@@ -30,6 +30,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>$(date +%Y%m%d%H%M)</string>
   <key>LSMinimumSystemVersion</key><string>15.4</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <!-- Without these, macOS ends the app the moment a page (a video call) asks
+       for the camera or microphone. -->
+  <key>NSCameraUsageDescription</key><string>A website you open wants to use the camera.</string>
+  <key>NSMicrophoneUsageDescription</key><string>A website you open wants to use the microphone.</string>
 </dict>
 </plist>
 PLIST

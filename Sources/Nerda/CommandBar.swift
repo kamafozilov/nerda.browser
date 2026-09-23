@@ -76,7 +76,7 @@ struct CommandBar: View {
                     SuggestionRow(
                         title: row.title,
                         detail: row.detail,
-                        site: row.isSearch ? nil : row.url.host(),
+                        site: row.isSearch ? nil : row.url,
                         highlighted: index == highlighted
                     )
                     .onHover { if $0 { highlighted = index } }
@@ -102,7 +102,7 @@ private struct SuggestionRow: View {
     let title: String
     let detail: String
     /// The site whose icon to show; nil shows a magnifying glass.
-    let site: String?
+    let site: URL?
     let highlighted: Bool
 
     var body: some View {
@@ -137,7 +137,7 @@ private struct SuggestionRow: View {
 
     @ViewBuilder private var icon: some View {
         if let site {
-            Favicon(host: site)
+            Favicon(site: site)
         } else {
             Image(systemName: "magnifyingglass")
                 .font(.body)
@@ -148,10 +148,12 @@ private struct SuggestionRow: View {
 
 extension View {
     /// The system's glass on macOS 26 and later; its thick material before that.
+    /// Tinted with the window's own ground: untinted, glass over a white page
+    /// turns light, and the app's light-on-dark text on it goes unreadable.
     @ViewBuilder func glassPanel(cornerRadius: CGFloat) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         if #available(macOS 26, *) {
-            glassEffect(.regular, in: shape)
+            glassEffect(.regular.tint(Palette.ground.opacity(0.75)), in: shape)
         } else {
             background(.thickMaterial, in: shape)
                 .overlay(shape.strokeBorder(.quaternary))

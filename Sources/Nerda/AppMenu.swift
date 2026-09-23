@@ -15,8 +15,18 @@ final class AppMenu: NSObject {
             item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
             item("Zoom", #selector(NSWindow.performZoom(_:))),
             .separator(),
+            item("Select Next Tab", #selector(nextTab), "\t", .control, target: self),
+            item("Select Previous Tab", #selector(previousTab), "\t", [.control, .shift], target: self),
+            .separator(),
             item("Bring All to Front", #selector(NSApplication.arrangeInFront(_:))),
-        ])
+        ] + (1...9).map { number in
+            // ⌘1 to ⌘9 work without nine lines of menu for them.
+            let item = item("Tab \(number)", #selector(selectTab(_:)), "\(number)", target: self)
+            item.tag = number
+            item.isHidden = true
+            item.allowsKeyEquivalentWhenHidden = true
+            return item
+        })
         let servicesMenu = submenu("Services", [])
 
         let bar = NSMenu()
@@ -35,6 +45,7 @@ final class AppMenu: NSObject {
             submenu("File", [
                 item("New Tab", #selector(newTab), "t", target: self),
                 item("Close Tab", #selector(closeTab), "w", target: self),
+                item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]),
             ]),
             submenu("Edit", [
                 item("Undo", Selector(("undo:")), "z"),
@@ -45,21 +56,71 @@ final class AppMenu: NSObject {
                 item("Paste", #selector(NSText.paste(_:)), "v"),
                 item("Delete", #selector(NSText.delete(_:))),
                 item("Select All", #selector(NSText.selectAll(_:)), "a"),
+                .separator(),
+                submenu("Find", [
+                    item("Find…", #selector(showFind), "f", target: self),
+                    item("Find Next", #selector(findNext), "g", target: self),
+                    item("Find Previous", #selector(findPrevious), "g", [.command, .shift], target: self),
+                ]),
             ]),
             // macOS adds Enter Full Screen here by itself.
             submenu("View", [
                 item("Collapse Tabs", #selector(toggleSidebar), "s", target: self),
+                .separator(),
+                item("Reload Page", #selector(reload), "r", target: self),
+                .separator(),
+                zoom("Zoom In", 1, "+"),
+                // ⌘= as well as ⌘+: they're the same key on most keyboards.
+                hidden(zoom("Zoom In", 1, "=")),
+                zoom("Zoom Out", -1, "-"),
+                zoom("Actual Size", 0, "0"),
+            ]),
+            submenu("History", [
+                item("Back", #selector(goBack), "[", target: self),
+                item("Forward", #selector(goForward), "]", target: self),
             ]),
             windowMenu,
         ]
         NSApp.mainMenu = bar
         NSApp.windowsMenu = windowMenu.submenu
         NSApp.servicesMenu = servicesMenu.submenu
+
+        // A focused page takes ⌃Tab as a key of its own, so it would never
+        // reach the menu: it is caught on its way in instead.
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [browser] event in
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift] else { return event }
+            MainActor.assumeIsolated { browser.selectTab(after: modifiers.contains(.shift) ? -1 : 1) }
+            return nil
+        }
     }
 
     @objc private func newTab() { browser.showCommandBar() }
     @objc private func closeTab() { browser.closeSelectedTab() }
     @objc private func toggleSidebar() { browser.toggleSidebar() }
+    @objc private func reload() { browser.selected?.reload() }
+    @objc private func goBack() { browser.selected?.webView.goBack() }
+    @objc private func goForward() { browser.selected?.webView.goForward() }
+    @objc private func zoom(_ sender: NSMenuItem) { browser.selected?.zoom(sender.tag) }
+    @objc private func selectTab(_ sender: NSMenuItem) { browser.selectTab(number: sender.tag) }
+    @objc private func nextTab() { browser.selectTab(after: 1) }
+    @objc private func previousTab() { browser.selectTab(after: -1) }
+
+    private func zoom(_ title: String, _ step: Int, _ key: String) -> NSMenuItem {
+        let item = item(title, #selector(zoom(_:)), key, target: self)
+        item.tag = step
+        return item
+    }
+
+    @objc private func showFind() { browser.showFindBar() }
+    @objc private func findNext() { browser.find() }
+    @objc private func findPrevious() { browser.find(backwards: true) }
+
+    private func hidden(_ item: NSMenuItem) -> NSMenuItem {
+        item.isHidden = true
+        item.allowsKeyEquivalentWhenHidden = true
+        return item
+    }
 
     private func item(
         _ title: String,
@@ -91,20 +152,40 @@ extension AppMenu: NSMenuItemValidation {
             item.title = browser.sidebarOpen ? "Collapse Tabs" : "Show Tabs"
             return true
         case #selector(closeTab):
-            return browser.selectedID != nil
+            return browser.commandBarOpen || browser.selectedID != nil
+        case #selector(reload), #selector(zoom(_:)):
+            // Actual Size only once there is a zoom to undo.
+            guard let tab = browser.selected else { return false }
+            return item.action != #selector(zoom(_:)) || item.tag != 0 || tab.webView.pageZoom != 1
+        case #selector(showFind):
+            return browser.selected != nil
+        case #selector(findNext), #selector(findPrevious):
+            return browser.selected != nil && !browser.findQuery.isEmpty
+        case #selector(nextTab), #selector(previousTab):
+            return browser.tabs.count > 1
+        case #selector(goBack):
+            return browser.selected?.webView.canGoBack == true
+        case #selector(goForward):
+            return browser.selected?.webView.canGoForward == true
         default:
             return true
         }
     }
 }
 
-/// Clicking the Dock icon with the window closed brings the same window back,
-/// tabs and all, as browsers do.
-final class AppDelegate: NSObject, NSApplicationDelegate {
+/// Closing the window closes its tabs; clicking the Dock icon brings the
+/// window back, asking where to go, as Safari does.
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let window: NSWindow
+    let browser: Browser
 
-    init(window: NSWindow) {
+    init(window: NSWindow, browser: Browser) {
         self.window = window
+        self.browser = browser
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        browser.closeAll()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {

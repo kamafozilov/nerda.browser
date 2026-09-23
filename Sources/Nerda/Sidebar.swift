@@ -1,50 +1,110 @@
 import SwiftUI
 
 /// The column down the left, on glass: the tabs, newest first, under the
-/// button that opens another.
+/// button that opens another, and downloads in the corner. Pinned beside the
+/// page, or, while collapsed, brought out over it from the window's edge.
 struct Sidebar: View {
     let browser: Browser
-    /// Asks for somewhere to go; the tab comes once there is an answer.
-    let newTab: () -> Void
+    /// Beside the page (true), or floating over it (false).
+    let pinned: Bool
+    @Binding var downloadsShown: Bool
 
     static let width: CGFloat = 232
     /// As tall as the window's title bar, so the traffic lights sit in its middle.
     static let topRow: CGFloat = 52
+    /// The room above and below the tabs, over which they fade as they scroll out.
+    private static let edge: CGFloat = 6
+    private static let listTop = "list-top"
 
     var body: some View {
         VStack(spacing: 0) {
-            // The traffic lights and the toggle, drawn over the sidebar.
-            Color.clear.frame(height: Self.topRow)
+            // The traffic lights sit on this row, and it moves the window, as
+            // the title bar under it would.
+            ZStack(alignment: .trailing) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(WindowDragGesture())
+                SidebarToggle(open: pinned, toggle: browser.toggleSidebar)
+                    .padding(.trailing, 10)
+            }
+            .frame(height: Self.topRow)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    SidebarRow(icon: "plus", title: "New Tab", dimmed: true, action: newTab)
+            // Fixed: always within reach, however far down the tabs go.
+            SidebarRow(icon: "plus", title: "New Tab", dimmed: true, action: browser.showCommandBar)
+                .padding(.horizontal, 8)
+                .padding(.top, 8)
 
-                    ForEach(browser.tabs) { tab in
-                        SidebarRow(
-                            icon: "safari",
-                            title: tab.title,
-                            selected: tab.id == browser.selectedID,
-                            close: { withAnimation(.slide) { browser.close(tab.id) } }
-                        ) {
-                            withAnimation(.easeOut(duration: 0.14)) { browser.selectedID = tab.id }
+            ScrollViewReader { list in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(browser.tabs) { tab in
+                            SidebarRow(
+                                icon: "globe",
+                                site: tab.site,
+                                loading: tab.isLoading,
+                                title: tab.title,
+                                selected: tab.id == browser.selectedID,
+                                close: { withAnimation(.slide) { browser.close(tab.id) } }
+                            ) {
+                                withAnimation(.easeOut(duration: 0.14)) { browser.selectedID = tab.id }
+                            }
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .top).combined(with: .opacity),
+                                removal: .opacity
+                            ))
                         }
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .top).combined(with: .opacity),
-                            removal: .opacity
-                        ))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, Self.edge)
+                    .background(alignment: .top) { Color.clear.frame(height: 0).id(Self.listTop) }
+                }
+                .scrollIndicators(.never)
+                // Tabs fade out at the list's edges instead of being cut off
+                // there, and never scroll up under New Tab.
+                .mask {
+                    VStack(spacing: 0) {
+                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                            .frame(height: Self.edge)
+                        Color.black
+                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                            .frame(height: Self.edge)
                     }
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 8)
+                // The tab on screen stays in sight: one opened while scrolled
+                // down arrives at the top, out of view otherwise. The newest
+                // brings the list right back to its top.
+                .onChange(of: browser.selectedID) { _, id in
+                    guard let id else { return }
+                    withAnimation(.slide) {
+                        if id == browser.tabs.first?.id {
+                            list.scrollTo(Self.listTop, anchor: .top)
+                        } else {
+                            list.scrollTo(id)
+                        }
+                    }
+                }
             }
-            .scrollIndicators(.never)
+
+            HStack {
+                DownloadsButton(browser: browser, shown: $downloadsShown)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
         }
         .frame(width: Self.width)
-        .background(SidebarGlass())
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(Palette.hairline).frame(width: 1)
-        }
+        .background { background }
+    }
+
+    /// The same glass either way, so the sidebar reads the same over any page.
+    /// Pinned, the desktop shows through, as in Finder's sidebar; floating, the
+    /// page underneath does, and a shadow lifts it off.
+    private var background: some View {
+        SidebarGlass(blending: pinned ? .behindWindow : .withinWindow)
+            .overlay(alignment: .trailing) {
+                Rectangle().fill(Palette.hairline).frame(width: 1)
+            }
+            .shadow(color: .black.opacity(pinned ? 0 : 0.25), radius: 16, x: 4)
     }
 }
 
@@ -56,6 +116,10 @@ extension Animation {
 /// One line of the sidebar: a tab, or the button that opens one.
 private struct SidebarRow: View {
     let icon: String
+    /// The site whose icon to show in place of `icon`.
+    var site: URL?
+    /// A spinner in place of the icon, once a load has taken long enough to notice.
+    var loading = false
     let title: String
     var selected = false
     /// Greyed, for the New Tab button, so it reads as an action rather than a tab.
@@ -65,16 +129,27 @@ private struct SidebarRow: View {
     let action: () -> Void
 
     @State private var hovering = false
+    @State private var spinning = false
 
     private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: dimmed ? .light : .regular))
-                    .foregroundStyle(Palette.muted)
-                    .frame(width: 18)
+                Group {
+                    if spinning {
+                        ProgressView()
+                            .controlSize(.small)
+                            .transition(.opacity)
+                    } else if let site {
+                        Favicon(site: site, size: 14)
+                    } else {
+                        Image(systemName: icon)
+                            .font(.system(size: 14, weight: dimmed ? .light : .regular))
+                            .foregroundStyle(Palette.muted)
+                    }
+                }
+                .frame(width: 22)
                 Text(title)
                     .font(.system(size: 14))
                     .foregroundStyle(dimmed ? Palette.muted : Palette.ink)
@@ -105,6 +180,13 @@ private struct SidebarRow: View {
         // being over the row.
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
+        // Only loads that take a while show: a quick one would just blink.
+        .task(id: loading) {
+            guard loading else { return spinning = false }
+            try? await Task.sleep(for: .milliseconds(300))
+            if !Task.isCancelled { spinning = true }
+        }
+        .animation(.easeOut(duration: 0.15), value: spinning)
     }
 }
 
@@ -213,10 +295,14 @@ private struct Tooltip: View {
 /// The system's own sidebar material: the desktop shows through, blurred,
 /// and it turns flat when the window is not in front, like Finder's.
 private struct SidebarGlass: NSViewRepresentable {
+    let blending: NSVisualEffectView.BlendingMode
+
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = .sidebar
-        view.blendingMode = .behindWindow
+        view.blendingMode = blending
+        // Floating over the page it is always in front, so always frosted.
+        view.state = blending == .withinWindow ? .active : .followsWindowActiveState
         return view
     }
 
@@ -224,5 +310,5 @@ private struct SidebarGlass: NSViewRepresentable {
 }
 
 #Preview {
-    Sidebar(browser: Browser(), newTab: {}).frame(height: 600)
+    Sidebar(browser: Browser(), pinned: true, downloadsShown: .constant(false)).frame(height: 600)
 }

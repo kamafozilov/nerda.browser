@@ -1,41 +1,47 @@
 import AppKit
 import SwiftUI
 
-/// The whole window: the sidebar, and the page beside it.
+/// The whole window: the sidebar, and the page beside it. With the sidebar
+/// collapsed the page takes the whole window, and the sidebar comes out over
+/// it while the pointer is at the window's left edge.
 struct BrowserView: View {
     let browser: Browser
+    let window: NSWindow
+
+    /// The collapsed sidebar, out over the page.
+    @State private var peeking = false
+    @State private var overPeek = false
+    @State private var downloadsShown = false
 
     var body: some View {
         HStack(spacing: 0) {
             if browser.sidebarOpen {
-                Sidebar(browser: browser, newTab: browser.showCommandBar).transition(.move(edge: .leading))
+                Sidebar(browser: browser, pinned: true, downloadsShown: $downloadsShown)
+                    .transition(.move(edge: .leading))
+                    // Its tooltip reaches out over the page.
+                    .zIndex(1)
             }
             ZStack {
                 Palette.ground
-                // The page goes here; for now just its address. Keyed by the
-                // tab, so each one gets its own view, as each will get its own page.
                 if let tab = browser.selected {
-                    Text(tab.url.absoluteString)
-                        .font(.system(size: 15))
-                        .foregroundStyle(Palette.muted)
+                    PageView(tab: tab, takesFocus: !browser.commandBarOpen)
+                        .overlay {
+                            if let failure = tab.failure { PageFailure(message: failure.message) }
+                        }
                         .id(tab.id)
                         .transition(.opacity)
                 }
             }
+            .overlay(alignment: .topTrailing) {
+                if browser.findBarOpen, browser.selected != nil {
+                    FindBar(browser: browser)
+                        .padding(12)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
         }
-        // The title bar is under the top row, so the window is dragged from there.
-        .overlay(alignment: .top) {
-            Color.clear
-                .frame(height: Sidebar.topRow)
-                .contentShape(Rectangle())
-                .gesture(WindowDragGesture())
-        }
-        .overlay(alignment: .topLeading) {
-            SidebarToggle(open: browser.sidebarOpen, toggle: browser.toggleSidebar)
-                // Open: at the sidebar's right edge. Closed: past the traffic
-                // lights, which end at 79pt.
-                .padding(.leading, browser.sidebarOpen ? Sidebar.width - 10 - 28 : 86)
-                .frame(height: Sidebar.topRow)
+        .overlay(alignment: .leading) {
+            if !browser.sidebarOpen { peek }
         }
         .overlay {
             if browser.commandBarOpen {
@@ -61,6 +67,52 @@ struct BrowserView: View {
             }
         }
         .ignoresSafeArea()
+        // The traffic lights belong to the sidebar: with it gone, nothing sits on the page.
+        .onChange(of: browser.sidebarOpen || peeking, initial: true) { _, shown in
+            window.showTrafficLights(shown)
+        }
+        // Pinning it, or going somewhere new from it, puts the floating one away.
+        .onChange(of: browser.sidebarOpen) { peeking = false }
+        .onChange(of: browser.commandBarOpen) { if browser.commandBarOpen { peeking = false } }
+        // Leaving it puts it away, after a moment, so brushing past the edge
+        // doesn't; the downloads list open from it holds it out.
+        .task(id: peeking && !overPeek && !downloadsShown) {
+            guard peeking, !overPeek, !downloadsShown else { return }
+            try? await Task.sleep(for: .milliseconds(350))
+            if !Task.isCancelled { withAnimation(.slide) { peeking = false } }
+        }
+    }
+
+    @ViewBuilder private var peek: some View {
+        if peeking {
+            Sidebar(browser: browser, pinned: false, downloadsShown: $downloadsShown)
+                .onHover { overPeek = $0 }
+                .transition(.move(edge: .leading))
+        } else {
+            // A sliver along the edge, narrow enough not to get in the page's way.
+            Color.clear
+                .frame(width: 6)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onHover { if $0 { withAnimation(.slide) { peeking = true } } }
+        }
+    }
+}
+
+extension NSWindow {
+    /// Faded rather than switched, and hidden once faded, so an invisible
+    /// close button can't be clicked on the page.
+    func showTrafficLights(_ shown: Bool) {
+        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap(standardWindowButton)
+        if shown { buttons.forEach { $0.isHidden = false } }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            buttons.forEach { $0.animator().alphaValue = shown ? 1 : 0 }
+        } completionHandler: {
+            MainActor.assumeIsolated {
+                buttons.forEach { $0.isHidden = $0.alphaValue == 0 }
+            }
+        }
     }
 }
 
@@ -72,13 +124,30 @@ extension Browser {
 
     func hideCommandBar() {
         withAnimation(.easeOut(duration: 0.14)) { commandBarOpen = false }
+        // The keyboard goes back to the page it was taken from. A page that is
+        // only now opening has no window yet, and takes it once it does.
+        if let page = selected?.webView { page.window?.makeFirstResponder(page) }
+    }
+
+    func showFindBar() {
+        withAnimation(.easeOut(duration: 0.14)) { findBarOpen = true }
+        findRequests += 1
+    }
+
+    /// Puts the find bar away, and the keyboard back on the page.
+    func hideFindBar() {
+        withAnimation(.easeOut(duration: 0.14)) { findBarOpen = false }
+        if let page = selected?.webView { page.window?.makeFirstResponder(page) }
     }
 
     func toggleSidebar() {
         withAnimation(.slide) { sidebarOpen.toggle() }
     }
 
+    /// ⌘W. With the command bar up it is the new tab being asked for that
+    /// goes, not the page behind it.
     func closeSelectedTab() {
+        if commandBarOpen { return hideCommandBar() }
         guard let selectedID else { return }
         withAnimation(.slide) { close(selectedID) }
     }
@@ -108,7 +177,7 @@ window.toolbar = NSToolbar()
 window.toolbarStyle = .unified
 window.isReleasedWhenClosed = false
 window.contentMinSize = NSSize(width: 640, height: 420)
-window.contentView = NSHostingView(rootView: BrowserView(browser: browser))
+window.contentView = NSHostingView(rootView: BrowserView(browser: browser, window: window))
 // Every launch, the whole screen short of the menu bar and Dock. Not the frame
 // it was left at: one stray resize would otherwise stick for good.
 if let screen = NSScreen.main {
@@ -116,7 +185,8 @@ if let screen = NSScreen.main {
 }
 window.makeKeyAndOrderFront(nil)
 
-let delegate = AppDelegate(window: window)
+let delegate = AppDelegate(window: window, browser: browser)
 app.delegate = delegate
+window.delegate = delegate
 app.activate()
 app.run()

@@ -1,0 +1,225 @@
+import SwiftUI
+import WebKit
+
+/// One page, and what the sidebar shows for it. The page lives while the tab
+/// is in use, so switching away and back finds it as it was left; a tab left
+/// alone long enough sleeps, giving the page's memory back, and wakes where it
+/// was (history, scroll position) when it is next shown.
+@Observable
+final class Tab: Identifiable {
+    let id = UUID()
+    /// Where the page is now, which is not where it started once links are followed.
+    private(set) var url: URL?
+    private var pageTitle = ""
+    private(set) var isLoading = false
+    /// Set when the last address could not be opened: the page shows why
+    /// instead, and Reload tries that address again.
+    var failure: (url: URL, message: String)?
+    /// The tab whose page opened this one, which closing it goes back to.
+    @ObservationIgnored weak var opener: Tab?
+    /// Told what the page does (the Browser), by every page the tab makes.
+    @ObservationIgnored weak var delegate: (any WKUIDelegate & WKNavigationDelegate)? {
+        didSet {
+            page?.uiDelegate = delegate
+            page?.navigationDelegate = delegate
+        }
+    }
+    /// When the tab was last on screen, so it sleeps only once it has been away a while.
+    @ObservationIgnored var lastSeen = Date.now
+    /// The page, while awake.
+    @ObservationIgnored private(set) var page: WKWebView?
+    /// What a sleeping page needs to wake as it was: its history, where it
+    /// was scrolled to, and its zoom.
+    @ObservationIgnored private var slept: (state: Any?, zoom: CGFloat)?
+    @ObservationIgnored private var observations: [NSKeyValueObservation] = []
+
+    /// The page, woken first if the tab was asleep.
+    var webView: WKWebView { page ?? wake() }
+    var isAsleep: Bool { page == nil }
+
+    /// The site the tab is about: the one that failed, if one did.
+    var site: URL? { failure?.url ?? url }
+
+    /// The page's own title; until it has one, the site's name, or for an
+    /// address without one (file:, about:blank), the address itself.
+    var title: String {
+        if failure == nil, !pageTitle.isEmpty { return pageTitle }
+        guard let site else { return "Untitled" }
+        guard let host = site.host(percentEncoded: false), !host.isEmpty else { return site.absoluteString }
+        let name = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        // localhost:3000 and localhost:8080 are two different sites.
+        return site.port.map { "\(name):\($0)" } ?? name
+    }
+
+    /// A page's own tab, or, given the configuration WebKit hands over, one for a
+    /// window a page opens, so that it can still talk to its opener (sign-in popups).
+    init(configuration: WKWebViewConfiguration = Tab.configuration) {
+        page = makePage(configuration)
+    }
+
+    convenience init(url: URL) {
+        self.init()
+        self.url = url
+        webView.load(URLRequest(url: url))
+    }
+
+    private func makePage(_ configuration: WKWebViewConfiguration) -> WKWebView {
+        let page = WKWebView(frame: .zero, configuration: configuration)
+        page.allowsBackForwardNavigationGestures = true
+        page.isInspectable = true
+        page.uiDelegate = delegate
+        page.navigationDelegate = delegate
+        // WebKit reports these on the main thread, where the tab lives.
+        observations = [
+            page.observe(\.url) { [weak self] page, _ in
+                // nil while a first load fails; the address typed is still the tab's.
+                MainActor.assumeIsolated { if let url = page.url { self?.url = url } }
+            },
+            page.observe(\.title) { [weak self] page, _ in
+                MainActor.assumeIsolated { self?.pageTitle = page.title ?? "" }
+            },
+            page.observe(\.isLoading) { [weak self] page, _ in
+                MainActor.assumeIsolated { self?.isLoading = page.isLoading }
+            },
+        ]
+        return page
+    }
+
+    /// Lets the page go, keeping what it takes to bring it back. Its process
+    /// ends with it, and with that the memory, which is most of a tab's cost.
+    func sleep() {
+        guard let page else { return }
+        slept = (page.interactionState, page.pageZoom)
+        observations = []
+        page.removeFromSuperview()
+        self.page = nil
+        isLoading = false
+    }
+
+    @discardableResult
+    private func wake() -> WKWebView {
+        let page = makePage(Self.configuration)
+        self.page = page
+        if let slept {
+            page.pageZoom = slept.zoom
+            page.interactionState = slept.state
+        } else if let url {
+            page.load(URLRequest(url: url))
+        }
+        slept = nil
+        return page
+    }
+
+    /// Reload, or after a failure, another go at the address that failed.
+    func reload() {
+        if let failure {
+            webView.load(URLRequest(url: failure.url))
+        } else {
+            webView.reload()
+        }
+    }
+
+    /// The steps ⌘+ and ⌘− go through, as Safari's do.
+    private static let zoomLevels: [CGFloat] = [0.5, 0.67, 0.75, 0.85, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3]
+
+    /// One step in or out (+1, −1), or back to actual size (0).
+    // ponytail: per tab; Safari keeps zoom per site across launches, once settings are saved.
+    func zoom(_ step: Int) {
+        let now = webView.pageZoom
+        let next: CGFloat? = switch step {
+        case 0: 1
+        case 1...: Self.zoomLevels.first { $0 > now + 0.01 }
+        default: Self.zoomLevels.last { $0 < now - 0.01 }
+        }
+        if let next { webView.pageZoom = next }
+    }
+
+    /// Something the user would notice stopping: sound or video playing, or
+    /// the camera or microphone on. A page like that is never put to sleep.
+    func isBusy() async -> Bool {
+        guard let page else { return false }
+        if page.cameraCaptureState != .none || page.microphoneCaptureState != .none { return true }
+        return await page.requestMediaPlaybackState() == .playing
+    }
+
+    /// Once the page is in, and only if /favicon.ico gave nothing: the icon
+    /// the page itself names, fetched from inside the page, so it comes with
+    /// the page's cookies past checks (Cloudflare's) that turn a bare request away.
+    func pageDidLoad() {
+        guard let page, let site = Favicons.origin(of: url), Favicons.shared.images[site] == nil else { return }
+        Task {
+            let icon = try? await page.callAsyncJavaScript(Self.findIcon, contentWorld: .defaultClient) as? String
+            await Favicons.shared.load(site, icon: icon.flatMap(URL.init(string:)))
+        }
+    }
+
+    /// The icon's bytes as a data: URL, or where they are when the page may
+    /// not read them itself (another origin's).
+    private static let findIcon = """
+        const link = document.querySelector('link[rel~="icon"]');
+        const href = link ? link.href : new URL('/favicon.ico', location.href).href;
+        try {
+            const response = await fetch(href);
+            if (!response.ok) return href;
+            let bytes = '';
+            for (const byte of new Uint8Array(await response.arrayBuffer())) bytes += String.fromCharCode(byte);
+            return 'data:;base64,' + btoa(bytes);
+        } catch { return href; }
+        """
+
+    private static var configuration: WKWebViewConfiguration {
+        let configuration = WKWebViewConfiguration()
+        configuration.applicationNameForUserAgent = applicationName
+        configuration.preferences.isElementFullscreenEnabled = true
+        return configuration
+    }
+
+    /// Sites serve their full pages only to browsers that say they are Safari;
+    /// without this Google, for one, sends its bare fallback. Safari's own
+    /// version, so it keeps up with the system.
+    private static let applicationName: String = {
+        let safari = Bundle(path: "/Applications/Safari.app")?.infoDictionary?["CFBundleShortVersionString"] as? String
+        return "Version/\(safari ?? "26.0") Safari/605.1.15"
+    }()
+}
+
+/// A tab's page on screen.
+struct PageView: NSViewRepresentable {
+    let tab: Tab
+    /// Whether the page takes the keyboard when it comes on screen, so Space
+    /// scrolls it. Not while the command bar has it.
+    let takesFocus: Bool
+
+    func makeNSView(context: Context) -> WKWebView {
+        let webView = tab.webView
+        if takesFocus {
+            DispatchQueue.main.async { webView.window?.makeFirstResponder(webView) }
+        }
+        return webView
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {}
+}
+
+/// In place of a page that could not be opened: what went wrong. ⌘R tries again.
+struct PageFailure: View {
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Text("Can't Open This Page")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(Palette.ink)
+            Text(message)
+                .foregroundStyle(Palette.muted)
+                .multilineTextAlignment(.center)
+            Text("Press ⌘R to try again.")
+                .font(.callout)
+                .foregroundStyle(Palette.muted)
+                .padding(.top, 8)
+        }
+        .frame(maxWidth: 420)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Palette.ground)
+    }
+}
