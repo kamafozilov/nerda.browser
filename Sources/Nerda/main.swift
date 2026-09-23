@@ -3,40 +3,25 @@ import SwiftUI
 
 /// The whole window: the sidebar, and the page beside it.
 struct BrowserView: View {
-    @State private var browser = Browser()
-    @State private var sidebarOpen = true
+    let browser: Browser
 
     var body: some View {
         HStack(spacing: 0) {
-            if sidebarOpen {
-                Sidebar(browser: browser).transition(.move(edge: .leading))
+            if browser.sidebarOpen {
+                Sidebar(browser: browser, newTab: browser.showCommandBar).transition(.move(edge: .leading))
             }
             ZStack {
                 Palette.ground
-                // The page goes here; for now just the tab's name. Keyed by the
+                // The page goes here; for now just its address. Keyed by the
                 // tab, so each one gets its own view, as each will get its own page.
                 if let tab = browser.selected {
-                    Text(tab.title)
+                    Text(tab.url.absoluteString)
                         .font(.system(size: 15))
                         .foregroundStyle(Palette.muted)
                         .id(tab.id)
                         .transition(.opacity)
                 }
             }
-        }
-        // ⌘T and ⌘W, here rather than on a view in the sidebar so they still
-        // work while the sidebar is closed.
-        .background {
-            Group {
-                Button("New Tab") { withAnimation(.slide) { browser.newTab() } }
-                    .keyboardShortcut("t", modifiers: .command)
-                Button("Close Tab") {
-                    guard let id = browser.selectedID else { return }
-                    withAnimation(.slide) { browser.close(id) }
-                }
-                .keyboardShortcut("w", modifiers: .command)
-            }
-            .hidden()
         }
         // The title bar is under the top row, so the window is dragged from there.
         .overlay(alignment: .top) {
@@ -46,18 +31,67 @@ struct BrowserView: View {
                 .gesture(WindowDragGesture())
         }
         .overlay(alignment: .topLeading) {
-            SidebarToggle(open: $sidebarOpen)
+            SidebarToggle(open: browser.sidebarOpen, toggle: browser.toggleSidebar)
                 // Open: at the sidebar's right edge. Closed: past the traffic
                 // lights, which end at 79pt.
-                .padding(.leading, sidebarOpen ? Sidebar.width - 10 - 28 : 86)
+                .padding(.leading, browser.sidebarOpen ? Sidebar.width - 10 - 28 : 86)
                 .frame(height: Sidebar.topRow)
+        }
+        .overlay {
+            if browser.commandBarOpen {
+                GeometryReader { window in
+                    ZStack(alignment: .top) {
+                        // A click anywhere outside the bar puts it away.
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture(perform: browser.hideCommandBar)
+                        CommandBar(
+                            go: { url in
+                                withAnimation(.slide) { browser.open(url) }
+                                browser.hideCommandBar()
+                            },
+                            dismiss: browser.hideCommandBar
+                        )
+                        // Pinned by its top edge, a third of the way down, so the
+                        // field stays put while the list under it grows and shrinks.
+                        .padding(.top, window.size.height * 0.3)
+                    }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
         }
         .ignoresSafeArea()
     }
 }
 
+/// What the menu and the buttons both do, animated the same way from either.
+extension Browser {
+    func showCommandBar() {
+        withAnimation(.easeOut(duration: 0.14)) { commandBarOpen = true }
+    }
+
+    func hideCommandBar() {
+        withAnimation(.easeOut(duration: 0.14)) { commandBarOpen = false }
+    }
+
+    func toggleSidebar() {
+        withAnimation(.slide) { sidebarOpen.toggle() }
+    }
+
+    func closeSelectedTab() {
+        guard let selectedID else { return }
+        withAnimation(.slide) { close(selectedID) }
+    }
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
+// Tabs are ours; no system tab bar, and no Show Tab Bar items in the menus.
+NSWindow.allowsAutomaticWindowTabbing = false
+
+let browser = Browser()
+let menu = AppMenu(browser: browser)
+menu.install()
 
 let window = NSWindow(
     contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
@@ -74,9 +108,16 @@ window.toolbar = NSToolbar()
 window.toolbarStyle = .unified
 window.isReleasedWhenClosed = false
 window.contentMinSize = NSSize(width: 640, height: 420)
-window.contentView = NSHostingView(rootView: BrowserView())
-window.center()
+window.contentView = NSHostingView(rootView: BrowserView(browser: browser))
+// The first time, the whole screen short of the menu bar and Dock. After that,
+// wherever and however big it was left, as Mac windows are.
+if !window.setFrameUsingName("Browser"), let screen = NSScreen.main {
+    window.setFrame(screen.visibleFrame, display: false)
+}
+window.setFrameAutosaveName("Browser")
 window.makeKeyAndOrderFront(nil)
 
+let delegate = AppDelegate(window: window)
+app.delegate = delegate
 app.activate()
 app.run()

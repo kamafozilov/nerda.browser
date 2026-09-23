@@ -4,6 +4,8 @@ import SwiftUI
 /// button that opens another.
 struct Sidebar: View {
     let browser: Browser
+    /// Asks for somewhere to go; the tab comes once there is an answer.
+    let newTab: () -> Void
 
     static let width: CGFloat = 232
     /// As tall as the window's title bar, so the traffic lights sit in its middle.
@@ -16,9 +18,7 @@ struct Sidebar: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    SidebarRow(icon: "plus", title: "New Tab", dimmed: true) {
-                        withAnimation(.slide) { browser.newTab() }
-                    }
+                    SidebarRow(icon: "plus", title: "New Tab", dimmed: true, action: newTab)
 
                     ForEach(browser.tabs) { tab in
                         SidebarRow(
@@ -131,19 +131,18 @@ private struct CloseButton: View {
     }
 }
 
-/// Opens and closes the sidebar, by click or ⌘S. One button for both states:
-/// it sits at the sidebar's right edge while the sidebar is open, and beside
-/// the traffic lights once it is closed.
+/// Opens and closes the sidebar (⌘S is the View menu's). One button for both
+/// states: it sits at the sidebar's right edge while the sidebar is open, and
+/// beside the traffic lights once it is closed.
 struct SidebarToggle: View {
-    @Binding var open: Bool
+    let open: Bool
+    let toggle: () -> Void
 
     @State private var hovering = false
     @State private var showsTip = false
 
     var body: some View {
-        Button {
-            withAnimation(.slide) { open.toggle() }
-        } label: {
+        Button(action: toggle) {
             Image(systemName: "sidebar.left")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(hovering ? Palette.ink : Palette.muted)
@@ -155,7 +154,6 @@ struct SidebarToggle: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .keyboardShortcut("s", modifiers: .command)
         .accessibilityLabel(title)
         .onHover { hovering = $0 }
         // The tip waits half a second under the pointer, like the system's own,
@@ -226,5 +224,5 @@ private struct SidebarGlass: NSViewRepresentable {
 }
 
 #Preview {
-    Sidebar(browser: Browser()).frame(height: 600)
+    Sidebar(browser: Browser(), newTab: {}).frame(height: 600)
 }
