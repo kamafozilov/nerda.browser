@@ -109,12 +109,11 @@ window.toolbarStyle = .unified
 window.isReleasedWhenClosed = false
 window.contentMinSize = NSSize(width: 640, height: 420)
 window.contentView = NSHostingView(rootView: BrowserView(browser: browser))
-// The first time, the whole screen short of the menu bar and Dock. After that,
-// wherever and however big it was left, as Mac windows are.
-if !window.setFrameUsingName("Browser"), let screen = NSScreen.main {
+// Every launch, the whole screen short of the menu bar and Dock. Not the frame
+// it was left at: one stray resize would otherwise stick for good.
+if let screen = NSScreen.main {
     window.setFrame(screen.visibleFrame, display: false)
 }
-window.setFrameAutosaveName("Browser")
 window.makeKeyAndOrderFront(nil)
 
 let delegate = AppDelegate(window: window)
