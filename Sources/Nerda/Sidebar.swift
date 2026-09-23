@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The column down the left, on the command bar's glass: the tabs, newest first, under the
+/// The column down the left, on glass: the tabs, newest first, under the
 /// button that opens another, and downloads in the corner. Pinned beside the
 /// page, or, while collapsed, brought out over it from the window's edge.
 struct Sidebar: View {
@@ -96,15 +96,34 @@ struct Sidebar: View {
             .padding(.vertical, 8)
         }
         .frame(width: width)
-        // The command bar's glass, over white rather than over what is behind
-        // it: glass takes its shade from what it covers, and pinned it covers
-        // WebKit's dark margin beside the page, so it would change shade the
-        // moment it docked. Over white it looks as the command bar does over
-        // a page, pinned, sliding and floating alike.
-        .glassPanel(cornerRadius: 0)
-        .background(.white)
+        .background { background }
         .overlay(alignment: .trailing) { SidebarResizer(width: $width) }
     }
+
+    /// The system's sidebar glass, pinned or floating alike, so it looks the
+    /// same sliding as at rest. Floating, a shadow lifts it off the page.
+    private var background: some View {
+        SidebarGlass()
+            .overlay(alignment: .trailing) {
+                Rectangle().fill(Palette.hairline).frame(width: 1)
+            }
+            .shadow(color: .black.opacity(pinned ? 0 : 0.25), radius: 16, x: 4)
+    }
+}
+
+/// The frosted desktop behind the window that macOS puts under sidebars
+/// (Finder's, Mail's), greyed while the window is in the background as theirs
+/// are. SwiftUI's own materials only blur what is in the window.
+private struct SidebarGlass: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }
 
 /// The sidebar's right edge: dragged, it sizes the sidebar within
