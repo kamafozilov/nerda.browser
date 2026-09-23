@@ -183,22 +183,56 @@ final class Tab: Identifiable {
     }()
 }
 
-/// A tab's page on screen.
+/// Every awake tab's page, all in the window at once, with only the selected
+/// one shown. Switching tabs just shows another, as it was left: a page taken
+/// out of the window and put back is set up and drawn again, and blinks blank
+/// meanwhile. Hidden, a page keeps its last frame, and WebKit still slows it
+/// down as out of sight, as it does a page out of the window.
 struct PageView: NSViewRepresentable {
-    let tab: Tab
+    let tabs: [Tab]
+    let selected: Tab?
     /// Whether the page takes the keyboard when it comes on screen, so Space
     /// scrolls it. Not while the command bar has it.
     let takesFocus: Bool
+    /// How much of the page's left side the sidebar covers. The page lays
+    /// itself out in the rest, without the web view changing size.
+    var coveredLeading: CGFloat = 0
 
-    func makeNSView(context: Context) -> WKWebView {
-        let webView = tab.webView
-        if takesFocus {
-            DispatchQueue.main.async { webView.window?.makeFirstResponder(webView) }
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        // First, so that a sleeping tab's page is woken and among the rest.
+        let shown = selected?.webView
+        let pages = tabs.compactMap(\.page)
+        // Closed tabs' pages go (sleeping ones take themselves out).
+        for page in view.subviews where !pages.contains(where: { $0 === page }) {
+            page.removeFromSuperview()
         }
-        return webView
+        for page in pages {
+            let arriving = page.superview !== view || page.isHidden
+            if page.superview !== view {
+                page.frame = view.bounds
+                page.autoresizingMask = [.width, .height]
+                view.addSubview(page)
+            }
+            cover(page)
+            page.isHidden = page !== shown
+            if page === shown, arriving, takesFocus {
+                DispatchQueue.main.async { page.window?.makeFirstResponder(page) }
+            }
+        }
     }
 
-    func updateNSView(_ webView: WKWebView, context: Context) {}
+    private func cover(_ webView: WKWebView) {
+        guard #available(macOS 26, *), webView.obscuredContentInsets.left != coveredLeading else { return }
+        webView.obscuredContentInsets = NSEdgeInsets(top: 0, left: coveredLeading, bottom: 0, right: 0)
+    }
+
+    /// Whether pages can be told what covers them (macOS 26), rather than be
+    /// made narrower, which WebKit catches up with a frame or more late.
+    static var canBeCovered: Bool {
+        if #available(macOS 26, *) { true } else { false }
+    }
 }
 
 /// In place of a page that could not be opened: what went wrong. ⌘R tries again.

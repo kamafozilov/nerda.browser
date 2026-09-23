@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The column down the left, on glass: the tabs, newest first, under the
+/// The column down the left, on the command bar's glass: the tabs, newest first, under the
 /// button that opens another, and downloads in the corner. Pinned beside the
 /// page, or, while collapsed, brought out over it from the window's edge.
 struct Sidebar: View {
@@ -8,8 +8,11 @@ struct Sidebar: View {
     /// Beside the page (true), or floating over it (false).
     let pinned: Bool
     @Binding var downloadsShown: Bool
+    /// Dragged wider or narrower at its right edge; see `SidebarResizer`.
+    @Binding var width: Double
 
-    static let width: CGFloat = 232
+    static let defaultWidth: Double = 256
+    static let widths: ClosedRange<Double> = 200...400
     /// As tall as the window's title bar, so the traffic lights sit in its middle.
     static let topRow: CGFloat = 52
     /// The room above and below the tabs, over which they fade as they scroll out.
@@ -92,25 +95,60 @@ struct Sidebar: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
         }
-        .frame(width: Self.width)
-        .background { background }
+        .frame(width: width)
+        // The command bar's glass, over white rather than over what is behind
+        // it: glass takes its shade from what it covers, and pinned it covers
+        // WebKit's dark margin beside the page, so it would change shade the
+        // moment it docked. Over white it looks as the command bar does over
+        // a page, pinned, sliding and floating alike.
+        .glassPanel(cornerRadius: 0)
+        .background(.white)
+        .overlay(alignment: .trailing) { SidebarResizer(width: $width) }
+    }
+}
+
+/// The sidebar's right edge: dragged, it sizes the sidebar within
+/// `Sidebar.widths`; double-clicked, it puts it back to its default width.
+private struct SidebarResizer: View {
+    @Binding var width: Double
+
+    /// The width the drag started from. The edge moves with the drag, so
+    /// the drag is measured from where it began rather than from the edge.
+    @State private var start: Double?
+
+    var body: some View {
+        Color.clear
+            .frame(width: 8)
+            .contentShape(Rectangle())
+            // Half over the page, so the edge is as easy to catch from either side.
+            .offset(x: 4)
+            // One arrow once a limit is reached, as the system's own edges show.
+            .pointerStyle(.frameResize(position: .trailing, directions: directions))
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { drag in
+                        let start = start ?? width
+                        self.start = start
+                        width = min(max(start + drag.translation.width, Sidebar.widths.lowerBound), Sidebar.widths.upperBound)
+                    }
+                    .onEnded { _ in start = nil }
+            )
+            .onTapGesture(count: 2) { withAnimation(.slide) { width = Sidebar.defaultWidth } }
+            .accessibilityHidden(true)
     }
 
-    /// The same glass either way, so the sidebar reads the same over any page.
-    /// Pinned, the desktop shows through, as in Finder's sidebar; floating, the
-    /// page underneath does, and a shadow lifts it off.
-    private var background: some View {
-        SidebarGlass(blending: pinned ? .behindWindow : .withinWindow)
-            .overlay(alignment: .trailing) {
-                Rectangle().fill(Palette.hairline).frame(width: 1)
-            }
-            .shadow(color: .black.opacity(pinned ? 0 : 0.25), radius: 16, x: 4)
+    private var directions: FrameResizeDirection.Set {
+        if width <= Sidebar.widths.lowerBound { return .outward }
+        if width >= Sidebar.widths.upperBound { return .inward }
+        return .all
     }
 }
 
 extension Animation {
-    /// For anything that slides into place: tabs arriving and leaving, the sidebar.
-    static let slide = Animation.spring(response: 0.34, dampingFraction: 0.86)
+    /// For anything that slides into place: tabs arriving and leaving, the
+    /// sidebar. Without bounce: a sidebar that overshot its place would pull
+    /// away from the window's edge and show a strip of the page there.
+    static let slide = Animation.smooth(duration: 0.25)
 }
 
 /// One line of the sidebar: a tab, or the button that opens one.
@@ -292,23 +330,7 @@ private struct Tooltip: View {
     }
 }
 
-/// The system's own sidebar material: the desktop shows through, blurred,
-/// and it turns flat when the window is not in front, like Finder's.
-private struct SidebarGlass: NSViewRepresentable {
-    let blending: NSVisualEffectView.BlendingMode
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .sidebar
-        view.blendingMode = blending
-        // Floating over the page it is always in front, so always frosted.
-        view.state = blending == .withinWindow ? .active : .followsWindowActiveState
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
-}
-
 #Preview {
-    Sidebar(browser: Browser(), pinned: true, downloadsShown: .constant(false)).frame(height: 600)
+    Sidebar(browser: Browser(), pinned: true, downloadsShown: .constant(false), width: .constant(Sidebar.defaultWidth))
+        .frame(height: 600)
 }

@@ -4,6 +4,14 @@ import SwiftUI
 /// The whole window: the sidebar, and the page beside it. With the sidebar
 /// collapsed the page takes the whole window, and the sidebar comes out over
 /// it while the pointer is at the window's left edge.
+///
+/// The sidebar always slides over the page, never alongside it, and the page
+/// never changes size for it: WebKit redraws a resized page a frame or more
+/// late, and the gap shows as a blank strip. The page stays the size of the
+/// window and is told how much of it the sidebar covers, and lays itself out
+/// beside it. (Before macOS 26, which can't be told, the page is resized once,
+/// where the sidebar hides it: as the sidebar starts to go, and once it has
+/// fully come.)
 struct BrowserView: View {
     let browser: Browser
     let window: NSWindow
@@ -12,36 +20,37 @@ struct BrowserView: View {
     @State private var peeking = false
     @State private var overPeek = false
     @State private var downloadsShown = false
+    /// The page leaves room for the sidebar.
+    @State private var docked = true
+    @AppStorage("sidebarWidth") private var sidebarWidth = Sidebar.defaultWidth
+
+    private var room: CGFloat { docked ? sidebarWidth : 0 }
+    private var sidebarShown: Bool { browser.sidebarOpen || peeking }
 
     var body: some View {
-        HStack(spacing: 0) {
-            if browser.sidebarOpen {
-                Sidebar(browser: browser, pinned: true, downloadsShown: $downloadsShown)
-                    .transition(.move(edge: .leading))
-                    // Its tooltip reaches out over the page.
-                    .zIndex(1)
+        ZStack(alignment: .leading) {
+            page
+                .padding(.leading, PageView.canBeCovered ? 0 : room)
+                // The page's room changes in one step, however it is asked for.
+                .animation(nil, value: docked)
+
+            // Always there, slid off to the left when not wanted, rather than
+            // added and taken away, so it comes back as it was left (scrolled
+            // where it was) without being built again.
+            Sidebar(browser: browser, pinned: browser.sidebarOpen, downloadsShown: $downloadsShown, width: $sidebarWidth)
+                .onHover { overPeek = $0 }
+                // Far enough that its shadow goes too.
+                .offset(x: sidebarShown ? 0 : -(sidebarWidth + 32))
+                .allowsHitTesting(sidebarShown)
+                .accessibilityHidden(!sidebarShown)
+
+            if !sidebarShown {
+                // A sliver along the edge, narrow enough not to get in the page's way.
+                Color.clear
+                    .frame(width: 6)
+                    .contentShape(Rectangle())
+                    .onHover { if $0 { withAnimation(.slide) { peeking = true } } }
             }
-            ZStack {
-                Palette.ground
-                if let tab = browser.selected {
-                    PageView(tab: tab, takesFocus: !browser.commandBarOpen)
-                        .overlay {
-                            if let failure = tab.failure { PageFailure(message: failure.message) }
-                        }
-                        .id(tab.id)
-                        .transition(.opacity)
-                }
-            }
-            .overlay(alignment: .topTrailing) {
-                if browser.findBarOpen, browser.selected != nil {
-                    FindBar(browser: browser)
-                        .padding(12)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-        }
-        .overlay(alignment: .leading) {
-            if !browser.sidebarOpen { peek }
         }
         .overlay {
             if browser.commandBarOpen {
@@ -67,12 +76,29 @@ struct BrowserView: View {
             }
         }
         .ignoresSafeArea()
-        // The traffic lights belong to the sidebar: with it gone, nothing sits on the page.
-        .onChange(of: browser.sidebarOpen || peeking, initial: true) { _, shown in
-            window.showTrafficLights(shown)
+        // The traffic lights belong to the sidebar: they go as soon as it starts
+        // to, and come once it has all but arrived, so that nothing sits on the
+        // page on its own and the sidebar's toggle never slides across them.
+        .task(id: sidebarShown) {
+            if sidebarShown {
+                try? await Task.sleep(for: .milliseconds(180))
+                if Task.isCancelled { return }
+            }
+            window.showTrafficLights(sidebarShown)
         }
-        // Pinning it, or going somewhere new from it, puts the floating one away.
-        .onChange(of: browser.sidebarOpen) { peeking = false }
+        .onChange(of: browser.sidebarOpen) { _, open in
+            // Pinning it puts the floating one away (it stays where it is, now pinned).
+            peeking = false
+            // Going: the page takes the whole window at once, under the sidebar
+            // as it slides off.
+            if !open { docked = false }
+        }
+        // Coming: the page makes room once the sidebar has slid all the way in
+        // over it (at once, if it came without animation).
+        .transaction(value: browser.sidebarOpen) { transaction in
+            guard browser.sidebarOpen else { return }
+            transaction.addAnimationCompletion { docked = browser.sidebarOpen }
+        }
         .onChange(of: browser.commandBarOpen) { if browser.commandBarOpen { peeking = false } }
         // Leaving it puts it away, after a moment, so brushing past the edge
         // doesn't; the downloads list open from it holds it out.
@@ -83,18 +109,27 @@ struct BrowserView: View {
         }
     }
 
-    @ViewBuilder private var peek: some View {
-        if peeking {
-            Sidebar(browser: browser, pinned: false, downloadsShown: $downloadsShown)
-                .onHover { overPeek = $0 }
-                .transition(.move(edge: .leading))
-        } else {
-            // A sliver along the edge, narrow enough not to get in the page's way.
-            Color.clear
-                .frame(width: 6)
-                .frame(maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .onHover { if $0 { withAnimation(.slide) { peeking = true } } }
+    private var page: some View {
+        ZStack {
+            Palette.ground
+            PageView(
+                tabs: browser.tabs,
+                selected: browser.selected,
+                takesFocus: !browser.commandBarOpen,
+                coveredLeading: PageView.canBeCovered ? room : 0
+            )
+            if let failure = browser.selected?.failure {
+                PageFailure(message: failure.message)
+                    .padding(.leading, PageView.canBeCovered ? room : 0)
+                    .background(Palette.ground)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if browser.findBarOpen, browser.selected != nil {
+                FindBar(browser: browser)
+                    .padding(12)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
     }
 }
@@ -106,7 +141,7 @@ extension NSWindow {
         let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap(standardWindowButton)
         if shown { buttons.forEach { $0.isHidden = false } }
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
+            context.duration = shown ? 0.15 : 0.1
             buttons.forEach { $0.animator().alphaValue = shown ? 1 : 0 }
         } completionHandler: {
             MainActor.assumeIsolated {
