@@ -137,14 +137,7 @@ private struct SuggestionRow: View {
 
     @ViewBuilder private var icon: some View {
         if let site {
-            // On a light plate, so dark marks (GitHub's) still read on dark glass.
-            AsyncImage(url: URL(string: "https://\(site)/favicon.ico")) { image in
-                image.resizable().interpolation(.high).frame(width: 16, height: 16)
-            } placeholder: {
-                Image(systemName: "globe").foregroundStyle(.secondary)
-            }
-            .frame(width: 24, height: 24)
-            .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            Favicon(host: site)
         } else {
             Image(systemName: "magnifyingglass")
                 .font(.body)
