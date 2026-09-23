@@ -10,6 +10,7 @@ let package = Package(
             // The whole app lives on the main thread, like AppKit and WebKit
             // themselves; background work opts out explicitly.
             swiftSettings: [.defaultIsolation(MainActor.self)]
-        )
+        ),
+        .testTarget(name: "NerdaTests", dependencies: ["Nerda"]),
     ]
 )

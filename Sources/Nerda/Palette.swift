@@ -8,8 +8,10 @@ enum Palette {
     static let ink = pair(0.09, 0.93)       // text
     static let muted = pair(0.55, 0.58)     // secondary text and icons
     static let hairline = pair(0.91, 0.20)  // dividers
-    // A tint rather than a solid grey, so the glass under it still shows.
-    static let hover = Color.primary.opacity(0.05)  // the button under the pointer
+    // Tints rather than solid greys, so the glass under them still shows.
+    static let hover = Color.primary.opacity(0.05)  // the row or button under the pointer
+    static let wash = Color.primary.opacity(0.10)   // the selected tab
+    static let rim = Color.primary.opacity(0.08)    // the selected tab's edge
 
     private static func pair(_ light: CGFloat, _ dark: CGFloat) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
