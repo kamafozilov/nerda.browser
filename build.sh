@@ -15,7 +15,12 @@ swift build -c "$CONFIG"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
-cp ".build/$CONFIG/$NAME" "$APP/Contents/MacOS/$NAME"
+# SwiftPM links reproducibly, which records the deployment target as the SDK
+# the app was built with. macOS reads that SDK to decide which look to give
+# the app, and for 15.4 it keeps the old one: smaller traffic lights, tighter
+# window corners. Stamp the SDK it was really built with.
+vtool -set-build-version macos 15.4 "$(xcrun --show-sdk-version)" -replace \
+  -output "$APP/Contents/MacOS/$NAME" ".build/$CONFIG/$NAME"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
