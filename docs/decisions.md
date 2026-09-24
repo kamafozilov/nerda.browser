@@ -1,30 +1,30 @@
-# Texnologik qarorlar
+# Technical decisions
 
-Namuna: [driceroland/Search](https://github.com/driceroland/Search) (MIT) — o'sha yo'ldan boramiz.
+Reference: [driceroland/Search](https://github.com/driceroland/Search) (MIT). We follow the same path.
 
-## Qabul qilingan
+## Adopted
 
-| # | Qatlam | Qaror | Nega |
+| # | Layer | Decision | Why |
 |---|---|---|---|
-| 1 | Platforma | Faqat macOS | O'zim macOS ishlataman; Windows/Linux'da Chrome kengaytmalari faqat Chromium bilan to'liq ishlaydi, bu esa "yengil" maqsadiga zid |
-| 2 | Engine | WebKit (`WKWebView`) | Tizimda bor: ilova bir necha MB, Chromium'ning 300 MB'i yo'q |
-| 3 | Til | Swift | Apple API'lari uchun yagona tabiiy tanlov |
-| 4 | UI | SwiftUI + kerak joyda AppKit | Search shunday qilgan va ishlaydi |
-| 5 | Loyiha | SwiftPM (`Package.swift`) + `build.sh` `.app` bundle yig'adi | Faqat matn fayllari; Xcode shart emas (Command Line Tools yetadi) |
-| 6 | Minimal OS | macOS 15.4 | `WKWebExtensionController` shundan boshlab bor (build'da tekshirildi) |
-| 7 | Chrome kengaytmalari | `WKWebExtension` + Chrome Web Store'dan `.crx` o'rnatish | Asosiy foydalanuvchilar shundan keladi |
-| 8 | Reklama bloklash | `WKContentRuleList` | WebKit tarmoq qatlamida ishlaydi, JS narxi yo'q |
-| 9 | RAM | Ishlatilmagan tablarni uxlatish (web view yo'q qilinadi, snapshot qoladi); xotira tanqisligida tezroq. Pin qilingan tablar hech qachon uxlamaydi va ishga tushishda darhol yuklanadi | Tab boshiga 100–300 MB — asosiy xarajat shu |
-| 10 | Saqlash | JSON fayllar, bitta papkada | Server yo'q, akkaunt yo'q |
-| 11 | Parollar | macOS Keychain | Tizimda bor |
-| 12 | Tashqi bog'liqliklar | Yo'q — faqat Apple framework'lari | |
-| 13 | Kod bazasi | Noldan yoziladi; kerakli qismlar (masalan `Crx.swift`, `ExtensionShims.swift`) Search'dan olinadi, MIT litsenziya matni bilan | Tuzilish o'zimniki bo'lsin |
-| 14 | Asboblar | Xcode (Instruments, debugger), `swift format` (toolchain ichida) | Build uchun Command Line Tools yetadi |
-| 15 | Kirish nuqtasi | AppKit (`NSApplication`, `main.swift`); SwiftUI ko'rinishlar `NSHostingView` orqali | Oynalar ustidan to'liq nazorat; SwiftUI `App` har doim biror Scene talab qiladi |
-| 16 | Concurrency | Swift 6, standart izolyatsiya `MainActor` | AppKit va WebKit baribir main thread'da; fon ishi alohida belgilanadi |
+| 1 | Platform | macOS only | I use macOS myself; on Windows/Linux, Chrome extensions only fully work with Chromium, which goes against the "lightweight" goal |
+| 2 | Engine | WebKit (`WKWebView`) | Ships with the system: the app is a few MB, without Chromium's 300 MB |
+| 3 | Language | Swift | The only natural choice for Apple APIs |
+| 4 | UI | SwiftUI, plus AppKit where needed | Search does it this way and it works |
+| 5 | Project | SwiftPM (`Package.swift`) + `build.sh` assembles the `.app` bundle | Plain text files only; Xcode not required (Command Line Tools are enough) |
+| 6 | Minimum OS | macOS 15.4 | `WKWebExtensionController` exists from this version on (checked in a build) |
+| 7 | Chrome extensions | `WKWebExtension` + installing `.crx` from the Chrome Web Store | That is where the main users come from |
+| 8 | Ad blocking | `WKContentRuleList` | Runs in WebKit's network layer, no JS cost |
+| 9 | RAM | Put unused tabs to sleep (the web view is destroyed, a snapshot stays); sooner under memory pressure. Pinned tabs never sleep and load right away at launch | 100–300 MB per tab is the main cost |
+| 10 | Storage | JSON files, in one folder | No server, no account |
+| 11 | Passwords | macOS Keychain | Built into the system |
+| 12 | External dependencies | None, Apple frameworks only | |
+| 13 | Codebase | Written from scratch; needed parts (e.g. `Crx.swift`, `ExtensionShims.swift`) are taken from Search, with the MIT license text | The structure should be our own |
+| 14 | Tools | Xcode (Instruments, debugger), `swift format` (in the toolchain) | Command Line Tools are enough to build |
+| 15 | Entry point | AppKit (`NSApplication`, `main.swift`); SwiftUI views through `NSHostingView` | Full control over windows; a SwiftUI `App` always requires some Scene |
+| 16 | Concurrency | Swift 6, default isolation `MainActor` | AppKit and WebKit are on the main thread anyway; background work is marked explicitly |
 
-## Ma'lum cheklovlar
+## Known limitations
 
-- Kengaytmalar Safari darajasida: MV3'da `webRequest` ishlamaydi; ba'zilari (masalan Vimium C) ochilmaydi.
-- DRM: faqat FairPlay (Netflix va h.k. Safari'dagidek).
-- Fullscreen: Chrome'dagidek oynaning o'zida (WebKit'niki sahifani alohida oynaga ko'chiradi, uni o'chirib bo'lmaydi). Saytning o'z `:fullscreen` CSS qoidalari ishlamaydi; oddiy `<video controls>` tugmasi hali ham WebKit'ning alohida oynasini ochadi. Fullscreen animatsiyasi paytida video to'xtamasligi uchun WebKit SPI (`_setWindowOcclusionDetectionEnabled:`) ishlatiladi; u yo'qolsa, video animatsiya paytida yana bir lahza to'xtaydi xolos.
+- Extensions at Safari's level: `webRequest` doesn't work in MV3; some (e.g. Vimium C) don't open.
+- DRM: FairPlay only (Netflix etc. as in Safari).
+- Full screen: inside the window, as in Chrome (WebKit's own moves the page into a separate window and can't be turned off). A site's own `:fullscreen` CSS rules don't apply; the button of a plain `<video controls>` still opens WebKit's separate window. WebKit SPI (`_setWindowOcclusionDetectionEnabled:`) keeps video playing during the full-screen animation; should it go away, video only pauses for a moment during the animation again.
