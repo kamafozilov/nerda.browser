@@ -51,6 +51,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
        for the camera or microphone. -->
   <key>NSCameraUsageDescription</key><string>A website you open wants to use the camera.</string>
   <key>NSMicrophoneUsageDescription</key><string>A website you open wants to use the microphone.</string>
+  <!-- A browser opens what it is given, http: too (t.co links often end on
+       one); otherwise App Transport Security refuses it. The page's icon is
+       fetched outside the page, so web content alone isn't enough. -->
+  <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
 </dict>
 </plist>
 PLIST
