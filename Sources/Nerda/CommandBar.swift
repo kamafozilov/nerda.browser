@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Where a new tab starts: a field on glass in the middle of the window. A tab
@@ -8,7 +9,12 @@ struct CommandBar: View {
     let dismiss: () -> Void
 
     @State private var query = ""
-    @State private var highlighted: Int?
+    /// The row picked with the arrow keys or the pointer. Kept by what it is,
+    /// not where it is, so rows arriving above it don't change what Enter does;
+    /// when it goes, or none was picked, Enter takes the first row.
+    @State private var highlighted: Suggestion.ID?
+    /// Where the pointer last picked a row from, so only moving it does.
+    @State private var pointer = NSEvent.mouseLocation
     /// Google's guesses at what is being typed, for the text they were asked for.
     @State private var searches: [String] = []
     @FocusState private var focused: Bool
@@ -45,6 +51,11 @@ struct CommandBar: View {
         return [first] + matches.filter { $0.url != url } + guesses
     }
 
+    /// What Enter opens: the row picked, or else, once something is typed, the first.
+    private func target(in rows: [Suggestion]) -> Suggestion? {
+        rows.first { $0.id == highlighted } ?? (query.isEmpty ? nil : rows.first)
+    }
+
     var body: some View {
         let rows = suggestions
 
@@ -57,13 +68,15 @@ struct CommandBar: View {
                     .textFieldStyle(.plain)
                     .font(.title2)
                     .focused($focused)
-                    .onSubmit { open(highlighted ?? (query.isEmpty ? nil : 0), in: rows) }
+                    .onSubmit { if let row = target(in: rows) { go(row.url) } }
                     .onKeyPress(.downArrow) {
-                        highlighted = min((highlighted ?? -1) + 1, rows.count - 1)
+                        let index = rows.firstIndex { $0.id == target(in: rows)?.id } ?? -1
+                        if !rows.isEmpty { highlighted = rows[min(index + 1, rows.count - 1)].id }
                         return .handled
                     }
                     .onKeyPress(.upArrow) {
-                        highlighted = max((highlighted ?? rows.count) - 1, 0)
+                        let index = rows.firstIndex { $0.id == target(in: rows)?.id } ?? rows.count
+                        if !rows.isEmpty { highlighted = rows[max(index - 1, 0)].id }
                         return .handled
                     }
                     .onKeyPress(.escape) {
@@ -76,16 +89,24 @@ struct CommandBar: View {
 
             Divider().padding(.horizontal, 12)
 
+            let target = target(in: rows)
             VStack(spacing: 2) {
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                ForEach(rows) { row in
                     SuggestionRow(
                         title: row.title,
                         detail: row.detail,
                         site: row.isSearch ? nil : row.url,
-                        highlighted: index == highlighted
+                        highlighted: row.id == target?.id
                     )
-                    .onHover { if $0 { highlighted = index } }
-                    .onTapGesture { open(index, in: rows) }
+                    // Only a pointer that moves picks a row: rows changing
+                    // under one at rest, as you type, leave Enter with what
+                    // is typed.
+                    .onContinuousHover { phase in
+                        guard case .active = phase, NSEvent.mouseLocation != pointer else { return }
+                        pointer = NSEvent.mouseLocation
+                        highlighted = row.id
+                    }
+                    .onTapGesture { go(row.url) }
                 }
             }
             .padding(8)
@@ -94,7 +115,7 @@ struct CommandBar: View {
         .glassPanel(cornerRadius: 24)
         .onAppear { focused = true }
         // Typing starts the list over: the first row is what Enter will do.
-        .onChange(of: query) { highlighted = query.isEmpty ? nil : 0 }
+        .onChange(of: query) { highlighted = nil }
         // The last guesses stay up while the next are on their way, so the
         // list doesn't flicker with every key; typing on cancels the ask.
         .task(id: query) {
@@ -105,11 +126,6 @@ struct CommandBar: View {
             let found = await Address.suggestions(for: text)
             if !Task.isCancelled { searches = found }
         }
-    }
-
-    private func open(_ index: Int?, in rows: [Suggestion]) {
-        guard let index, rows.indices.contains(index) else { return }
-        go(rows[index].url)
     }
 }
 
