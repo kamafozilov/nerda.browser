@@ -228,9 +228,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         browser.closeAll()
     }
 
+    /// The window comes back with the tabs it closed with.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        if !hasVisibleWindows { window.makeKeyAndOrderFront(nil) }
+        if !hasVisibleWindows {
+            browser.restore(from: Session.file)
+            window.makeKeyAndOrderFront(nil)
+        }
         return true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) { save() }
+
+    /// Going to another app is a good moment: nothing is happening here.
+    func applicationDidResignActive(_ notification: Notification) { save() }
+
+    func save() {
+        browser.saveSession()
+        History.shared.save()
     }
 
     /// The toolbar is empty: in full screen it goes with the menu bar, rather

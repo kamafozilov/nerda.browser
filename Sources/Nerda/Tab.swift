@@ -60,6 +60,31 @@ final class Tab: Identifiable {
         page = makePage(configuration)
     }
 
+    /// A tab from an earlier run, asleep: it shows its title and icon, and
+    /// only loads, back where it was, once it is shown.
+    init(restoring saved: Session.Tab) {
+        url = saved.url
+        recorded = saved.url
+        pageTitle = saved.title
+        slept = (saved.state, saved.zoom)
+    }
+
+    /// What it takes to open the tab again at the next launch. Only pages from
+    /// the web or disk: a blob: or data: address can't be opened again.
+    var saved: Session.Tab? {
+        guard let site, ["http", "https", "file"].contains(site.scheme) else { return nil }
+        let state: Any?
+        if let page {
+            // A page that never got there (still loading, or failed) would
+            // wake to the one before it, or blank: it is loaded afresh instead.
+            state = page.backForwardList.currentItem?.url == site ? page.interactionState : nil
+        } else {
+            state = slept?.state
+        }
+        return Session.Tab(url: site, title: failure == nil ? pageTitle : "", state: state as? Data,
+                           zoom: page?.pageZoom ?? slept?.zoom ?? 1)
+    }
+
     convenience init(url: URL) {
         self.init()
         self.url = url
@@ -109,9 +134,9 @@ final class Tab: Identifiable {
     private func wake() -> WKWebView {
         let page = makePage(Self.configuration)
         self.page = page
-        if let slept {
-            page.pageZoom = slept.zoom
-            page.interactionState = slept.state
+        if let slept { page.pageZoom = slept.zoom }
+        if let state = slept?.state {
+            page.interactionState = state
         } else if let url {
             page.load(URLRequest(url: url))
         }

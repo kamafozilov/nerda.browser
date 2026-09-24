@@ -6,12 +6,15 @@ import WebKit
 /// there are no empty "New Tab" tabs.
 @Observable
 final class Browser: NSObject {
-    private(set) var tabs: [Tab] = []
+    private(set) var tabs: [Tab] = [] {
+        didSet { sessionChanged() }
+    }
     var selectedID: Tab.ID? {
         didSet {
             tabs.first { $0.id == oldValue }?.lastSeen = .now
             // As in Chrome, going to another tab takes the page out of full screen.
             if selectedID != oldValue { exitPageFullscreen() }
+            sessionChanged()
         }
     }
     var sidebarOpen = true
@@ -39,6 +42,12 @@ final class Browser: NSObject {
     @ObservationIgnored private var memoryPressure: (any DispatchSourceMemoryPressure)?
     /// The address last loaded again for a redirect WebKit lost, so it is only tried once.
     @ObservationIgnored private var retried: URL?
+    /// Where the tabs are saved as they change (see Session); nil keeps them
+    /// to this run, as in tests, and while the window is closed.
+    @ObservationIgnored var sessionFile: URL?
+    @ObservationIgnored var pendingSave: Task<Void, Never>?
+    @ObservationIgnored var savedSession: Data?
+    @ObservationIgnored private var sessionTimer: Timer?
 
     var selected: Tab? { tabs.first { $0.id == selectedID } }
 
@@ -49,6 +58,12 @@ final class Browser: NSObject {
             MainActor.assumeIsolated { self?.sleepIdleTabs(unseenFor: Self.sleepAfter) }
         }
         sleepTimer?.tolerance = 15
+        // What changes without telling (scrolling, a page changing its own
+        // address) is saved every few seconds, and only if it did change.
+        sessionTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.saveSession() }
+        }
+        sessionTimer?.tolerance = 3
         // When the Mac runs short of memory, every tab out of sight sleeps at once.
         memoryPressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         memoryPressure?.setEventHandler { [weak self] in
@@ -74,7 +89,7 @@ final class Browser: NSObject {
         add(Tab(url: url), inBackground: inBackground)
     }
 
-    private func add(_ tab: Tab, inBackground: Bool = false) {
+    func add(_ tab: Tab, inBackground: Bool = false) {
         tab.delegate = self
         tabs.insert(tab, at: 0)
         if !inBackground { selectedID = tab.id }
@@ -95,8 +110,12 @@ final class Browser: NSObject {
     }
 
     /// Closing the window closes its tabs, as Safari does: nothing keeps
-    /// playing, or holding memory, behind a window that is gone.
+    /// playing, or holding memory, behind a window that is gone. They are
+    /// still saved, as Chrome keeps its last window: they come back with the
+    /// window, or at the next launch.
     func closeAll() {
+        saveSession()
+        sessionFile = nil
         tabs.removeAll()
         selectedID = nil
         commandBarOpen = true
@@ -303,6 +322,7 @@ extension Browser: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         tab(for: webView)?.pageDidLoad()
+        sessionChanged()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {

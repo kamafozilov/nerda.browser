@@ -226,6 +226,7 @@ NSWindow.allowsAutomaticWindowTabbing = false
 
 let browser = Browser()
 History.shared.load(from: History.file)
+browser.restore(from: Session.file)
 let menu = AppMenu(browser: browser)
 menu.install()
 
@@ -255,5 +256,15 @@ window.makeKeyAndOrderFront(nil)
 let delegate = AppDelegate(window: window, browser: browser)
 app.delegate = delegate
 window.delegate = delegate
+// SIGTERM (`kill`, and watch.sh putting in a new build) would end the app on
+// the spot; the tabs and history are saved first.
+signal(SIGTERM, SIG_IGN)
+let terminated = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+terminated.setEventHandler {
+    MainActor.assumeIsolated { delegate.save() }
+    exit(0)
+}
+terminated.resume()
+
 app.activate()
 app.run()

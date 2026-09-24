@@ -238,6 +238,103 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     Issue.record("never got to \(url)")
 }
 
+/// Quit, crash or rebuild, the tabs come back as they were: in order, the
+/// same one on screen, each with its history. Only that one loads; the rest
+/// sleep, keeping what they were, until they are shown.
+@MainActor
+@Test func tabsComeBackAsTheyWereLeft() async throws {
+    let folder = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let pages = try ["a", "b", "c"].map { name in
+        let page = folder.appending(path: "\(name).html")
+        try "<title>Page \(name)</title><p>\(name)</p>".write(to: page, atomically: true, encoding: .utf8)
+        return page
+    }
+    let file = folder.appending(path: "session.json")
+
+    let browser = Browser()
+    browser.open(pages[0])
+    try await arrive(browser.tabs[0], at: pages[0])
+    browser.tabs[0].webView.load(URLRequest(url: pages[1]))
+    try await arrive(browser.tabs[0], at: pages[1])
+    browser.open(pages[2])
+    try await arrive(browser.tabs[0], at: pages[2])
+    browser.tabs[0].zoom(1)
+    browser.selectedID = browser.tabs[1].id  // the one with history
+    browser.sessionFile = file
+    browser.saveSession()
+
+    let restored = Browser()
+    restored.restore(from: file)
+    #expect(restored.tabs.map(\.title) == ["Page c", "Page b"])
+    #expect(restored.tabs.allSatisfy { $0.isAsleep })
+    #expect(restored.selectedID == restored.tabs[1].id)
+    #expect(!restored.commandBarOpen)
+
+    // Saved again before any wakes, nothing is lost.
+    let again = folder.appending(path: "again.json")
+    restored.sessionFile = again
+    restored.saveSession()
+    #expect(try Data(contentsOf: again) == (try Data(contentsOf: file)))
+
+    let shown = restored.selected!
+    try await arrive(shown, at: pages[1])
+    #expect(shown.webView.canGoBack)
+    #expect(restored.tabs[0].isAsleep)
+
+    try await arrive(restored.tabs[0], at: pages[2])
+    #expect(restored.tabs[0].webView.pageZoom > 1)
+}
+
+@MainActor
+@Test func aSessionThatCantBeReadIsSetAsideNotOverwritten() throws {
+    let folder = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appending(path: "session.json")
+    try Data("{\"tabs\": [{\"url".utf8).write(to: file)
+
+    let browser = Browser()
+    browser.restore(from: file)
+    #expect(browser.tabs.isEmpty)
+    #expect(browser.commandBarOpen)
+    #expect(FileManager.default.fileExists(atPath: folder.appending(path: "session-unreadable.json").path))
+}
+
+/// Closing the window closes its tabs, but keeps them for next time, as
+/// Chrome does; closing them one by one really closes them.
+@MainActor
+@Test func closingTheWindowKeepsItsTabsForNextTime() throws {
+    let folder = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appending(path: "session.json")
+
+    let browser = Browser()
+    browser.restore(from: file)
+    browser.open(somewhere)
+    browser.open(URL(string: "https://github.com")!)
+    browser.closeAll()
+    browser.saveSession()
+    let kept = try JSONDecoder().decode(Session.self, from: Data(contentsOf: file))
+    #expect(kept.tabs.map(\.url.host) == ["github.com", "example.com"])
+
+    // The window back: the tabs with it.
+    browser.restore(from: file)
+    #expect(browser.tabs.count == 2)
+    while let tab = browser.tabs.first { browser.close(tab.id) }
+    browser.saveSession()
+    #expect(try JSONDecoder().decode(Session.self, from: Data(contentsOf: file)).tabs.isEmpty)
+}
+
+/// Addresses that can't be opened again (blob:, data:) aren't saved.
+@MainActor
+@Test func onlyTabsThatCanOpenAgainAreSaved() {
+    let browser = Browser()
+    browser.open(URL(string: "data:text/html,hello")!)
+    browser.open(somewhere)
+    #expect(browser.session.tabs.map(\.url.host) == ["example.com"])
+    #expect(browser.session.selected == 0)
+}
+
 // MARK: - History
 
 @MainActor
