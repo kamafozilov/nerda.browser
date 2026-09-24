@@ -64,8 +64,7 @@ final class Tab: Identifiable {
     }
 
     private func makePage(_ configuration: WKWebViewConfiguration) -> WKWebView {
-        let page = WKWebView(frame: .zero, configuration: configuration)
-        page.allowsBackForwardNavigationGestures = true
+        let page = SwipingWebView(frame: .zero, configuration: configuration)
         page.isInspectable = true
         page.uiDelegate = delegate
         page.navigationDelegate = delegate
