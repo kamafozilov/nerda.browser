@@ -334,12 +334,22 @@ extension Browser: WKNavigationDelegate {
     }
 
     /// The page's process died (out of memory, or a WebKit bug): it would stay
-    /// blank, so it is loaded again, as Safari does.
-    // ponytail: reloads every time; a page that crashes on load will keep
-    // reloading. Count crashes and show a failure once it repeats.
+    /// blank, so it is loaded again, as Safari does. One out of sight sleeps
+    /// instead, and loads when it is next shown: reloading it now would only
+    /// add to the memory it may have died for. A page that dies again within
+    /// a minute would only keep reloading, and says so instead; ⌘R tries again.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        if let tab = tab(for: webView), fullscreenTab == tab.id { fullscreenTab = nil }
-        webView.reload()
+        guard let tab = tab(for: webView) else { return }
+        if fullscreenTab == tab.id { fullscreenTab = nil }
+        let again = tab.crashed.map { Date.now.timeIntervalSince($0) < 60 } ?? false
+        tab.crashed = .now
+        if again, let url = webView.url ?? tab.site {
+            tab.failure = (url, "The page crashed each time it was opened.")
+        } else if tab.id == selectedID {
+            webView.reload()
+        } else {
+            tab.sleep()
+        }
     }
 }
 

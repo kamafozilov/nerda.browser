@@ -35,6 +35,8 @@ final class Tab: Identifiable {
     /// The address last put in history, so a page is counted once per visit,
     /// not again when it wakes or reloads.
     @ObservationIgnored private var recorded: URL?
+    /// When the page's process last died, to tell a page that keeps crashing.
+    @ObservationIgnored var crashed: Date?
 
     /// The page, woken first if the tab was asleep.
     var webView: WKWebView { page ?? wake() }

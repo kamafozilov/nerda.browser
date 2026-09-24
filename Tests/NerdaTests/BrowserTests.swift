@@ -335,6 +335,39 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     #expect(browser.session.selected == 0)
 }
 
+// MARK: - Reliability
+
+/// A page whose process dies is loaded again; if it dies again straight
+/// away, it stops, and says so, instead of reloading for ever.
+@MainActor
+@Test func aPageThatKeepsCrashingStops() {
+    let browser = Browser()
+    browser.open(somewhere)
+    let tab = browser.tabs[0]
+    browser.webViewWebContentProcessDidTerminate(tab.webView)
+    #expect(tab.failure == nil)
+    browser.webViewWebContentProcessDidTerminate(tab.webView)
+    #expect(tab.failure?.url.host == "example.com")
+
+    // Much later, a crash is a one-off again.
+    tab.failure = nil
+    tab.crashed = .now.addingTimeInterval(-120)
+    browser.webViewWebContentProcessDidTerminate(tab.webView)
+    #expect(tab.failure == nil)
+}
+
+/// A page out of sight that crashes sleeps, and loads when next shown.
+@MainActor
+@Test func aCrashedTabOutOfSightWaitsToBeShown() {
+    let browser = Browser()
+    browser.open(somewhere)
+    browser.open(somewhere)
+    let hidden = browser.tabs[1]
+    browser.webViewWebContentProcessDidTerminate(hidden.webView)
+    #expect(hidden.isAsleep)
+    #expect(hidden.failure == nil)
+}
+
 // MARK: - History
 
 @MainActor
