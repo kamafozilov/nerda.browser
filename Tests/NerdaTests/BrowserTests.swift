@@ -485,3 +485,128 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     #expect(tab.failure != nil)
     #expect(History.shared.visits[refused] == nil)
 }
+
+// MARK: - Pinned tabs
+
+/// Pinned tabs sit above the rest in the order pinned, never sleep, outlast
+/// ⌘W, and come back pinned, and loaded, at the next launch.
+@MainActor
+@Test func pinnedTabsStayOnTopAwakeAndOpenAgain() async throws {
+    let folder = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appending(path: "session.json")
+    let browser = Browser()
+    browser.restore(from: file)
+    for site in ["https://a.test", "https://b.test", "https://c.test"] { browser.open(URL(string: site)!) }
+    let (c, b, a) = (browser.tabs[0].id, browser.tabs[1].id, browser.tabs[2].id)
+
+    browser.setPinned(true, a)
+    browser.setPinned(true, c)
+    #expect(browser.tabs.map(\.id) == [a, c, b])
+    // A new tab opens under the pins, and ⌘1 is still the first tile.
+    browser.open(somewhere)
+    #expect(browser.tabs[2].title == "example.com")
+    browser.selectTab(number: 1)
+    #expect(browser.selectedID == a)
+
+    browser.selectedID = browser.tabs[2].id
+    browser.sleepIdleTabs(unseenFor: 0)
+    for _ in 0..<100 where !browser.tabs[3].isAsleep { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(browser.tabs[3].isAsleep)
+    #expect(!browser.tabs[0].isAsleep && !browser.tabs[1].isAsleep)
+
+    browser.selectedID = c
+    browser.commandBarOpen = false
+    browser.closeSelectedTab()
+    #expect(browser.tabs.contains { $0.id == c })
+    #expect(browser.selectedID == browser.tabs[2].id)
+
+    browser.saveSession()
+    let restored = Browser()
+    restored.restore(from: file)
+    #expect(restored.tabs.map(\.isPinned) == [true, true, false, false])
+    #expect(restored.tabs.map(\.title) == ["a.test", "c.test", "example.com", "b.test"])
+    #expect(!restored.tabs[0].isAsleep && !restored.tabs[1].isAsleep)
+    #expect(restored.tabs[3].isAsleep)
+
+    // Unpinned, a tab goes to the top of the list.
+    restored.setPinned(false, restored.tabs[0].id)
+    #expect(restored.tabs.map(\.title) == ["c.test", "a.test", "example.com", "b.test"])
+    #expect(restored.tabs.map(\.isPinned) == [true, false, false, false])
+}
+
+/// Dragged, a tab takes the place it is let go at, within its own kind or
+/// across into the other, and stays in that order.
+@MainActor
+@Test func tabsAreDraggedIntoAnotherOrder() {
+    let browser = Browser()
+    for site in ["https://a.test", "https://b.test", "https://c.test", "https://d.test"] { browser.open(URL(string: site)!) }
+    func titles() -> [String] { browser.tabs.map { ($0.isPinned ? "*" : "") + $0.title } }
+    #expect(titles() == ["d.test", "c.test", "b.test", "a.test"])
+
+    browser.move(browser.tabs[3].id, pinned: false, to: 1)
+    #expect(titles() == ["d.test", "a.test", "c.test", "b.test"])
+    browser.move(browser.tabs[0].id, pinned: false, to: .max)
+    #expect(titles() == ["a.test", "c.test", "b.test", "d.test"])
+
+    // Into the tiles, where it was let go; tiles among themselves; and back out.
+    browser.move(browser.tabs[2].id, pinned: true, to: 0)
+    browser.move(browser.tabs[2].id, pinned: true, to: 0)
+    #expect(titles() == ["*c.test", "*b.test", "a.test", "d.test"])
+    browser.move(browser.tabs[0].id, pinned: true, to: 1)
+    #expect(titles() == ["*b.test", "*c.test", "a.test", "d.test"])
+    browser.move(browser.tabs[1].id, pinned: false, to: 1)
+    #expect(titles() == ["*b.test", "a.test", "c.test", "d.test"])
+}
+
+/// An icon only the page names (the site's /favicon.ico is empty) is still
+/// there at the next launch, while the tab sleeps and its page never loads.
+@MainActor
+@Test func iconsFoundInThePageOutlastTheRun() async throws {
+    let folder = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let icon = folder.appending(path: "icon.png")
+    let image = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { NSColor.red.setFill(); $0.fill(); return true }
+    try NSBitmapImageRep(data: image.tiffRepresentation!)!.representation(using: .png, properties: [:])!.write(to: icon)
+    let site = "https://icon.invalid"
+
+    let before = Favicons()
+    before.folder = folder.appending(path: "Favicons")
+    await before.load(site, icon: icon)
+    #expect(before.images[site] != nil)
+
+    let after = Favicons()
+    after.folder = before.folder
+    await after.load(site)
+    #expect(after.images[site] != nil)
+    #expect(after.tints[site]?.colors.count == 1)
+}
+
+/// A pinned tile wears its icon's colours: each hue in it, or, for a dark
+/// icon without any, its grey; a light grey one has none.
+@MainActor
+@Test func tilesTakeTheirIconsColours() throws {
+    func icon(_ colors: [NSColor]) -> NSImage {
+        NSImage(size: NSSize(width: 16, height: 16), flipped: false) { rect in
+            for (i, color) in colors.enumerated() {
+                color.setFill()
+                rect.divided(atDistance: rect.width / CGFloat(colors.count) * CGFloat(i), from: .minXEdge).remainder.fill()
+            }
+            return true
+        }
+    }
+    let google = try #require(Tint(icon([.systemRed, .systemYellow, .systemGreen, .systemBlue])))
+    #expect(!google.isGrey && google.colors.count == 4)
+    let youtube = try #require(Tint(icon([.red])))
+    #expect(!youtube.isGrey && youtube.colors.count == 1 && youtube.colors[0].redComponent > 0.9)
+    // A black square (X's) is kept as it is; a black mark on nothing (GitHub's) is drawn light on a tile.
+    let square = try #require(Tint(icon([.black])))
+    #expect(square.isGrey && !square.isMark)
+    let mark = try #require(Tint(NSImage(size: NSSize(width: 16, height: 16), flipped: false) { rect in
+        NSColor.black.setFill()
+        NSBezierPath(ovalIn: rect.insetBy(dx: 3, dy: 3)).fill()
+        return true
+    }))
+    #expect(mark.isGrey && mark.isMark)
+    #expect(Tint(icon([.white])) == nil)
+}

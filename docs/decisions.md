@@ -14,7 +14,7 @@ Namuna: [driceroland/Search](https://github.com/driceroland/Search) (MIT) — o'
 | 6 | Minimal OS | macOS 15.4 | `WKWebExtensionController` shundan boshlab bor (build'da tekshirildi) |
 | 7 | Chrome kengaytmalari | `WKWebExtension` + Chrome Web Store'dan `.crx` o'rnatish | Asosiy foydalanuvchilar shundan keladi |
 | 8 | Reklama bloklash | `WKContentRuleList` | WebKit tarmoq qatlamida ishlaydi, JS narxi yo'q |
-| 9 | RAM | Ishlatilmagan tablarni uxlatish (web view yo'q qilinadi, snapshot qoladi); xotira tanqisligida tezroq | Tab boshiga 100–300 MB — asosiy xarajat shu |
+| 9 | RAM | Ishlatilmagan tablarni uxlatish (web view yo'q qilinadi, snapshot qoladi); xotira tanqisligida tezroq. Pin qilingan tablar hech qachon uxlamaydi va ishga tushishda darhol yuklanadi | Tab boshiga 100–300 MB — asosiy xarajat shu |
 | 10 | Saqlash | JSON fayllar, bitta papkada | Server yo'q, akkaunt yo'q |
 | 11 | Parollar | macOS Keychain | Tizimda bor |
 | 12 | Tashqi bog'liqliklar | Yo'q — faqat Apple framework'lari | |

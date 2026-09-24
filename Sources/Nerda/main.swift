@@ -213,11 +213,17 @@ extension Browser {
     }
 
     /// ⌘W. With the command bar up it is the new tab being asked for that
-    /// goes, not the page behind it.
+    /// goes, not the page behind it. A pinned tab stays, as in Safari: the
+    /// screen goes to the tabs below it instead.
     func closeSelectedTab() {
         if commandBarOpen { return hideCommandBar() }
-        guard let selectedID else { return }
-        withAnimation(.slide) { close(selectedID) }
+        guard let selected else { return }
+        if selected.isPinned {
+            if let next = tabs.first(where: { !$0.isPinned }) { selectedID = next.id }
+            return
+        }
+        let id = selected.id
+        withAnimation(.slide) { close(id) }
     }
 }
 
@@ -228,6 +234,7 @@ NSWindow.allowsAutomaticWindowTabbing = false
 
 let browser = Browser()
 History.shared.load(from: History.file)
+Favicons.shared.folder = Favicons.folder
 browser.restore(from: Session.file)
 let menu = AppMenu(browser: browser)
 menu.install()

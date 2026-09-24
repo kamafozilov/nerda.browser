@@ -11,6 +11,8 @@ struct Session: Codable {
         /// back and forward, and where it was scrolled to.
         let state: Data?
         let zoom: CGFloat
+        /// Optional, and left out unless set, so sessions saved before pins still open.
+        let pinned: Bool?
     }
 
     var tabs: [Tab]
@@ -33,6 +35,8 @@ extension Browser {
         }
         for saved in session.tabs.reversed() { add(Tab(restoring: saved), inBackground: true) }
         guard !tabs.isEmpty else { return }
+        // Pinned sites are there at once, as they always are.
+        for tab in tabs where tab.isPinned { _ = tab.webView }
         let index = session.selected.flatMap { tabs.indices.contains($0) ? $0 : nil } ?? 0
         selectedID = tabs[index].id
         commandBarOpen = false

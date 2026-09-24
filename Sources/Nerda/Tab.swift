@@ -15,6 +15,9 @@ final class Tab: Identifiable {
     /// Set when the last address could not be opened: the page shows why
     /// instead, and Reload tries that address again.
     var failure: (url: URL, message: String)?
+    /// Kept at the top of the sidebar as a tile, and never put to sleep: the
+    /// sites always open. See `Browser.setPinned`.
+    var isPinned = false
     /// The tab whose page opened this one, which closing it goes back to.
     @ObservationIgnored weak var opener: Tab?
     /// Told what the page does (the Browser), by every page the tab makes.
@@ -69,6 +72,7 @@ final class Tab: Identifiable {
         recorded = saved.url
         pageTitle = saved.title
         slept = (saved.state, saved.zoom)
+        isPinned = saved.pinned == true
     }
 
     /// What it takes to open the tab again at the next launch. Only pages from
@@ -84,7 +88,7 @@ final class Tab: Identifiable {
             state = slept?.state
         }
         return Session.Tab(url: site, title: failure == nil ? pageTitle : "", state: state as? Data,
-                           zoom: page?.pageZoom ?? slept?.zoom ?? 1)
+                           zoom: page?.pageZoom ?? slept?.zoom ?? 1, pinned: isPinned ? true : nil)
     }
 
     convenience init(url: URL) {

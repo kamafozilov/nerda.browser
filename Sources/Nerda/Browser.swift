@@ -74,10 +74,11 @@ final class Browser: NSObject {
         memoryPressure?.activate()
     }
 
-    /// Tabs out of sight at least this long, and not busy (playing, on a call), sleep.
+    /// Tabs out of sight at least this long, and not busy (playing, on a call),
+    /// sleep. Pinned ones never do: being always ready is what they are for.
     func sleepIdleTabs(unseenFor age: TimeInterval) {
         let cutoff = Date.now.addingTimeInterval(-age)
-        for tab in tabs where tab.id != selectedID && !tab.isAsleep && tab.lastSeen <= cutoff {
+        for tab in tabs where tab.id != selectedID && !tab.isPinned && !tab.isAsleep && tab.lastSeen <= cutoff {
             Task {
                 // Asked of the page, so it may have come on screen in the meantime.
                 if await !tab.isBusy(), tab.id != selectedID { tab.sleep() }
@@ -91,10 +92,34 @@ final class Browser: NSObject {
         add(Tab(url: url), inBackground: inBackground)
     }
 
+    /// Pinned tabs come first, in their own order; the rest follow, newest first.
     func add(_ tab: Tab, inBackground: Bool = false) {
         tab.delegate = self
-        tabs.insert(tab, at: 0)
+        tabs.insert(tab, at: tab.isPinned ? 0 : pinnedCount)
         if !inBackground { selectedID = tab.id }
+    }
+
+    var pinnedCount: Int { tabs.prefix { $0.isPinned }.count }
+
+    /// Pinned, a tab goes to the end of the tiles; unpinned, to the top of the list.
+    func setPinned(_ pinned: Bool, _ id: Tab.ID) {
+        guard tabs.first(where: { $0.id == id })?.isPinned != pinned else { return }
+        move(id, pinned: pinned, to: pinned ? .max : 0)
+    }
+
+    /// Puts a tab at `position` among the pinned tabs, or among the rest,
+    /// pinning or unpinning it on the way; past the end is the end.
+    func move(_ id: Tab.ID, pinned: Bool, to position: Int) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        // Moved in one change: `tabs` taking it out on its own would silence its page.
+        var moved = tabs
+        let tab = moved.remove(at: index)
+        let pins = moved.prefix { $0.isPinned }.count
+        moved.insert(tab, at: pinned ? min(max(position, 0), pins) : pins + min(max(position, 0), moved.count - pins))
+        // Called on every step of a drag: nothing to tell when nothing moved.
+        guard tab.isPinned != pinned || !moved.elementsEqual(tabs, by: ===) else { return }
+        tab.isPinned = pinned
+        tabs = moved
     }
 
     /// Closing the tab on screen hands the screen back to the page that opened

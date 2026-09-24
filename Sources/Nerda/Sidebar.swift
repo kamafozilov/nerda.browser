@@ -1,8 +1,11 @@
 import SwiftUI
 
-/// The column down the left, on glass: the tabs, newest first, under the
-/// button that opens another, and downloads in the corner. Pinned beside the
-/// page, or, while collapsed, brought out over it from the window's edge.
+/// The column down the left, on glass: pinned sites as tiles at the top, then
+/// the tabs, newest first, under the button that opens another, and downloads
+/// in the corner. Pinned beside the page, or, while collapsed, brought out
+/// over it from the window's edge. Tabs and tiles are dragged into another
+/// order; a tab dragged onto the tiles is pinned, a tile dragged down among
+/// the tabs unpinned.
 struct Sidebar: View {
     let browser: Browser
     /// Beside the page (true), or floating over it (false).
@@ -15,9 +18,36 @@ struct Sidebar: View {
     static let widths: ClosedRange<Double> = 200...400
     /// As tall as the window's title bar, so the traffic lights sit in its middle.
     static let topRow: CGFloat = 52
+    static let rowHeight: CGFloat = 32
+    private static let rowGap: CGFloat = 2
+    nonisolated static let tileHeight: CGFloat = 40
+    nonisolated static let tileGap: CGFloat = 6
     /// The room above and below the tabs, over which they fade as they scroll out.
     private static let edge: CGFloat = 6
     private static let listTop = "list-top"
+    nonisolated private static let space = "sidebar"
+
+    @State private var dragged: Drag?
+    @State private var layout = Layout()
+
+    /// A tab or tile being dragged.
+    private struct Drag {
+        let id: Tab.ID
+        /// Where the pointer is, in the sidebar's space.
+        var at: CGPoint
+        /// From the middle of what was taken hold of to the pointer, so the
+        /// same spot stays under it.
+        let grab: CGSize
+        let size: CGSize
+    }
+
+    /// Where the tiles and the tabs' rows are, in the sidebar's space, for a
+    /// drag to tell what it is over. Out of SwiftUI's sight: the rows move
+    /// with every scroll, and nothing needs drawing again for that.
+    private final class Layout {
+        var tiles = CGRect.zero
+        var rows = CGRect.zero
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,6 +62,11 @@ struct Sidebar: View {
             }
             .frame(height: Self.topRow)
 
+            tiles
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.tiles = $0 }
+                .padding(.horizontal, 8)
+                .padding(.top, 8)
+
             // Fixed: always within reach, however far down the tabs go.
             SidebarRow(icon: "plus", title: "New Tab", dimmed: true, action: browser.showCommandBar)
                 .padding(.horizontal, 8)
@@ -39,17 +74,28 @@ struct Sidebar: View {
 
             ScrollViewReader { list in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(browser.tabs) { tab in
+                    VStack(alignment: .leading, spacing: Self.rowGap) {
+                        ForEach(rest) { tab in
+                            // The buttons hold only the id: SwiftUI keeps their actions a
+                            // while after the row goes, and a tab held there keeps its page,
+                            // playing, after it is closed.
+                            let id = tab.id
                             SidebarRow(
                                 icon: "globe",
                                 site: tab.site,
                                 loading: tab.isLoading,
                                 title: tab.title,
-                                selected: tab.id == browser.selectedID,
-                                close: { withAnimation(.slide) { browser.close(tab.id) } }
+                                selected: id == browser.selectedID,
+                                close: { withAnimation(.slide) { browser.close(id) } }
                             ) {
-                                withAnimation(.easeOut(duration: 0.14)) { browser.selectedID = tab.id }
+                                withAnimation(.easeOut(duration: 0.14)) { browser.selectedID = id }
+                            }
+                            // Its place stays empty while it is dragged: where it will land.
+                            .opacity(dragged?.id == id ? 0 : 1)
+                            .simultaneousGesture(drag(id))
+                            .contextMenu {
+                                Button("Pin Tab") { withAnimation(.slide) { browser.setPinned(true, id) } }
+                                Button("Close Tab") { withAnimation(.slide) { browser.close(id) } }
                             }
                             .transition(.asymmetric(
                                 insertion: .move(edge: .top).combined(with: .opacity),
@@ -57,6 +103,7 @@ struct Sidebar: View {
                             ))
                         }
                     }
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.rows = $0 }
                     .padding(.horizontal, 8)
                     .padding(.vertical, Self.edge)
                     .background(alignment: .top) { Color.clear.frame(height: 0).id(Self.listTop) }
@@ -81,7 +128,7 @@ struct Sidebar: View {
                 .onChange(of: browser.selectedID) { _, id in
                     guard let id else { return }
                     withAnimation(.slide) {
-                        if id == browser.tabs.first?.id {
+                        if id == rest.first?.id {
                             list.scrollTo(Self.listTop, anchor: .top)
                         } else {
                             list.scrollTo(id)
@@ -98,8 +145,147 @@ struct Sidebar: View {
             .padding(.vertical, 8)
         }
         .frame(width: width)
+        .coordinateSpace(.named(Self.space))
         .background { background }
         .overlay(alignment: .trailing) { SidebarResizer(width: $width) }
+        // What is dragged follows the pointer, over everything in the sidebar.
+        // A tab over the tiles turns into one, the size of the gap opened for it.
+        .overlay(alignment: .topLeading) {
+            if let dragged, let tab = browser.tabs.first(where: { $0.id == dragged.id }) {
+                let gap = gap
+                let becomingTile = gap != nil
+                let size = gap.map { TileGrid.frame($0, of: pins.count + 1, in: layout.tiles).size } ?? dragged.size
+                let grab = becomingTile ? .zero : dragged.grab
+                Group {
+                    if tab.isPinned || becomingTile {
+                        PinnedTile(site: tab.site, loading: false, title: tab.title, selected: true) {}
+                    } else {
+                        SidebarRow(icon: "globe", site: tab.site, title: tab.title, selected: true) {}
+                    }
+                }
+                .frame(width: size.width, height: size.height)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
+                // Across, kept within the sidebar, as the tabs are.
+                .position(x: min(max(dragged.at.x - grab.width, size.width / 2 + 8), width - size.width / 2 - 8),
+                          y: dragged.at.y - grab.height)
+                .animation(.snappy(duration: 0.2), value: becomingTile)
+                .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private var pins: [Tab] { Array(browser.tabs.prefix { $0.isPinned }) }
+    private var rest: [Tab] { Array(browser.tabs.drop { $0.isPinned }) }
+
+    /// Where a tab from the list would go among the tiles, while it is dragged over them.
+    private var gap: Int? {
+        guard let dragged, rest.contains(where: { $0.id == dragged.id }), overTiles(dragged.at) else { return nil }
+        return TileGrid.index(at: dragged.at, of: pins.count + 1, in: layout.tiles)
+    }
+
+    /// With no tiles yet, where to drag one is always shown, dashed. With
+    /// some, a tab dragged over them opens a gap between them where it goes.
+    private var tiles: some View {
+        let pins = pins, gap = gap
+        var items: [Tab.ID?] = pins.map(\.id)
+        if pins.isEmpty { items = [nil] } else if let gap { items.insert(nil, at: gap) }
+        return TileGrid {
+            // One list, whatever row each is in, so a tile keeps its drag moving from one to another.
+            ForEach(items, id: \.self) { id in
+                if let id {
+                    if let tab = browser.tabs.first(where: { $0.id == id }) {
+                        PinnedTile(site: tab.site, loading: tab.isLoading, title: tab.title,
+                                   selected: id == browser.selectedID) {
+                            withAnimation(.easeOut(duration: 0.14)) { browser.selectedID = id }
+                        }
+                        .opacity(dragged?.id == id ? 0 : 1)
+                        .simultaneousGesture(drag(id))
+                        .contextMenu {
+                            Button("Unpin Tab") { withAnimation(.slide) { browser.setPinned(false, id) } }
+                            Button("Close Tab") { withAnimation(.slide) { browser.close(id) } }
+                        }
+                        .transition(.scale(scale: 0.8).combined(with: .opacity))
+                    }
+                } else if pins.isEmpty {
+                    PinSlot(targeted: gap != nil)
+                        .transition(.opacity)
+                } else {
+                    Color.clear
+                }
+            }
+        }
+        .animation(.snappy(duration: 0.2), value: gap)
+    }
+
+    /// Dragging a tab or tile, by the id alone (see the rows).
+    private func drag(_ id: Tab.ID) -> some Gesture {
+        DragGesture(minimumDistance: 6, coordinateSpace: .named(Self.space))
+            .onChanged { value in
+                if dragged == nil { dragged = start(id, at: value.startLocation) }
+                dragged?.at = value.location
+                reorder(id, at: value.location)
+            }
+            .onEnded { drop(id, at: $0.location) }
+    }
+
+    private func start(_ id: Tab.ID, at point: CGPoint) -> Drag? {
+        let pins = pins
+        let frame: CGRect
+        if let index = pins.firstIndex(where: { $0.id == id }) {
+            frame = TileGrid.frame(index, of: pins.count, in: layout.tiles)
+        } else if let index = rest.firstIndex(where: { $0.id == id }) {
+            frame = rowFrame(index)
+        } else {
+            return nil
+        }
+        return Drag(id: id, at: point, grab: CGSize(width: point.x - frame.midX, height: point.y - frame.midY),
+                    size: frame.size)
+    }
+
+    /// As the pointer passes over another tab, or tile, the dragged one takes
+    /// its place, and the rest make way.
+    private func reorder(_ id: Tab.ID, at point: CGPoint) {
+        let pins = pins, rest = rest
+        withAnimation(.snappy(duration: 0.2)) {
+            if pins.contains(where: { $0.id == id }) {
+                // Heading down into the list: unpinned there on drop.
+                guard !belowTiles(point) else { return }
+                browser.move(id, pinned: true, to: TileGrid.index(at: point, of: pins.count, in: layout.tiles))
+            } else if !overTiles(point) {
+                browser.move(id, pinned: false, to: rowIndex(at: point.y, of: rest.count))
+            }
+        }
+    }
+
+    /// Onto the tiles, a tab is pinned where it is let go; a tile let go below
+    /// them is unpinned there. Anywhere else, it stays where the drag put it.
+    private func drop(_ id: Tab.ID, at point: CGPoint) {
+        let gap = gap
+        withAnimation(.slide) {
+            dragged = nil
+            guard let tab = browser.tabs.first(where: { $0.id == id }) else { return }
+            if tab.isPinned, belowTiles(point), (0...width).contains(point.x) {
+                browser.move(id, pinned: false, to: rowIndex(at: point.y, of: rest.count + 1))
+            } else if let gap {
+                browser.move(id, pinned: true, to: gap)
+            }
+        }
+    }
+
+    private func overTiles(_ point: CGPoint) -> Bool { layout.tiles.insetBy(dx: 0, dy: -8).contains(point) }
+    private func belowTiles(_ point: CGPoint) -> Bool { point.y > layout.tiles.maxY + 8 }
+
+    private func rowFrame(_ index: Int) -> CGRect {
+        let rows = layout.rows
+        return CGRect(x: rows.minX, y: rows.minY + CGFloat(index) * (Self.rowHeight + Self.rowGap),
+                      width: rows.width, height: Self.rowHeight)
+    }
+
+    /// The row under `y` of `count`, the first above them all and the last below.
+    private func rowIndex(at y: CGFloat, of count: Int) -> Int {
+        let row = Int(((y - layout.rows.minY) / (Self.rowHeight + Self.rowGap)).rounded(.down))
+        return min(max(row, 0), count - 1)
     }
 
     /// The system's sidebar glass, pinned or floating alike, so it looks the
@@ -110,6 +296,40 @@ struct Sidebar: View {
                 Rectangle().fill(Palette.hairline).frame(width: 1)
             }
             .shadow(color: .black.opacity(pinned ? 0 : 0.25), radius: 16, x: 4)
+    }
+}
+
+/// The tiles: three to a row, each row shared out evenly, so one fills the
+/// width. A drag finds what it is over by the same sums.
+private struct TileGrid: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = CGFloat((subviews.count + 2) / 3)
+        return CGSize(width: proposal.width ?? 0, height: max(rows * (Sidebar.tileHeight + Sidebar.tileGap) - Sidebar.tileGap, 0))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for (index, subview) in subviews.enumerated() {
+            let frame = Self.frame(index, of: subviews.count, in: bounds)
+            subview.place(at: frame.origin, proposal: ProposedViewSize(frame.size))
+        }
+    }
+
+    static func frame(_ index: Int, of count: Int, in bounds: CGRect) -> CGRect {
+        let row = index / 3
+        let across = CGFloat(min(3, count - row * 3))
+        let width = (bounds.width - Sidebar.tileGap * (across - 1)) / across
+        return CGRect(x: bounds.minX + CGFloat(index % 3) * (width + Sidebar.tileGap),
+                      y: bounds.minY + CGFloat(row) * (Sidebar.tileHeight + Sidebar.tileGap),
+                      width: width, height: Sidebar.tileHeight)
+    }
+
+    /// The tile under `point` of `count`: the nearest, from outside them.
+    static func index(at point: CGPoint, of count: Int, in bounds: CGRect) -> Int {
+        let row = min(max(Int(((point.y - bounds.minY) / (Sidebar.tileHeight + Sidebar.tileGap)).rounded(.down)), 0),
+                      (count - 1) / 3)
+        let across = min(3, count - row * 3)
+        let column = Int(((point.x - bounds.minX) / ((bounds.width + Sidebar.tileGap) / CGFloat(across))).rounded(.down))
+        return row * 3 + min(max(column, 0), across - 1)
     }
 }
 
@@ -188,27 +408,15 @@ private struct SidebarRow: View {
     let action: () -> Void
 
     @State private var hovering = false
-    @State private var spinning = false
 
     private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Group {
-                    if spinning {
-                        ProgressView()
-                            .controlSize(.small)
-                            .transition(.opacity)
-                    } else if let site {
-                        Favicon(site: site, size: 14)
-                    } else {
-                        Image(systemName: icon)
-                            .font(.system(size: 14, weight: dimmed ? .light : .regular))
-                            .foregroundStyle(Palette.muted)
-                    }
-                }
-                .frame(width: 22)
+                TabIcon(site: site, loading: loading, fallback: icon)
+                    .font(.system(size: 14, weight: dimmed ? .light : .regular))
+                    .frame(width: 22)
                 Text(title)
                     .font(.system(size: 14))
                     .foregroundStyle(dimmed ? Palette.muted : Palette.ink)
@@ -218,7 +426,7 @@ private struct SidebarRow: View {
             // Room for the close button, so a long title stops short of it.
             .padding(.trailing, close == nil ? 10 : 34)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 32)
+            .frame(height: Sidebar.rowHeight)
             .background {
                 shape
                     .fill(selected ? Palette.wash : hovering ? Palette.hover : .clear)
@@ -239,13 +447,131 @@ private struct SidebarRow: View {
         // being over the row.
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
-        // Only loads that take a while show: a quick one would just blink.
+    }
+}
+
+/// A tab's site icon, or a spinner once a load has taken long enough to
+/// notice: a quick one would just blink.
+private struct TabIcon: View {
+    let site: URL?
+    let loading: Bool
+    /// In place of the site's icon, for a row without a site.
+    var fallback = "globe"
+    var size: CGFloat = 14
+    /// See `Favicon`.
+    var plate = true
+
+    @State private var spinning = false
+
+    var body: some View {
+        Group {
+            if spinning {
+                ProgressView()
+                    .controlSize(.small)
+                    .transition(.opacity)
+            } else if let site {
+                Favicon(site: site, size: size, plate: plate)
+            } else {
+                Image(systemName: fallback)
+                    .foregroundStyle(Palette.muted)
+            }
+        }
         .task(id: loading) {
             guard loading else { return spinning = false }
             try? await Task.sleep(for: .milliseconds(300))
             if !Task.isCancelled { spinning = true }
         }
         .animation(.easeOut(duration: 0.15), value: spinning)
+    }
+}
+
+/// A pinned site: its icon alone, bare, on a tile, its name in a tooltip. The
+/// one on screen wears the icon's colours (see `Tint`), as Dia's do: its edge
+/// in them, and its glass faintly tinted.
+private struct PinnedTile: View {
+    let site: URL?
+    let loading: Bool
+    let title: String
+    let selected: Bool
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+
+    var body: some View {
+        let tint = Favicons.origin(of: site).flatMap { Favicons.shared.tints[$0] }
+        let colors = tint?.colors.map { Color(nsColor: $0) } ?? []
+        Button(action: action) {
+            TabIcon(site: site, loading: loading, size: 16, plate: false)
+                .frame(maxWidth: .infinity)
+                .frame(height: Sidebar.tileHeight)
+                .background {
+                    // No colour to wear (GitHub's): as dark as the window gets, or as light,
+                    // under the mark drawn in the text's colour.
+                    if selected, let tint, tint.isGrey {
+                        shape.fill(Palette.ground)
+                    } else if selected, tint != nil {
+                        shape.fill(Color.primary.opacity(0.2))
+                            .overlay(shape.fill(LinearGradient(colors: colors.map { $0.opacity(0.14) },
+                                                               startPoint: .topLeading, endPoint: .bottomTrailing)))
+                            // Lighter in the middle, as glass lit from behind.
+                            .overlay(shape.fill(RadialGradient(colors: [.white.opacity(0.06), .clear],
+                                                               center: .center, startRadius: 0, endRadius: 40)))
+                    } else {
+                        shape.fill(Color.primary.opacity(selected ? 0.2 : hovering ? 0.13 : 0.09))
+                    }
+                }
+                // Selected, a bevelled edge, as Dia's: the colour deep, with a
+                // lighter line round its outside.
+                .overlay {
+                    if selected, let tint, !tint.isGrey {
+                        let deep = tint.colors.map { Color(nsColor: $0.blended(withFraction: 0.4, of: .black) ?? $0) }
+                        let light = tint.colors.map { Color(nsColor: $0.blended(withFraction: 0.35, of: .white) ?? $0).opacity(0.6) }
+                        shape.strokeBorder(LinearGradient(colors: deep, startPoint: .leading, endPoint: .trailing), lineWidth: 2.5)
+                        shape.strokeBorder(LinearGradient(colors: light, startPoint: .leading, endPoint: .trailing), lineWidth: 1)
+                    } else if selected {
+                        shape.strokeBorder(Color.primary.opacity(0.28), lineWidth: 3)
+                        shape.strokeBorder(Color.primary.opacity(0.25), lineWidth: 1.5)
+                    } else {
+                        // A hairline, lighter than the glass, as its edge catching the light.
+                        shape.strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+                    }
+                }
+                .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .help(title)
+        .accessibilityLabel(title)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovering)
+        .animation(.easeOut(duration: 0.14), value: selected)
+    }
+}
+
+/// While nothing is pinned, where a tab is dragged to pin it: dashed, and lit
+/// once the tab is over it.
+private struct PinSlot: View {
+    let targeted: Bool
+
+    private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+
+    var body: some View {
+        Image(systemName: "pin")
+            .font(.system(size: 14))
+            .overlay(alignment: .topTrailing) {
+                Image(systemName: "plus")
+                    .font(.system(size: 7, weight: .bold))
+                    .offset(x: 6, y: -2)
+            }
+            .foregroundStyle(targeted ? Palette.ink : Palette.muted)
+            .frame(maxWidth: .infinity)
+            .frame(height: Sidebar.tileHeight)
+            .help("Drag a tab here to pin it")
+            .background(shape.fill(targeted ? Palette.wash : .clear))
+            .overlay(shape.strokeBorder(Palette.muted.opacity(targeted ? 0.9 : 0.5),
+                                        style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])))
+            .animation(.easeOut(duration: 0.14), value: targeted)
     }
 }
 
