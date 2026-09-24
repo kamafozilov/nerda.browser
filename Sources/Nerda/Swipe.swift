@@ -114,6 +114,12 @@ final class SwipingWebView: WKWebView {
         let x = swipe.back ? coveredLeading + offset : bounds.width - size - offset
         arrow.frame = CGRect(x: x, y: (bounds.height - size) / 2, width: size, height: size)
         arrow.back = swipe.back
+        // A tick through the trackpad as letting go comes to go there (the
+        // trackpad only taps fingers that are on it, so not on letting go).
+        // Hidden means a fresh swipe, whatever the last one left the arrow at.
+        if swipe.armed, !arrow.armed || arrow.alphaValue == 0 {
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .drawCompleted)
+        }
         arrow.armed = swipe.armed
         arrow.alphaValue = 1
     }
