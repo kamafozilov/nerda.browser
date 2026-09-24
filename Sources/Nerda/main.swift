@@ -70,7 +70,8 @@ struct BrowserView: View {
                                 withAnimation(.slide) { browser.open(url) }
                                 browser.hideCommandBar()
                             },
-                            dismiss: browser.hideCommandBar
+                            dismiss: browser.hideCommandBar,
+                            requests: browser.commandBarRequests
                         )
                         // Pinned by its top edge, a third of the way down, so the
                         // field stays put while the list under it grows and shrinks.
@@ -186,6 +187,7 @@ extension NSWindow {
 extension Browser {
     func showCommandBar() {
         withAnimation(.easeOut(duration: 0.14)) { commandBarOpen = true }
+        commandBarRequests += 1
     }
 
     func hideCommandBar() {

@@ -34,7 +34,9 @@ struct FindBar: View {
         .padding(.trailing, 6)
         .frame(width: 320, height: 36)
         .glassPanel(cornerRadius: 18)
-        .onAppear { focused = true }
+        // A turn later, as the command bar does: focus asked for as the field
+        // is added is dropped.
+        .onAppear { DispatchQueue.main.async { focused = true } }
         // Looks as you type, from the top, as Safari does.
         .onChange(of: browser.findQuery) { browser.find() }
         // ⌘F with the bar already open goes back to its field.

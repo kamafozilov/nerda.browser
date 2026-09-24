@@ -22,6 +22,8 @@ final class Browser: NSObject {
     var commandBarOpen = true {
         didSet { if commandBarOpen { exitPageFullscreen() } }
     }
+    /// Counts ⌘Ts, so one with the bar already open still puts the keyboard in it.
+    var commandBarRequests = 0
     /// The tab whose page shows one of its elements (a video) over the whole
     /// window, as it asked to. Always the one on screen.
     private(set) var fullscreenTab: Tab.ID?

@@ -7,6 +7,8 @@ import SwiftUI
 struct CommandBar: View {
     let go: (URL) -> Void
     let dismiss: () -> Void
+    /// Counts ⌘Ts, so one with the bar already open still puts the keyboard in it.
+    let requests: Int
 
     @State private var query = ""
     /// The row picked with the arrow keys or the pointer. Kept by what it is,
@@ -135,7 +137,11 @@ struct CommandBar: View {
         }
         .frame(width: 620)
         .glassPanel(cornerRadius: 24)
-        .onAppear { focused = true }
+        // A turn later: asked for in the update that adds the field, focus is
+        // dropped before the field is in the window, and the keyboard (and Esc)
+        // stays with the page.
+        .onAppear { DispatchQueue.main.async { focused = true } }
+        .onChange(of: requests) { focused = true }
         // Typing starts the list over: the first row is what Enter will do.
         .onChange(of: query) { highlighted = nil }
         // The last guesses stay up while the next are on their way, so the
