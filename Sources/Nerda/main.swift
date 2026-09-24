@@ -1,17 +1,19 @@
 import AppKit
 import SwiftUI
 
-/// The whole window: the sidebar, and the page beside it. With the sidebar
-/// collapsed the page takes the whole window, and the sidebar comes out over
-/// it while the pointer is at the window's left edge.
+/// The whole window: the sidebar, and the page beside it, on the window's
+/// glass: the page and its address bar as one card with rounded corners,
+/// clear of the window's edges. With the sidebar collapsed the card takes
+/// the whole window, and the sidebar comes out over it while the pointer is
+/// at the window's left edge.
 ///
 /// The sidebar always slides over the page, never alongside it, and the page
 /// never changes size for it: WebKit redraws a resized page a frame or more
 /// late, and the gap shows as a blank strip. The page stays the size of the
 /// window and is told how much of it the sidebar covers, and lays itself out
-/// beside it. (Before macOS 26, which can't be told, the page is resized once,
-/// where the sidebar hides it: as the sidebar starts to go, and once it has
-/// fully come.)
+/// beside it; its corners are cut where it shows. (Before macOS 26, which
+/// can't be told, the page is resized once, where the sidebar hides it: as
+/// the sidebar starts to go, and once it has fully come.)
 struct BrowserView: View {
     let browser: Browser
     let window: NSWindow
@@ -32,12 +34,39 @@ struct BrowserView: View {
     private var room: CGFloat { docked && !pageFullscreen ? sidebarWidth : 0 }
     private var sidebarShown: Bool { (browser.sidebarOpen || peeking) && !pageFullscreen }
 
+    /// The page, and the address bar over it, sit as one card on the window's
+    /// glass, clear of its edges by this much, their corners rounded by this.
+    static let margin: CGFloat = 6
+    static let cornerRadius: CGFloat = 10
+    private var margin: CGFloat { pageFullscreen ? 0 : Self.margin }
+    /// Where the card's visible left edge is: past the docked sidebar, or the margin.
+    private var inset: CGFloat { max(room, margin) }
+    /// How much of the page lies under the docked sidebar (macOS 26, where
+    /// the page is told rather than made narrower).
+    private var covered: CGFloat { PageView.canBeCovered ? inset - margin : 0 }
+
     var body: some View {
         ZStack(alignment: .leading) {
+            // The window's glass, around the card as under the sidebar; it
+            // moves the window, as the title bar under it would.
+            SidebarGlass()
+                .overlay { Color.clear.contentShape(Rectangle()).gesture(WindowDragGesture()) }
+
             page
-                .padding(.leading, PageView.canBeCovered ? 0 : room)
+                .padding(.top, pageFullscreen ? 0 : margin + AddressBar.height)
+                .padding([.bottom, .trailing], margin)
+                .padding(.leading, PageView.canBeCovered ? margin : inset)
                 // The page's room changes in one step, however it is asked for.
                 .animation(nil, value: docked)
+
+            if !pageFullscreen {
+                // Beside the sidebar, and under it while it is out over the page.
+                AddressBar(browser: browser)
+                    .padding(.leading, inset)
+                    .padding([.top, .trailing], margin)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .animation(nil, value: docked)
+            }
 
             // Always there, slid off to the left when not wanted, rather than
             // added and taken away, so it comes back as it was left (scrolled
@@ -66,6 +95,8 @@ struct BrowserView: View {
                             .contentShape(Rectangle())
                             .onTapGesture(perform: browser.hideCommandBar)
                         CommandBar(
+                            text: "",
+                            inline: false,
                             go: { url in
                                 withAnimation(.slide) { browser.open(url) }
                                 browser.hideCommandBar()
@@ -73,6 +104,7 @@ struct BrowserView: View {
                             dismiss: browser.hideCommandBar,
                             requests: browser.commandBarRequests
                         )
+                        .padding(.horizontal, 12)
                         // Pinned by its top edge, a third of the way down, so the
                         // field stays put while the list under it grows and shrinks.
                         .padding(.top, window.size.height * 0.3)
@@ -142,22 +174,28 @@ struct BrowserView: View {
     }
 
     private var page: some View {
-        ZStack {
+        let radius = pageFullscreen ? 0 : Self.cornerRadius
+        return ZStack {
             Palette.ground
             PageView(
                 tabs: browser.tabs,
                 selected: browser.selected,
                 takesFocus: !browser.commandBarOpen,
-                coveredLeading: PageView.canBeCovered ? room : 0
+                coveredLeading: covered
             )
             if let failure = browser.selected?.failure {
                 // Switched in with the tab, as the page is: faded, it would
                 // show the blank page under it, and linger over the next.
                 PageFailure(message: failure.message)
-                    .padding(.leading, PageView.canBeCovered ? room : 0)
+                    .padding(.leading, covered)
                     .background(Palette.ground)
                     .transition(.identity)
             }
+        }
+        // The card's lower corners, where it shows: past what the sidebar covers.
+        .mask {
+            UnevenRoundedRectangle(bottomLeadingRadius: radius, bottomTrailingRadius: radius, style: .continuous)
+                .padding(.leading, covered)
         }
         .overlay(alignment: .topTrailing) {
             if browser.findBarOpen, browser.selected != nil {
@@ -170,14 +208,14 @@ struct BrowserView: View {
             if let offer = browser.passwordOffer, offer.tab == browser.selectedID {
                 PasswordOfferBar(browser: browser, offer: offer)
                     .padding(.top, 12)
-                    .padding(.leading, PageView.canBeCovered ? room : 0)
+                    .padding(.leading, covered)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .overlay(alignment: .topLeading) {
             if let choices = browser.passwordChoices, choices.tab == browser.selectedID, !browser.commandBarOpen {
                 PasswordChoicesView(browser: browser, choices: choices)
-                    .offset(x: (PageView.canBeCovered ? room : 0) + choices.spot.minX, y: choices.spot.maxY + 4)
+                    .offset(x: covered + choices.spot.minX, y: choices.spot.maxY + 4)
             }
         }
     }
@@ -203,8 +241,28 @@ extension NSWindow {
 /// What the menu and the buttons both do, animated the same way from either.
 extension Browser {
     func showCommandBar() {
-        withAnimation(.easeOut(duration: 0.14)) { commandBarOpen = true }
+        withAnimation(.easeOut(duration: 0.14)) {
+            editingAddress = false
+            commandBarOpen = true
+        }
         commandBarRequests += 1
+    }
+
+    /// ⌘L, or a click on the address: the address made editable where it is,
+    /// to take the tab on screen somewhere else. With no tab, a new one.
+    func editAddress() {
+        guard selected != nil else { return showCommandBar() }
+        exitPageFullscreen()
+        if commandBarOpen { withAnimation(.easeOut(duration: 0.14)) { commandBarOpen = false } }
+        editingAddress = true
+        commandBarRequests += 1
+    }
+
+    /// The address back as it was, and the keyboard back on the page.
+    func endAddressEdit() {
+        guard editingAddress else { return }
+        editingAddress = false
+        if let page = selected?.webView { page.window?.makeFirstResponder(page) }
     }
 
     func hideCommandBar() {
@@ -264,7 +322,8 @@ let window = NSWindow(
 )
 // No visible title bar: the sidebar runs up to the top edge and the traffic
 // lights sit on it. An empty unified toolbar makes the title bar 52pt tall,
-// which brings the lights down to the middle of the sidebar's top row.
+// which brings the lights down to the middle of the sidebar's top row, level
+// with the middle of the address bar (see `Sidebar.topRow`).
 window.titlebarAppearsTransparent = true
 window.titleVisibility = .hidden
 window.toolbar = NSToolbar()

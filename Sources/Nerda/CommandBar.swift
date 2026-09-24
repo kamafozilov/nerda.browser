@@ -3,8 +3,14 @@ import SwiftUI
 
 /// Where a new tab starts: a field on glass in the middle of the window. A tab
 /// is only made once you pick somewhere to go; Esc or a click outside leaves
-/// nothing behind.
+/// nothing behind. On the address bar (⌘L), it is the address itself, made
+/// editable where it is, and takes that tab somewhere else.
 struct CommandBar: View {
+    /// What the field starts with, all selected, so typing replaces it.
+    let text: String
+    /// In the address bar, in the address's place, the list under it; or else
+    /// big, in the middle of the window.
+    let inline: Bool
     let go: (URL) -> Void
     let dismiss: () -> Void
     /// Counts ⌘Ts, so one with the bar already open still puts the keyboard in it.
@@ -81,79 +87,116 @@ struct CommandBar: View {
     }
 
     var body: some View {
-        let rows = Self.suggestions(for: query, guesses: searches, history: .shared)
+        // Opened on an address, the list waits for it to be changed: until
+        // then Enter just goes there again.
+        let untouched = !text.isEmpty && query == text
+        let rows = untouched ? [] : Self.suggestions(for: query, guesses: searches, history: .shared)
 
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Image(systemName: "magnifyingglass")
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
-                TextField("Search or enter address", text: $query)
-                    .textFieldStyle(.plain)
-                    .font(.title2)
-                    .focused($focused)
-                    .onSubmit { if let row = target(in: rows) { go(row.url) } }
-                    .onKeyPress(.downArrow) {
-                        let index = rows.firstIndex { $0.id == target(in: rows)?.id } ?? -1
-                        if !rows.isEmpty { highlighted = rows[min(index + 1, rows.count - 1)].id }
-                        return .handled
+        Group {
+            if inline {
+                // In the address's own place, as the address; only the list,
+                // once there is one, hangs below it over the page.
+                field(rows, untouched: untouched)
+                    .background(Palette.hover, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(alignment: .top) {
+                        if !rows.isEmpty {
+                            list(rows)
+                                .glassPanel(cornerRadius: 12)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .offset(y: AddressBar.fieldHeight + 6)
+                        }
                     }
-                    .onKeyPress(.upArrow) {
-                        let index = rows.firstIndex { $0.id == target(in: rows)?.id } ?? rows.count
-                        if !rows.isEmpty { highlighted = rows[max(index - 1, 0)].id }
-                        return .handled
+                    // Clicking away (into the page) is done with it, as Esc is.
+                    .onChange(of: focused) { if !focused { dismiss() } }
+            } else {
+                VStack(spacing: 0) {
+                    field(rows, untouched: untouched)
+                    if !rows.isEmpty {
+                        Divider().padding(.horizontal, 12)
                     }
-                    .onKeyPress(.escape) {
-                        dismiss()
-                        return .handled
-                    }
-            }
-            .padding(.horizontal, 20)
-            .frame(height: 56)
-
-            Divider().padding(.horizontal, 12)
-
-            let target = target(in: rows)
-            VStack(spacing: 2) {
-                ForEach(rows) { row in
-                    SuggestionRow(
-                        title: row.title,
-                        detail: row.detail,
-                        site: row.isSearch ? nil : row.url,
-                        highlighted: row.id == target?.id
-                    )
-                    // Only a pointer that moves picks a row: rows changing
-                    // under one at rest, as you type, leave Enter with what
-                    // is typed.
-                    .onContinuousHover { phase in
-                        guard case .active = phase, NSEvent.mouseLocation != pointer else { return }
-                        pointer = NSEvent.mouseLocation
-                        highlighted = row.id
-                    }
-                    .onTapGesture { go(row.url) }
+                    list(rows)
                 }
+                .frame(maxWidth: 620)
+                .glassPanel(cornerRadius: 24)
             }
-            .padding(8)
         }
-        .frame(width: 620)
-        .glassPanel(cornerRadius: 24)
         // A turn later: asked for in the update that adds the field, focus is
         // dropped before the field is in the window, and the keyboard (and Esc)
         // stays with the page.
-        .onAppear { DispatchQueue.main.async { focused = true } }
+        .onAppear {
+            query = text
+            DispatchQueue.main.async { focused = true }
+        }
         .onChange(of: requests) { focused = true }
         // Typing starts the list over: the first row is what Enter will do.
         .onChange(of: query) { highlighted = nil }
         // The last guesses stay up while the next are on their way, so the
         // list doesn't flicker with every key; typing on cancels the ask.
         .task(id: query) {
-            let text = query.trimmingCharacters(in: .whitespaces)
-            guard !text.isEmpty else { return searches = [] }
+            let typed = query.trimmingCharacters(in: .whitespaces)
+            guard !typed.isEmpty, query != text else { return searches = [] }
             try? await Task.sleep(for: .milliseconds(60))
             guard !Task.isCancelled else { return }
-            let found = await Address.suggestions(for: text)
+            let found = await Address.suggestions(for: typed)
             if !Task.isCancelled { searches = found }
         }
+    }
+
+    private func field(_ rows: [Suggestion], untouched: Bool) -> some View {
+        HStack(spacing: inline ? AddressBar.fieldSpacing : 12) {
+            Image(systemName: "magnifyingglass")
+                .font(inline ? .system(size: 12) : .title2)
+                .foregroundStyle(.secondary)
+                .frame(width: inline ? AddressBar.fieldIcon : nil)
+            TextField("Search or enter address", text: $query)
+                .textFieldStyle(.plain)
+                .font(inline ? .system(size: 12.5) : .title2)
+                .focused($focused)
+                .onSubmit {
+                    if let url = target(in: rows)?.url ?? (untouched ? Address.url(from: query) : nil) { go(url) }
+                }
+                .onKeyPress(.downArrow) {
+                    let index = rows.firstIndex { $0.id == target(in: rows)?.id } ?? -1
+                    if !rows.isEmpty { highlighted = rows[min(index + 1, rows.count - 1)].id }
+                    return .handled
+                }
+                .onKeyPress(.upArrow) {
+                    let index = rows.firstIndex { $0.id == target(in: rows)?.id } ?? rows.count
+                    if !rows.isEmpty { highlighted = rows[max(index - 1, 0)].id }
+                    return .handled
+                }
+                .onKeyPress(.escape) {
+                    dismiss()
+                    return .handled
+                }
+        }
+        .padding(.horizontal, inline ? AddressBar.fieldInset : 20)
+        .frame(height: inline ? AddressBar.fieldHeight : 56)
+    }
+
+    private func list(_ rows: [Suggestion]) -> some View {
+        let target = target(in: rows)
+        return VStack(spacing: inline ? 1 : 2) {
+            ForEach(rows) { row in
+                SuggestionRow(
+                    title: row.title,
+                    detail: row.detail,
+                    site: row.isSearch ? nil : row.url,
+                    highlighted: row.id == target?.id,
+                    compact: inline
+                )
+                // Only a pointer that moves picks a row: rows changing
+                // under one at rest, as you type, leave Enter with what
+                // is typed.
+                .onContinuousHover { phase in
+                    guard case .active = phase, NSEvent.mouseLocation != pointer else { return }
+                    pointer = NSEvent.mouseLocation
+                    highlighted = row.id
+                }
+                .onTapGesture { go(row.url) }
+            }
+        }
+        .padding(rows.isEmpty ? 0 : inline ? 6 : 8)
     }
 }
 
@@ -163,16 +206,17 @@ private struct SuggestionRow: View {
     /// The site whose icon to show; nil shows a magnifying glass.
     let site: URL?
     let highlighted: Bool
+    let compact: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            icon.frame(width: 24, height: 24)
+        HStack(spacing: compact ? 8 : 12) {
+            icon.frame(width: compact ? 22 : 24, height: compact ? 22 : 24)
 
             Text(title)
-                .font(.title3)
+                .font(compact ? .system(size: 13) : .title3)
                 .foregroundStyle(.primary)
             Text(detail)
-                .font(.body)
+                .font(compact ? .system(size: 12) : .body)
                 .foregroundStyle(.secondary)
 
             Spacer(minLength: 0)
@@ -180,15 +224,15 @@ private struct SuggestionRow: View {
             // What Enter will do, on the row it will do it to.
             if highlighted {
                 Image(systemName: "return")
-                    .font(.body)
+                    .font(compact ? .system(size: 12) : .body)
                     .foregroundStyle(.tertiary)
             }
         }
         .lineLimit(1)
-        .padding(.horizontal, 12)
-        .frame(height: 42)
+        .padding(.horizontal, compact ? 8 : 12)
+        .frame(height: compact ? 30 : 42)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: compact ? 8 : 14, style: .continuous)
                 .fill(highlighted ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear))
         )
         .contentShape(Rectangle())
@@ -196,10 +240,10 @@ private struct SuggestionRow: View {
 
     @ViewBuilder private var icon: some View {
         if let site {
-            Favicon(site: site)
+            Favicon(site: site, size: compact ? 14 : 16)
         } else {
             Image(systemName: "magnifyingglass")
-                .font(.body)
+                .font(compact ? .system(size: 12) : .body)
                 .foregroundStyle(.secondary)
         }
     }

@@ -16,8 +16,9 @@ struct Sidebar: View {
 
     static let defaultWidth: Double = 256
     static let widths: ClosedRange<Double> = 200...400
-    /// As tall as the window's title bar, so the traffic lights sit in its middle.
-    static let topRow: CGFloat = 52
+    /// As tall as the window's title bar, so the traffic lights sit in its
+    /// middle, level with the middle of the address bar below the margin.
+    static let topRow = 2 * (BrowserView.margin + AddressBar.height / 2)
     static let rowHeight: CGFloat = 32
     private static let rowGap: CGFloat = 2
     nonisolated static let tileHeight: CGFloat = 40
@@ -52,13 +53,16 @@ struct Sidebar: View {
     var body: some View {
         VStack(spacing: 0) {
             // The traffic lights sit on this row, and it moves the window, as
-            // the title bar under it would.
+            // the title bar under it would. The sidebar's button is on the
+            // address bar; out over the page, the sidebar has its own, to keep it.
             ZStack(alignment: .trailing) {
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(WindowDragGesture())
-                SidebarToggle(open: pinned, toggle: browser.toggleSidebar)
-                    .padding(.trailing, 10)
+                if !pinned {
+                    SidebarToggle(open: false, toggle: browser.toggleSidebar)
+                        .padding(.trailing, 10)
+                }
             }
             .frame(height: Self.topRow)
 
@@ -291,11 +295,12 @@ struct Sidebar: View {
     }
 
     /// The system's sidebar glass, pinned or floating alike, so it looks the
-    /// same sliding as at rest. Floating, a shadow lifts it off the page.
+    /// same sliding as at rest. Pinned, it is one with the window's glass
+    /// around the page; floating, an edge and a shadow lift it off the page.
     private var background: some View {
         SidebarGlass()
             .overlay(alignment: .trailing) {
-                Rectangle().fill(Palette.hairline).frame(width: 1)
+                if !pinned { Rectangle().fill(Palette.hairline).frame(width: 1) }
             }
             .shadow(color: .black.opacity(pinned ? 0 : 0.25), radius: 16, x: 4)
     }
@@ -338,7 +343,7 @@ private struct TileGrid: Layout {
 /// The frosted desktop behind the window that macOS puts under sidebars
 /// (Finder's, Mail's), greyed while the window is in the background as theirs
 /// are. SwiftUI's own materials only blur what is in the window.
-private struct SidebarGlass: NSViewRepresentable {
+struct SidebarGlass: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = .sidebar
@@ -600,9 +605,9 @@ private struct CloseButton: View {
     }
 }
 
-/// Opens and closes the sidebar (⌘S is the View menu's). One button for both
-/// states: it sits at the sidebar's right edge while the sidebar is open, and
-/// beside the traffic lights once it is closed.
+/// Opens and closes the sidebar (⌘S is the View menu's). At the start of the
+/// address bar; and on the sidebar itself while it is out over the page, to
+/// keep it there.
 struct SidebarToggle: View {
     let open: Bool
     let toggle: () -> Void

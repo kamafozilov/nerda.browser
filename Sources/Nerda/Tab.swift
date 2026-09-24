@@ -12,6 +12,13 @@ final class Tab: Identifiable {
     private(set) var url: URL?
     private var pageTitle = ""
     private(set) var isLoading = false
+    /// For the address bar's buttons, and the line under it that fills as the page loads.
+    private(set) var canGoBack = false
+    private(set) var canGoForward = false
+    private(set) var progress = 0.0
+    /// The colour the page gives its top (its theme colour), or else its
+    /// background: the address bar wears it, so it reads as part of the page.
+    private(set) var color: NSColor?
     /// Set when the last address could not be opened: the page shows why
     /// instead, and Reload tries that address again.
     var failure: (url: URL, message: String)?
@@ -36,7 +43,7 @@ final class Tab: Identifiable {
     /// What a sleeping page needs to wake as it was: its history, where it
     /// was scrolled to, and its zoom.
     @ObservationIgnored private var slept: (state: Any?, zoom: CGFloat)?
-    @ObservationIgnored private var observations: [NSKeyValueObservation] = []
+    @ObservationIgnored private var observations: [NSObject] = []
     /// The address last put in history, so a page is counted once per visit,
     /// not again when it wakes or reloads.
     @ObservationIgnored private var recorded: URL?
@@ -129,9 +136,40 @@ final class Tab: Identifiable {
             page.observe(\.isLoading) { [weak self] page, _ in
                 MainActor.assumeIsolated { self?.isLoading = page.isLoading }
             },
+            // At once too: a page woken from sleep may have no history, where the one before had.
+            page.observe(\.canGoBack, options: .initial) { [weak self] page, _ in
+                MainActor.assumeIsolated { self?.canGoBack = page.canGoBack }
+            },
+            page.observe(\.canGoForward, options: .initial) { [weak self] page, _ in
+                MainActor.assumeIsolated { self?.canGoForward = page.canGoForward }
+            },
+            page.observe(\.estimatedProgress) { [weak self] page, _ in
+                MainActor.assumeIsolated { self?.progress = page.estimatedProgress }
+            },
+            page.observe(\.themeColor) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.recolor() }
+            },
+            page.observe(\.underPageBackgroundColor) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.recolor() }
+            },
+            KeyObserver(page, Self.sampledTopColor) { [weak self] in self?.recolor() },
         ]
         return page
     }
+
+    /// The colour along the page's top edge, as WebKit samples it for Safari:
+    /// what the address bar touches, which sites' theme colours often aren't
+    /// (GitHub's, YouTube's). WebKit has none when the edge isn't one colour;
+    /// then the page's theme colour, or its background.
+    // WebKit SPI, as Safari's own: should it go, the theme colour is the fallback.
+    private func recolor() {
+        guard let page else { return }
+        let sampled = page.responds(to: NSSelectorFromString(Self.sampledTopColor))
+            ? page.value(forKey: Self.sampledTopColor) as? NSColor : nil
+        color = sampled ?? page.themeColor ?? page.underPageBackgroundColor
+    }
+
+    private static let sampledTopColor = "_sampledPageTopColor"
 
     /// Lets the page go, keeping what it takes to bring it back. Its process
     /// ends with it, and with that the memory, which is most of a tab's cost.
@@ -248,6 +286,13 @@ final class Tab: Identifiable {
         configuration.userContentController.addUserScript(Fullscreen.script)
         configuration.userContentController.add(Fullscreen.messages, contentWorld: .page, name: "fullscreen")
         Passwords.install(in: configuration.userContentController)
+        // WebKit samples the page's top edge only when asked, allowing this
+        // much difference across it (as Safari does), for `recolor`.
+        let sample = NSSelectorFromString("_setSampledPageTopColorMaxDifference:")
+        if configuration.responds(to: sample) {
+            typealias Setter = @convention(c) (AnyObject, Selector, Double) -> Void
+            unsafeBitCast(configuration.method(for: sample), to: Setter.self)(configuration, sample, 5)
+        }
         return configuration
     }
 
@@ -258,6 +303,30 @@ final class Tab: Identifiable {
         let safari = Bundle(path: "/Applications/Safari.app")?.infoDictionary?["CFBundleShortVersionString"] as? String
         return "Version/\(safari ?? "26.0") Safari/605.1.15"
     }()
+}
+
+/// KVO on a key WebKit names only privately, which Swift has no key path for.
+/// Told on the main thread, as WebKit tells of its other keys; stops when let go.
+nonisolated private final class KeyObserver: NSObject {
+    private let object: NSObject
+    private let key: String
+    private let changed: @MainActor @Sendable () -> Void
+
+    init(_ object: NSObject, _ key: String, changed: @escaping @MainActor @Sendable () -> Void) {
+        self.object = object
+        self.key = key
+        self.changed = changed
+        super.init()
+        object.addObserver(self, forKeyPath: key, context: nil)
+    }
+
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?,
+                               change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
+        let changed = changed
+        MainActor.assumeIsolated { changed() }
+    }
+
+    deinit { object.removeObserver(self, forKeyPath: key) }
 }
 
 /// Every awake tab's page, all in the window at once, with only the selected

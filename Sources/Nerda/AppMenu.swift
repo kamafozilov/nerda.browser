@@ -50,6 +50,7 @@ final class AppMenu: NSObject {
             ]),
             submenu("File", [
                 item("New Tab", #selector(newTab), "t", target: self),
+                item("Open Location…", #selector(openLocation), "l", target: self),
                 item("Close Tab", #selector(closeTab), "w", target: self),
                 item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]),
                 .separator(),
@@ -102,6 +103,7 @@ final class AppMenu: NSObject {
     }
 
     @objc private func newTab() { browser.showCommandBar() }
+    @objc private func openLocation() { browser.editAddress() }
     @objc private func closeTab() { browser.closeSelectedTab() }
     @objc private func toggleSidebar() { browser.toggleSidebar() }
     @objc private func reload() { browser.selected?.reload() }
