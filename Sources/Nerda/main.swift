@@ -23,9 +23,14 @@ struct BrowserView: View {
     /// The page leaves room for the sidebar.
     @State private var docked = true
     @AppStorage("sidebarWidth") private var sidebarWidth = Sidebar.defaultWidth
+    /// The window went full screen for a page, and comes back with it.
+    @State private var fullScreenForPage = false
 
-    private var room: CGFloat { docked ? sidebarWidth : 0 }
-    private var sidebarShown: Bool { browser.sidebarOpen || peeking }
+    /// A page shows one of its elements (a video) over the whole window: the
+    /// sidebar keeps out of the way until it is done.
+    private var pageFullscreen: Bool { browser.fullscreenTab != nil }
+    private var room: CGFloat { docked && !pageFullscreen ? sidebarWidth : 0 }
+    private var sidebarShown: Bool { (browser.sidebarOpen || peeking) && !pageFullscreen }
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -44,7 +49,7 @@ struct BrowserView: View {
                 .allowsHitTesting(sidebarShown)
                 .accessibilityHidden(!sidebarShown)
 
-            if !sidebarShown {
+            if !sidebarShown, !pageFullscreen {
                 // A sliver along the edge, narrow enough not to get in the page's way.
                 Color.clear
                     .frame(width: 6)
@@ -100,12 +105,38 @@ struct BrowserView: View {
             transaction.addAnimationCompletion { docked = browser.sidebarOpen }
         }
         .onChange(of: browser.commandBarOpen) { if browser.commandBarOpen { peeking = false } }
+        // As Chrome does: the window goes full screen with the page, unless it
+        // already was, and comes back with it. Asked again once a transition
+        // ends, as macOS ignores what is asked during one.
+        .onChange(of: pageFullscreen) { matchWindowToPage() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification, object: window)) { _ in
+            matchWindowToPage()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification, object: window)) { _ in
+            fullScreenForPage = false
+            matchWindowToPage()
+        }
+        // Leaving full screen from the window (its green button, ⌃⌘F) takes the page out too.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willExitFullScreenNotification, object: window)) { _ in
+            fullScreenForPage = false
+            browser.exitPageFullscreen()
+        }
         // Leaving it puts it away, after a moment, so brushing past the edge
         // doesn't; the downloads list open from it holds it out.
         .task(id: peeking && !overPeek && !downloadsShown) {
             guard peeking, !overPeek, !downloadsShown else { return }
             try? await Task.sleep(for: .milliseconds(350))
             if !Task.isCancelled { withAnimation(.slide) { peeking = false } }
+        }
+    }
+
+    private func matchWindowToPage() {
+        let windowFullScreen = window.styleMask.contains(.fullScreen)
+        if pageFullscreen, !windowFullScreen {
+            fullScreenForPage = true
+            window.toggleFullScreen(nil)
+        } else if !pageFullscreen, fullScreenForPage, windowFullScreen {
+            window.toggleFullScreen(nil)
         }
     }
 

@@ -192,4 +192,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if !hasVisibleWindows { window.makeKeyAndOrderFront(nil) }
         return true
     }
+
+    /// The toolbar is empty: in full screen it goes with the menu bar, rather
+    /// than stay as a blank strip across the top of the page.
+    func window(_ window: NSWindow, willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions = []) -> NSApplication.PresentationOptions {
+        proposedOptions.union(.autoHideToolbar)
+    }
+
+    // Pages don't hear the window is covered while macOS animates it in or out
+    // of full screen, or their videos would pause for it, until it is in view
+    // again: the animation ends a moment before the window says so.
+    private var settling = false
+
+    func windowWillEnterFullScreen(_ notification: Notification) { pages(hearCovered: false) }
+    func windowWillExitFullScreen(_ notification: Notification) { pages(hearCovered: false) }
+    func windowDidEnterFullScreen(_ notification: Notification) { settle() }
+    func windowDidExitFullScreen(_ notification: Notification) { settle() }
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) { settle() }
+    func windowDidFailToExitFullScreen(_ window: NSWindow) { settle() }
+
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        guard settling, window.occlusionState.contains(.visible) else { return }
+        settling = false
+        pages(hearCovered: true)
+    }
+
+    private func settle() {
+        settling = true
+        windowDidChangeOcclusionState(Notification(name: NSWindow.didChangeOcclusionStateNotification))
+    }
+
+    private func pages(hearCovered: Bool) {
+        for tab in browser.tabs { tab.page?.hearsWindowCovered(hearCovered) }
+    }
 }

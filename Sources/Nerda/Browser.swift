@@ -8,11 +8,20 @@ import WebKit
 final class Browser: NSObject {
     private(set) var tabs: [Tab] = []
     var selectedID: Tab.ID? {
-        didSet { tabs.first { $0.id == oldValue }?.lastSeen = .now }
+        didSet {
+            tabs.first { $0.id == oldValue }?.lastSeen = .now
+            // As in Chrome, going to another tab takes the page out of full screen.
+            if selectedID != oldValue { exitPageFullscreen() }
+        }
     }
     var sidebarOpen = true
     /// Open at launch too: there are no tabs until you say where to go.
-    var commandBarOpen = true
+    var commandBarOpen = true {
+        didSet { if commandBarOpen { exitPageFullscreen() } }
+    }
+    /// The tab whose page shows one of its elements (a video) over the whole
+    /// window, as it asked to. Always the one on screen.
+    private(set) var fullscreenTab: Tab.ID?
     /// This session's downloads, newest first.
     private(set) var downloads: [Download] = []
     /// Find in page (⌘F): the bar, what it looks for, and whether the last look found it.
@@ -116,6 +125,29 @@ final class Browser: NSObject {
             let found = (try? await page.find(query, configuration: configuration))?.matchFound ?? false
             if query == findQuery { findMissing = !found }
         }
+    }
+
+    /// A page going full screen, or coming back. Only the page on screen, and
+    /// only straight after a click or key press: the page checks that too, but
+    /// it could be got round there.
+    func page(_ page: WKWebView, wantsFullscreen: Bool) {
+        guard let tab = tab(for: page) else { return }
+        guard wantsFullscreen else {
+            if fullscreenTab == tab.id { fullscreenTab = nil }
+            return
+        }
+        let sinceInput = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+        guard tab.id == selectedID, !commandBarOpen, sinceInput < 1 else {
+            page.evaluateJavaScript(Fullscreen.exit)
+            return
+        }
+        fullscreenTab = tab.id
+    }
+
+    func exitPageFullscreen() {
+        guard let id = fullscreenTab else { return }
+        fullscreenTab = nil
+        tabs.first { $0.id == id }?.page?.evaluateJavaScript(Fullscreen.exit)
     }
 
     func clearDownloads() {
@@ -264,6 +296,8 @@ extension Browser: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         retried = nil
         tab(for: webView)?.failure = nil
+        // A new document has nothing on show.
+        if let tab = tab(for: webView), fullscreenTab == tab.id { fullscreenTab = nil }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -283,6 +317,7 @@ extension Browser: WKNavigationDelegate {
     // ponytail: reloads every time; a page that crashes on load will keep
     // reloading. Count crashes and show a failure once it repeats.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        if let tab = tab(for: webView), fullscreenTab == tab.id { fullscreenTab = nil }
         webView.reload()
     }
 }

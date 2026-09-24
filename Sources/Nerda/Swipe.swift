@@ -36,6 +36,11 @@ final class SwipingWebView: WKWebView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Esc the page had no use for. AppKit would take a full-screen window out
+    /// of full screen for it; browsers don't (a page's video is taken out by
+    /// the page, see Fullscreen), so it goes no further.
+    override func cancelOperation(_ sender: Any?) {}
+
     override func scrollWheel(with event: NSEvent) {
         super.scrollWheel(with: event)
         // A mouse wheel, or the glide after the fingers lift, doesn't swipe.

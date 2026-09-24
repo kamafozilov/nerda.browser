@@ -27,3 +27,4 @@ Namuna: [driceroland/Search](https://github.com/driceroland/Search) (MIT) — o'
 
 - Kengaytmalar Safari darajasida: MV3'da `webRequest` ishlamaydi; ba'zilari (masalan Vimium C) ochilmaydi.
 - DRM: faqat FairPlay (Netflix va h.k. Safari'dagidek).
+- Fullscreen: Chrome'dagidek oynaning o'zida (WebKit'niki sahifani alohida oynaga ko'chiradi, uni o'chirib bo'lmaydi). Saytning o'z `:fullscreen` CSS qoidalari ishlamaydi; oddiy `<video controls>` tugmasi hali ham WebKit'ning alohida oynasini ochadi. Fullscreen animatsiyasi paytida video to'xtamasligi uchun WebKit SPI (`_setWindowOcclusionDetectionEnabled:`) ishlatiladi; u yo'qolsa, video animatsiya paytida yana bir lahza to'xtaydi xolos.

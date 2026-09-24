@@ -196,3 +196,26 @@ func iconsAreKeptPerOrigin(url: String, origin: String?) {
     #expect(browser.selectedID == nil)
     #expect(browser.commandBarOpen)
 }
+
+/// Full screen stays in the page: the element fills it from inside a box
+/// that would trap anything fixed (a transform), and goes back as it was,
+/// with the page where it was, though it scrolled behind in the meantime.
+@MainActor
+@Test func anElementGoesFullScreenInsideThePageAndBack() async throws {
+    let page = Tab().webView
+    page.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+    let html = #"<div style="height: 3000px"></div><div style="transform: scale(1)"><div id="box" style="width: 20px">x</div></div><div style="height: 3000px"></div>"#
+    page.loadHTMLString(html, baseURL: somewhere)
+    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    func run(_ script: String) async throws -> Any? { try await page.callAsyncJavaScript(script, contentWorld: .page) }
+
+    let fills = "const r = box.getBoundingClientRect(); return r.width === innerWidth && r.height === innerHeight"
+    _ = try await run("scrollTo(0, 2800); await box.requestFullscreen()")
+    #expect(try await run("return document.fullscreenElement === box") as? Bool == true)
+    #expect(try await run(fills) as? Bool == true)
+
+    _ = try await run("scrollTo(0, 4000); await document.exitFullscreen()")
+    #expect(try await run("return document.fullscreenElement === null") as? Bool == true)
+    #expect(try await run(fills) as? Bool == false)
+    #expect(try await run("return scrollY") as? Int == 2800)
+}

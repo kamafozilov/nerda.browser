@@ -169,7 +169,11 @@ final class Tab: Identifiable {
     private static var configuration: WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
         configuration.applicationNameForUserAgent = applicationName
+        // WebKit's full screen, under our own (see Fullscreen). Pages a page
+        // opens (popups) are given this configuration's, script and all.
         configuration.preferences.isElementFullscreenEnabled = true
+        configuration.userContentController.addUserScript(Fullscreen.script)
+        configuration.userContentController.add(Fullscreen.messages, contentWorld: .page, name: "fullscreen")
         return configuration
     }
 
