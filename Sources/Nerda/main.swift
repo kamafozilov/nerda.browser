@@ -151,9 +151,12 @@ struct BrowserView: View {
                 coveredLeading: PageView.canBeCovered ? room : 0
             )
             if let failure = browser.selected?.failure {
+                // Switched in with the tab, as the page is: faded, it would
+                // show the blank page under it, and linger over the next.
                 PageFailure(message: failure.message)
                     .padding(.leading, PageView.canBeCovered ? room : 0)
                     .background(Palette.ground)
+                    .transition(.identity)
             }
         }
         .overlay(alignment: .topTrailing) {
