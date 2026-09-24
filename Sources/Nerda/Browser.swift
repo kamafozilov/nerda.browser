@@ -28,6 +28,8 @@ final class Browser: NSObject {
     static let sleepAfter: TimeInterval = 30 * 60
     @ObservationIgnored private var sleepTimer: Timer?
     @ObservationIgnored private var memoryPressure: (any DispatchSourceMemoryPressure)?
+    /// The address last loaded again for a redirect WebKit lost, so it is only tried once.
+    @ObservationIgnored private var retried: URL?
 
     var selected: Tab? { tabs.first { $0.id == selectedID } }
 
@@ -228,6 +230,16 @@ extension Browser: WKNavigationDelegate {
 
     /// What a page can't show (a zip), or is told to save (an attachment), is downloaded.
     func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+        // A WebKit bug: a redirect onto a page its service worker serves
+        // (youtube.com to www.youtube.com, once visited) comes with no response
+        // at all, which would load blank or be saved as a file. Going to the new
+        // address directly works, so that is done instead, once.
+        if response.response.url == nil {
+            guard response.isForMainFrame, let url = webView.url, url != retried else { return .cancel }
+            retried = url
+            Task { webView.load(URLRequest(url: url)) }
+            return .cancel
+        }
         let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
         return response.canShowMIMEType && !disposition.lowercased().hasPrefix("attachment") ? .allow : .download
     }
@@ -250,6 +262,7 @@ extension Browser: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        retried = nil
         tab(for: webView)?.failure = nil
     }
 
