@@ -296,6 +296,7 @@ extension Browser: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         retried = nil
         tab(for: webView)?.failure = nil
+        tab(for: webView)?.recordVisit()
         // A new document has nothing on show.
         if let tab = tab(for: webView), fullscreenTab == tab.id { fullscreenTab = nil }
     }

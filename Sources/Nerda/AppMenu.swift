@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 /// The menu bar. Besides listing what the app can do, it is how the standard
 /// shortcuts work at all: ⌘A, ⌘C, ⌘V, ⌘Z and the rest are the Edit menu's
@@ -28,6 +29,10 @@ final class AppMenu: NSObject {
             return item
         })
         let servicesMenu = submenu("Services", [])
+        let historyMenu = submenu("History", [
+            item("Back", #selector(goBack), "[", target: self),
+            item("Forward", #selector(goForward), "]", target: self),
+        ])
 
         let bar = NSMenu()
         bar.items = [
@@ -75,12 +80,10 @@ final class AppMenu: NSObject {
                 zoom("Zoom Out", -1, "-"),
                 zoom("Actual Size", 0, "0"),
             ]),
-            submenu("History", [
-                item("Back", #selector(goBack), "[", target: self),
-                item("Forward", #selector(goForward), "]", target: self),
-            ]),
+            historyMenu,
             windowMenu,
         ]
+        historyMenu.submenu?.delegate = self
         NSApp.mainMenu = bar
         NSApp.windowsMenu = windowMenu.submenu
         NSApp.servicesMenu = servicesMenu.submenu
@@ -110,6 +113,21 @@ final class AppMenu: NSObject {
         let item = item(title, #selector(zoom(_:)), key, target: self)
         item.tag = step
         return item
+    }
+
+    @objc private func openVisit(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        if browser.commandBarOpen { browser.hideCommandBar() }
+        withAnimation(.slide) { browser.open(url) }
+    }
+
+    @objc private func clearHistory() {
+        let alert = NSAlert()
+        alert.messageText = "Clear all history?"
+        alert.informativeText = "The pages you visited will no longer be suggested as you type. Open tabs stay as they are."
+        alert.addButton(withTitle: "Clear History")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn { History.shared.clear() }
     }
 
     @objc private func showFind() { browser.showFindBar() }
@@ -167,9 +185,31 @@ extension AppMenu: NSMenuItemValidation {
             return browser.selected?.webView.canGoBack == true
         case #selector(goForward):
             return browser.selected?.webView.canGoForward == true
+        case #selector(clearHistory):
+            return !History.shared.visits.isEmpty
         default:
             return true
         }
+    }
+}
+
+extension AppMenu: NSMenuDelegate {
+    /// Under Back and Forward, the pages visited last, as Safari lists them;
+    /// each opens in a tab of its own.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        while menu.items.count > 2 { menu.removeItem(at: 2) }
+        menu.addItem(.separator())
+        for visit in History.shared.recent(15) {
+            let title = visit.title.isEmpty ? visit.url.absoluteString : visit.title
+            let item = item(title.count > 60 ? title.prefix(59) + "…" : title, #selector(openVisit(_:)), target: self)
+            item.representedObject = visit.url
+            if let icon = Favicons.origin(of: visit.url).flatMap({ Favicons.shared.images[$0] }) {
+                item.image = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { icon.draw(in: $0); return true }
+            }
+            menu.addItem(item)
+        }
+        if menu.items.count > 3 { menu.addItem(.separator()) }
+        menu.addItem(item("Clear History…", #selector(clearHistory), target: self))
     }
 }
 

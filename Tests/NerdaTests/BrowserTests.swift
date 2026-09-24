@@ -219,3 +219,139 @@ func iconsAreKeptPerOrigin(url: String, origin: String?) {
     #expect(try await run(fills) as? Bool == false)
     #expect(try await run("return scrollY") as? Int == 2800)
 }
+
+// MARK: - Session
+
+private func temporaryFolder() throws -> URL {
+    let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    return folder
+}
+
+/// Waits for the tab's page to have loaded `url`.
+@MainActor
+private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
+    for _ in 0..<200 {
+        if tab.webView.url == url, !tab.webView.isLoading { return }
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    Issue.record("never got to \(url)")
+}
+
+// MARK: - History
+
+@MainActor
+@Test func sitesAreSuggestedByTheStartOfTheirName() {
+    let history = History()
+    let now = Date.now
+    for _ in 1...5 { history.visit(URL(string: "https://www.youtube.com/")!, title: "YouTube", at: now) }
+    history.visit(URL(string: "https://www.youtube.com/watch?v=1")!, title: "A video", at: now)
+    history.visit(URL(string: "https://yoga.example/poses")!, title: "Poses", at: now)
+    history.visit(URL(string: "file:///tmp/notes.html")!, title: "Notes", at: now)
+    history.visit(URL(string: "http://localhost:3000/app")!, title: "", at: now)
+
+    let yo = history.sites(startingWith: "yo", now: now)
+    #expect(yo.map(\.url.absoluteString) == ["https://www.youtube.com/", "https://yoga.example/"])
+    #expect(yo[0].title == "YouTube")
+    #expect(yo[1].title == "")  // its front page was never visited
+    #expect(history.sites(startingWith: "www.you", now: now).first?.url.host() == "www.youtube.com")
+    #expect(history.sites(startingWith: "localhost:3", now: now).first?.url.absoluteString == "http://localhost:3000/")
+    #expect(history.sites(startingWith: "outube", now: now).isEmpty)
+    #expect(history.visits.count == 4)  // not the file
+}
+
+/// Visited often long ago counts for less than a few times lately.
+@MainActor
+@Test func recentVisitsCountForMore() {
+    let history = History()
+    let now = Date.now
+    for _ in 1...10 { history.visit(URL(string: "https://github.com/")!, title: "", at: now.addingTimeInterval(-60 * 86400)) }
+    for _ in 1...3 { history.visit(URL(string: "https://gitlab.com/")!, title: "", at: now) }
+    #expect(history.sites(startingWith: "git", now: now).map(\.url.host) == ["gitlab.com", "github.com"])
+}
+
+@MainActor
+@Test func pagesAreFoundByAnyWordsOfTheirTitleOrAddress() {
+    let history = History()
+    history.visit(URL(string: "https://docs.swift.org/swift-book/")!, title: "The Swift Programming Language")
+    history.visit(URL(string: "https://example.com/")!, title: "Example")
+    history.name(URL(string: "https://example.com/")!, "Example Domain")
+    #expect(history.pages(matching: "swift language").map(\.url.host) == ["docs.swift.org"])
+    #expect(history.pages(matching: "swift-book").count == 1)
+    #expect(history.pages(matching: "domain").first?.title == "Example Domain")
+    #expect(history.pages(matching: "swift nothing").isEmpty)
+}
+
+@MainActor
+@Test func historyIsKeptBetweenLaunchesButNotForever() throws {
+    let folder = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appending(path: "history.json")
+    let history = History()
+    history.load(from: file)
+    history.visit(URL(string: "https://old.example/")!, title: "Old", at: .now.addingTimeInterval(-100 * 86400))
+    history.visit(URL(string: "https://new.example/")!, title: "New")
+    history.save()
+
+    let next = History()
+    next.load(from: file)
+    #expect(next.visits.keys.map(\.host) == ["new.example"])
+    #expect(next.recent(5).first?.title == "New")
+}
+
+/// Typing the start of a site you go to makes it what Enter opens; the
+/// search for what was typed comes right after.
+@MainActor
+@Test func typingTheStartOfASiteYouVisitGoesThere() {
+    let history = History()
+    for _ in 1...3 { history.visit(URL(string: "https://www.youtube.com/")!, title: "YouTube") }
+    history.visit(URL(string: "https://www.youtube.com/watch?v=1")!, title: "Swift in 100 seconds")
+
+    let yo = CommandBar.suggestions(for: "yo", guesses: ["yoga", "yo"], history: history)
+    #expect(yo.map(\.url.absoluteString) == [
+        "https://www.youtube.com/",
+        "https://www.google.com/search?q=yo",
+        "https://www.youtube.com/watch?v=1",
+        "https://www.google.com/search?q=yoga",
+    ])
+    // Not from the middle of a word.
+    #expect(CommandBar.suggestions(for: "tube", guesses: [], history: history).count == 1)
+
+    // Typed out in full, the site is there once, not twice.
+    #expect(CommandBar.suggestions(for: "youtube.com", guesses: [], history: history).map(\.url.absoluteString)
+        == ["https://www.youtube.com/", "https://www.youtube.com/watch?v=1"])
+    // Words are a search first, with the pages that match them after.
+    #expect(CommandBar.suggestions(for: "swift seconds", guesses: [], history: history).map(\.url.absoluteString) == [
+        "https://www.google.com/search?q=swift%20seconds",
+        "https://www.youtube.com/watch?v=1",
+    ])
+    // Nothing typed: the sites you go to.
+    #expect(CommandBar.suggestions(for: "", guesses: [], history: history).map(\.title) == ["YouTube"])
+    // Nothing visited: what is typed.
+    #expect(CommandBar.suggestions(for: "yo", guesses: [], history: History()).count == 1)
+}
+
+/// A page is put in history once it is there, including one that changes
+/// its own address (as YouTube does going to a video); an address that fails
+/// to open never is.
+@MainActor
+@Test func visitsAreRecordedOnceThePageIsThere() async throws {
+    let browser = Browser()
+    browser.open(somewhere)
+    let tab = browser.tabs[0]
+    let page = URL(string: "https://example.com/")!
+    try await arrive(tab, at: page)
+    #expect(History.shared.visits[page]?.count ?? 0 > 0)
+    #expect(History.shared.visits[page]?.title == "Example Domain")
+
+    let next = URL(string: "https://example.com/visit-\(UUID().uuidString)")!
+    _ = try await tab.webView.callAsyncJavaScript("history.pushState({}, '', '\(next.path())')", contentWorld: .page)
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(History.shared.visits[next]?.count == 1)
+
+    let refused = URL(string: "http://127.0.0.1:9/")!
+    tab.webView.load(URLRequest(url: refused))
+    for _ in 0..<100 where tab.failure == nil { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(tab.failure != nil)
+    #expect(History.shared.visits[refused] == nil)
+}

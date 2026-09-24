@@ -19,7 +19,7 @@ struct CommandBar: View {
     @State private var searches: [String] = []
     @FocusState private var focused: Bool
 
-    private struct Suggestion: Identifiable {
+    struct Suggestion: Identifiable {
         var id: String { url.absoluteString }
         let title: String
         let detail: String
@@ -28,27 +28,49 @@ struct CommandBar: View {
         var isSearch = false
     }
 
-    // ponytail: a fixed list until there is history to suggest from.
-    private static let topSites: [Suggestion] = [
-        ("YouTube", "youtube.com"),
-        ("Wikipedia", "wikipedia.org"),
-        ("GitHub", "github.com"),
-    ].map { Suggestion(title: $0.0, detail: $0.1, url: URL(string: "https://\($0.1)")!) }
+    private static let maxRows = 10
 
-    private var suggestions: [Suggestion] {
+    /// With nothing typed, the sites you go to most. Typing, what it means
+    /// (a search, or an address), the sites and pages you've been to that
+    /// match it, and Google's guesses.
+    static func suggestions(for query: String, guesses searches: [String], history: History) -> [Suggestion] {
         let text = query.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty, let url = Address.url(from: text) else { return Self.topSites }
+        guard !text.isEmpty, let url = Address.url(from: text) else {
+            return history.sites(startingWith: "").prefix(3).map(Self.suggestion)
+        }
 
         let isSearch = url.host() == "www.google.com" && url.path() == "/search" && !text.contains("google.com")
-        let first = Suggestion(title: text, detail: isSearch ? "Search Google" : "Open", url: url, isSearch: isSearch)
-        let matches = Self.topSites.filter {
-            $0.title.localizedCaseInsensitiveContains(text) || $0.detail.localizedCaseInsensitiveContains(text)
+        let typed = Suggestion(title: text, detail: isSearch ? "Search Google" : "Open", url: url, isSearch: isSearch)
+        // A site of yours whose name starts with what is typed comes first,
+        // for Enter to go to: "yo" is YouTube once you've been there, as in
+        // Chrome. The search for it is right under. Typed out in full, it is
+        // the one row.
+        var rows = [typed]
+        var pagesShown = 4
+        if !text.contains(" "), let site = history.sites(startingWith: text).first {
+            let sameSite = History.site(of: url) == History.site(of: site.url) && (url.path().isEmpty || url.path() == "/")
+            rows = sameSite ? [Self.suggestion(site)] : [Self.suggestion(site), typed]
+            pagesShown = 3
         }
-        let guesses = searches
+        let lead = rows.map(\.url)
+        rows += history.pages(matching: text).lazy.filter { !lead.contains($0.url) }.prefix(pagesShown).map(Self.suggestion)
+        rows += searches
             .filter { $0.caseInsensitiveCompare(text) != .orderedSame }
-            .prefix(6)
             .compactMap { guess in Address.search(guess).map { Suggestion(title: guess, detail: "", url: $0, isSearch: true) } }
-        return [first] + matches.filter { $0.url != url } + guesses
+        return Array(Self.unique(rows).prefix(Self.maxRows))
+    }
+
+    private static func suggestion(_ visit: History.Visit) -> Suggestion {
+        let site = History.site(of: visit.url) ?? visit.url.absoluteString
+        return visit.title.isEmpty
+            ? Suggestion(title: site, detail: "", url: visit.url)
+            : Suggestion(title: visit.title, detail: site, url: visit.url)
+    }
+
+    /// Each address once: a page you've been to may also be what's typed, or one of Google's guesses.
+    private static func unique(_ rows: [Suggestion]) -> [Suggestion] {
+        var seen = Set<URL>()
+        return rows.filter { seen.insert($0.url).inserted }
     }
 
     /// What Enter opens: the row picked, or else, once something is typed, the first.
@@ -57,7 +79,7 @@ struct CommandBar: View {
     }
 
     var body: some View {
-        let rows = suggestions
+        let rows = Self.suggestions(for: query, guesses: searches, history: .shared)
 
         VStack(spacing: 0) {
             HStack(spacing: 12) {

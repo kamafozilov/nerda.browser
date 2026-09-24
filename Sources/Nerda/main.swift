@@ -225,6 +225,7 @@ app.setActivationPolicy(.regular)
 NSWindow.allowsAutomaticWindowTabbing = false
 
 let browser = Browser()
+History.shared.load(from: History.file)
 let menu = AppMenu(browser: browser)
 menu.install()
 

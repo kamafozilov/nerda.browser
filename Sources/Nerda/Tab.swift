@@ -32,6 +32,9 @@ final class Tab: Identifiable {
     /// was scrolled to, and its zoom.
     @ObservationIgnored private var slept: (state: Any?, zoom: CGFloat)?
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
+    /// The address last put in history, so a page is counted once per visit,
+    /// not again when it wakes or reloads.
+    @ObservationIgnored private var recorded: URL?
 
     /// The page, woken first if the tab was asleep.
     var webView: WKWebView { page ?? wake() }
@@ -73,9 +76,16 @@ final class Tab: Identifiable {
             page.observe(\.url) { [weak self] page, _ in
                 // nil while a first load fails; the address typed is still the tab's.
                 MainActor.assumeIsolated { if let url = page.url { self?.url = url } }
+                // A page that changes its address itself (YouTube going to a
+                // video) never loads anew: that is a visit too. Asked once the
+                // page has caught up, as WebKit tells of the address first.
+                DispatchQueue.main.async { self?.recordVisit() }
             },
             page.observe(\.title) { [weak self] page, _ in
-                MainActor.assumeIsolated { self?.pageTitle = page.title ?? "" }
+                MainActor.assumeIsolated {
+                    self?.pageTitle = page.title ?? ""
+                    if let url = page.url, let title = page.title { History.shared.name(url, title) }
+                }
             },
             page.observe(\.isLoading) { [weak self] page, _ in
                 MainActor.assumeIsolated { self?.isLoading = page.isLoading }
@@ -107,6 +117,15 @@ final class Tab: Identifiable {
         }
         slept = nil
         return page
+    }
+
+    /// Puts the page's address in history, once it is really there: loaded,
+    /// not just asked for (a mistyped address that fails is not a visit).
+    func recordVisit() {
+        guard let page, let url = page.url, url != recorded,
+              page.backForwardList.currentItem?.url == url else { return }
+        recorded = url
+        History.shared.visit(url, title: page.title ?? "")
     }
 
     /// Reload, or after a failure, another go at the address that failed.
