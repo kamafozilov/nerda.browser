@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 import WebKit
 @testable import Nerda
@@ -34,7 +35,7 @@ private let somewhere = URL(string: "https://example.com")!
 @MainActor
 @Test func closedTabsAreFreed() {
     let browser = Browser()
-    weak var tab: Tab?
+    weak var tab: Nerda.Tab?
     weak var page: WKWebView?
     // As the app's run loop does after every event: WebKit hands things out autoreleased.
     autoreleasepool {
@@ -45,6 +46,58 @@ private let somewhere = URL(string: "https://example.com")!
     }
     #expect(tab == nil)
     #expect(page == nil)
+}
+
+/// …also from the window, where the sidebar's rows showed it.
+@MainActor
+@Test func closedTabsAreFreedFromTheWindow() async throws {
+    let browser = Browser()
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+                          styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = NSHostingView(rootView: BrowserView(browser: browser, window: window))
+    window.orderFront(nil)
+    defer { window.close() }
+    weak var tab: Nerda.Tab?
+    autoreleasepool {
+        browser.open(somewhere)
+        browser.commandBarOpen = false
+        tab = browser.tabs[0]
+    }
+    try await Task.sleep(for: .milliseconds(500))
+    autoreleasepool { withAnimation(.slide) { browser.close(browser.tabs[0].id) } }
+    try await Task.sleep(for: .seconds(1))
+    #expect(tab == nil)
+}
+
+/// A closed tab's page goes quiet at once, even while something still holds it.
+@MainActor
+@Test func closedTabsStopPlaying() async throws {
+    // A second of silence, looped: playing, as far as WebKit is concerned.
+    let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let samples = 8000
+    var wav = Data()
+    func put(_ value: Int, _ size: Int) { withUnsafeBytes(of: UInt32(value).littleEndian) { wav.append(contentsOf: $0.prefix(size)) } }
+    wav.append(contentsOf: "RIFF".utf8); put(36 + samples, 4)
+    wav.append(contentsOf: "WAVEfmt ".utf8); put(16, 4); put(1, 2); put(1, 2); put(8000, 4); put(8000, 4); put(1, 2); put(8, 2)
+    wav.append(contentsOf: "data".utf8); put(samples, 4)
+    wav.append(Data(repeating: 128, count: samples))
+    try wav.write(to: folder.appending(path: "tone.wav"))
+    let page = folder.appending(path: "page.html")
+    try #"<video src="tone.wav" loop autoplay></video>"#.write(to: page, atomically: true, encoding: .utf8)
+
+    let browser = Browser()
+    browser.open(page)
+    let held = browser.tabs[0].webView
+    for _ in 0..<100 where await held.requestMediaPlaybackState() != .playing {
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    #expect(await held.requestMediaPlaybackState() == .playing)
+
+    browser.close(browser.tabs[0].id)
+    #expect(await held.requestMediaPlaybackState() == .suspended)
 }
 
 @MainActor

@@ -7,7 +7,12 @@ import WebKit
 @Observable
 final class Browser: NSObject {
     private(set) var tabs: [Tab] = [] {
-        didSet { sessionChanged() }
+        // However a tab goes, its page goes quiet now, not once the last
+        // reference to it is let go, which something may yet hold on to.
+        didSet {
+            for tab in oldValue where !tabs.contains(where: { $0 === tab }) { tab.silence() }
+            sessionChanged()
+        }
     }
     var selectedID: Tab.ID? {
         didSet {

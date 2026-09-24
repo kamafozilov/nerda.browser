@@ -201,6 +201,15 @@ final class Tab: Identifiable {
         return await page.requestMediaPlaybackState() == .playing
     }
 
+    /// For a closed tab: no more sound or video, and the camera and microphone off,
+    /// for good. Suspended rather than paused, so the page can't start them again.
+    func silence() {
+        guard let page else { return }
+        page.setAllMediaPlaybackSuspended(true)
+        page.setCameraCaptureState(.none)
+        page.setMicrophoneCaptureState(.none)
+    }
+
     /// Once the page is in, and only if /favicon.ico gave nothing: the icon
     /// the page itself names, fetched from inside the page, so it comes with
     /// the page's cookies past checks (Cloudflare's) that turn a bare request away.
