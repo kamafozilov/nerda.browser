@@ -9,7 +9,7 @@ import SwiftUI
 @Observable
 final class Favicons {
     static let shared = Favicons()
-    static let folder = URL.applicationSupportDirectory.appending(path: "Nerda/Favicons")
+    static let folder = Edition.folder.appending(path: "Favicons")
 
     /// Where icons are kept between runs; nil keeps them to this run, as in tests.
     // ponytail: an icon once kept is never fetched again; refresh it on page

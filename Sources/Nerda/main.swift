@@ -313,6 +313,7 @@ Favicons.shared.folder = Favicons.folder
 browser.restore(from: Session.file)
 let menu = AppMenu(browser: browser)
 menu.install()
+if Edition.updates { Updater.shared.start() }
 
 let window = NSWindow(
     contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),

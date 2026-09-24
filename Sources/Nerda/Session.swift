@@ -21,7 +21,7 @@ struct Session: Codable {
     /// Which of them was on screen.
     var selected: Int?
 
-    static let file = URL.applicationSupportDirectory.appending(path: "Nerda/session.json")
+    static let file = Edition.folder.appending(path: "session.json")
 }
 
 extension Browser {

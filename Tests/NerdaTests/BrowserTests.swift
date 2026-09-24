@@ -6,6 +6,17 @@ import WebKit
 
 private let somewhere = URL(string: "https://example.com")!
 
+/// The updater offers a release only when its version is newer, by number
+/// rather than by text: 0.0.10 comes after 0.0.9.
+@Test func releasesAreNewerByNumber() {
+    #expect(Version.isNewer("0.0.2", than: "0.0.1"))
+    #expect(Version.isNewer("0.0.10", than: "0.0.9"))
+    #expect(Version.isNewer("1.0.0", than: "0.9.9"))
+    #expect(Version.isNewer("0.1", than: "0.0.9"))
+    #expect(!Version.isNewer("0.0.1", than: "0.0.1"))
+    #expect(!Version.isNewer("0.0.1", than: "0.0.2"))
+}
+
 @MainActor
 @Test func closingTabsHandsTheScreenOn() {
     let browser = Browser()

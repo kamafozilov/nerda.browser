@@ -1,6 +1,7 @@
 #!/bin/bash
-# Builds and opens the app, then rebuilds and reopens it every time a source
-# file is saved. A build that fails leaves the running app as it was.
+# Builds and opens Nerda Dev, then rebuilds and reopens it every time a source
+# file is saved. A build that fails leaves the running app as it was. The
+# released Nerda, if it is open, is left alone.
 #
 #   ./watch.sh
 set -uo pipefail
@@ -15,10 +16,10 @@ while true; do
     last="$now"
     echo "— building $(date +%T)"
     if ./build.sh debug >/tmp/nerda-build.log 2>&1; then
-      pkill -x Nerda
-      while pgrep -x Nerda >/dev/null; do sleep 0.1; done
+      pkill -x "Nerda Dev"
+      while pgrep -x "Nerda Dev" >/dev/null; do sleep 0.1; done
       # macOS takes a moment to let go of the old one.
-      for _ in 1 2 3 4 5 6 7 8 9 10; do open build/Nerda.app 2>/dev/null && break; sleep 0.3; done
+      for _ in 1 2 3 4 5 6 7 8 9 10; do open "build/Nerda Dev.app" 2>/dev/null && break; sleep 0.3; done
       echo "— opened"
     else
       grep -E "error" /tmp/nerda-build.log || tail -20 /tmp/nerda-build.log

@@ -58,8 +58,8 @@ struct PasswordOffer: Equatable {
 /// one question after such a build, and only once a password is really wanted,
 /// picked or saved.
 actor Vault {
-    static let shared = Vault(service: "Nerda Passwords",
-                              names: URL.applicationSupportDirectory.appending(path: "Nerda/accounts.json"))
+    static let shared = Vault(service: "\(Edition.name) Passwords",
+                              names: Edition.folder.appending(path: "accounts.json"))
 
     /// As kept in the keychain.
     nonisolated struct Login: Codable, Sendable {

@@ -38,6 +38,10 @@ final class AppMenu: NSObject {
         bar.items = [
             submenu("Nerda", [
                 item("About Nerda", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+                // Development builds don't update themselves.
+                Edition.updates
+                    ? item("Check for Updates…", #selector(checkForUpdates), target: self)
+                    : hidden(item("Check for Updates…", #selector(checkForUpdates), target: self)),
                 .separator(),
                 servicesMenu,
                 .separator(),
@@ -122,6 +126,7 @@ final class AppMenu: NSObject {
     }
 
     @objc private func toggleQuitWarning() { QuitConfirmation.isWanted.toggle() }
+    @objc private func checkForUpdates() { Updater.shared.check(asked: true) }
 
     @objc private func openVisit(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }
@@ -193,6 +198,8 @@ extension AppMenu: NSMenuItemValidation {
             return browser.selected?.webView.canGoBack == true
         case #selector(goForward):
             return browser.selected?.webView.canGoForward == true
+        case #selector(checkForUpdates):
+            return Updater.shared.state == .idle
         case #selector(toggleQuitWarning):
             item.state = QuitConfirmation.isWanted ? .on : .off
             return true
@@ -250,7 +257,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // With no tabs there is nothing to lose.
-        guard QuitConfirmation.isWanted, !browser.tabs.isEmpty, !QuitConfirmation.systemIsQuitting else {
+        guard QuitConfirmation.isWanted, !browser.tabs.isEmpty, !QuitConfirmation.systemIsQuitting,
+              !Updater.shared.relaunching
+        else {
             return .terminateNow
         }
         switch QuitConfirmation.ask() {

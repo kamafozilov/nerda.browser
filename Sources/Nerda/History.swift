@@ -7,7 +7,7 @@ import Foundation
 // thousands of pages (a few MB). SQLite if it ever outgrows that.
 final class History {
     static let shared = History()
-    static let file = URL.applicationSupportDirectory.appending(path: "Nerda/history.json")
+    static let file = Edition.folder.appending(path: "history.json")
     private static let keptFor: TimeInterval = 90 * 24 * 60 * 60
     private static let limit = 20_000
     /// How quickly a visit counts for less: half as much two weeks on.
