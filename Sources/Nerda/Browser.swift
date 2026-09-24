@@ -19,6 +19,8 @@ final class Browser: NSObject {
             tabs.first { $0.id == oldValue }?.lastSeen = .now
             // As in Chrome, going to another tab takes the page out of full screen.
             if selectedID != oldValue { exitPageFullscreen() }
+            // Accounts listed under a box of the tab left behind.
+            if selectedID != oldValue { passwordChoices = nil }
             sessionChanged()
         }
     }
@@ -40,6 +42,15 @@ final class Browser: NSObject {
     private(set) var findMissing = false
     /// Counts ⌘Fs, so one with the bar already open still puts the keyboard in it.
     var findRequests = 0
+    /// The saved accounts listed under the sign-in box the caret is in, and a
+    /// sign-in's password offered to keep (see Passwords).
+    var passwordChoices: PasswordChoices?
+    var passwordOffer: PasswordOffer?
+    /// Counts what changes the list, so an answer from the keychain that
+    /// comes after the caret has moved on is let go.
+    @ObservationIgnored var choicesAsked = 0
+    /// Where passwords are kept; tests give theirs a store of its own.
+    @ObservationIgnored var vault = Vault.shared
 
     /// How long a tab can go unseen before it sleeps.
     // ponytail: fixed; a setting once there are settings. Edge's default is 2 hours,
@@ -134,6 +145,7 @@ final class Browser: NSObject {
     func close(_ id: Tab.ID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let closed = tabs.remove(at: index)
+        if passwordOffer?.tab == id { passwordOffer = nil }
         if selectedID == id {
             let opener = tabs.first { $0 === closed.opener }
             selectedID = opener?.id ?? (tabs.indices.contains(index) ? tabs[index].id : tabs.last?.id)
@@ -206,7 +218,7 @@ final class Browser: NSObject {
         downloads.removeAll { $0.state != .running }
     }
 
-    private func tab(for webView: WKWebView) -> Tab? {
+    func tab(for webView: WKWebView) -> Tab? {
         tabs.first { $0.page === webView }
     }
 }
@@ -349,12 +361,14 @@ extension Browser: WKNavigationDelegate {
         retried = nil
         tab(for: webView)?.failure = nil
         tab(for: webView)?.recordVisit()
+        if let tab = tab(for: webView) { hideChoices(on: tab) }
         // A new document has nothing on show.
         if let tab = tab(for: webView), fullscreenTab == tab.id { fullscreenTab = nil }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         tab(for: webView)?.pageDidLoad()
+        if let tab = tab(for: webView) { signInLanded(on: tab) }
         sessionChanged()
     }
 

@@ -42,6 +42,10 @@ final class Tab: Identifiable {
     @ObservationIgnored private var recorded: URL?
     /// When the page's process last died, to tell a page that keeps crashing.
     @ObservationIgnored var crashed: Date?
+    /// A password the page just sent, until it is known whether it got in.
+    @ObservationIgnored var signIn: SentSignIn?
+    /// A name sent on its own, for the password step that comes after it.
+    @ObservationIgnored var nameSent: (host: String, user: String, at: Date)?
 
     /// The page, woken first if the tab was asleep.
     var webView: WKWebView { page ?? wake() }
@@ -243,6 +247,7 @@ final class Tab: Identifiable {
         configuration.preferences.isElementFullscreenEnabled = true
         configuration.userContentController.addUserScript(Fullscreen.script)
         configuration.userContentController.add(Fullscreen.messages, contentWorld: .page, name: "fullscreen")
+        Passwords.install(in: configuration.userContentController)
         return configuration
     }
 

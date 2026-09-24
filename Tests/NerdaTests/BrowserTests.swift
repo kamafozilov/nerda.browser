@@ -697,3 +697,41 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     #expect(mark.isGrey && mark.isMark)
     #expect(Tint(icon([.white])) == nil)
 }
+
+// MARK: - Passwords
+
+/// A site's accounts are offered across its subdomains, its own host's
+/// first, and never on another site: not one next door on a shared host, a
+/// country's second level, or an address.
+@Test func savedPasswordsBelongToTheirSite() {
+    let accounts = [
+        Account(host: "example.com", user: "a"),
+        Account(host: "login.example.com", user: "b"),
+        Account(host: "other.com", user: "c"),
+        Account(host: "alice.github.io", user: "d"),
+        Account(host: "shop.co.uz", user: "e"),
+        Account(host: "10.0.0.1", user: "f"),
+    ]
+    #expect(Site.matching(accounts, "WWW.Login.Example.com").map(\.user) == ["b", "a"])
+    #expect(Site.matching(accounts, "bob.github.io").isEmpty)
+    #expect(Site.matching(accounts, "bank.co.uz").isEmpty)
+    #expect(Site.matching(accounts, "mail.shop.co.uz").map(\.user) == ["e"])
+    #expect(Site.matching(accounts, "10.0.0.2").isEmpty)
+}
+
+/// Exports as Passwords and Chrome write them: quoted fields with commas,
+/// quotes and line breaks, a byte-order mark, and rows with nothing to keep.
+@Test func exportedPasswordsAreReadIn() {
+    let apple = "\u{FEFF}Title,URL,Username,Password,Notes,OTPAuth\r\n"
+        + "Google,https://accounts.google.com/,kama@gmail.com,\"p,a\"\"ss\",\"two\nlines\",\r\n"
+        + "App,,someone,secret,,\r\n"
+        + "Bank,www.bank.uz,me,,,\r\n"
+    let logins = PasswordsFile.logins(in: apple)
+    #expect(logins.count == 1)
+    #expect(logins.first?.0 == Account(host: "accounts.google.com", user: "kama@gmail.com"))
+    #expect(logins.first?.1 == "p,a\"ss")
+
+    let chrome = "name,url,username,password,note\nx.com,https://www.x.com/login,kama,hunter2,\n"
+    #expect(PasswordsFile.logins(in: chrome).first.map { [$0.0.host, $0.0.user, $0.1] } == ["x.com", "kama", "hunter2"])
+    #expect(PasswordsFile.logins(in: "a,b\n1,2\n").isEmpty)
+}

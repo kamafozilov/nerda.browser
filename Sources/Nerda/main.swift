@@ -166,6 +166,20 @@ struct BrowserView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        .overlay(alignment: .top) {
+            if let offer = browser.passwordOffer, offer.tab == browser.selectedID {
+                PasswordOfferBar(browser: browser, offer: offer)
+                    .padding(.top, 12)
+                    .padding(.leading, PageView.canBeCovered ? room : 0)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if let choices = browser.passwordChoices, choices.tab == browser.selectedID, !browser.commandBarOpen {
+                PasswordChoicesView(browser: browser, choices: choices)
+                    .offset(x: (PageView.canBeCovered ? room : 0) + choices.spot.minX, y: choices.spot.maxY + 4)
+            }
+        }
     }
 }
 

@@ -16,7 +16,7 @@ Reference: [driceroland/Search](https://github.com/driceroland/Search) (MIT). We
 | 8 | Ad blocking | `WKContentRuleList` | Runs in WebKit's network layer, no JS cost |
 | 9 | RAM | Put unused tabs to sleep (the web view is destroyed, a snapshot stays); sooner under memory pressure. Pinned tabs never sleep and load right away at launch | 100–300 MB per tab is the main cost |
 | 10 | Storage | JSON files, in one folder | No server, no account |
-| 11 | Passwords | macOS Keychain | Built into the system |
+| 11 | Passwords | Nerda's own store: the passwords are one item in the login keychain (`Nerda Passwords`), the site and user names they go with are `accounts.json` beside the history; those in Passwords/Safari come in once from a CSV via File › Import Passwords… | Safari's passwords sit behind an Apple entitlement; macOS (AMFI launch constraint) won't start the iCloud Passwords helper from Nerda. The keychain asks again after every build without a Team ID: as one item, and with the names outside it, that is one question, and only once a password is picked or saved, never for listing accounts |
 | 12 | External dependencies | None, Apple frameworks only | |
 | 13 | Codebase | Written from scratch; needed parts (e.g. `Crx.swift`, `ExtensionShims.swift`) are taken from Search, with the MIT license text | The structure should be our own |
 | 14 | Tools | Xcode (Instruments, debugger), `swift format` (in the toolchain) | Command Line Tools are enough to build |
@@ -28,3 +28,4 @@ Reference: [driceroland/Search](https://github.com/driceroland/Search) (MIT). We
 - Extensions at Safari's level: `webRequest` doesn't work in MV3; some (e.g. Vimium C) don't open.
 - DRM: FairPlay only (Netflix etc. as in Safari).
 - Full screen: inside the window, as in Chrome (WebKit's own moves the page into a separate window and can't be turned off). A site's own `:fullscreen` CSS rules don't apply; the button of a plain `<video controls>` still opens WebKit's separate window. WebKit SPI (`_setWindowOcclusionDetectionEnabled:`) keeps video playing during the full-screen animation; should it go away, video only pauses for a moment during the animation again.
+- Passwords: only in the page's own frame (not in sign-ins inside another site's iframe). No passkeys (they need Apple's browser entitlement and a Developer ID). Without an Apple Development certificate (Team ID), macOS asks for the login password once after each new build, the first time a password is picked or saved; `build.sh` uses the certificate by itself when there is one.

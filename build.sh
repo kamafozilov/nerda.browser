@@ -59,6 +59,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signature: enough to run on this Mac, not to hand to anyone else.
-codesign --force --sign - "$APP"
+# Signed with an Apple Development certificate when this Mac has one (Xcode ›
+# Settings › Accounts, any Apple ID, free): the keychain then knows every
+# build as the same app, by its team, and hands over saved passwords without
+# asking. Otherwise ad-hoc, which is enough to run on this Mac, but each build
+# is a new app to the keychain, and the first one to need the passwords asks
+# once for the login password.
+IDENTITY="$(security find-identity -v -p codesigning | grep -o '"Apple Development: [^"]*"' | head -1 | tr -d '"' || true)"
+codesign --force --sign "${IDENTITY:--}" "$APP"
 echo "$APP"

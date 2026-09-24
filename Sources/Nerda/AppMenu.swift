@@ -52,6 +52,8 @@ final class AppMenu: NSObject {
                 item("New Tab", #selector(newTab), "t", target: self),
                 item("Close Tab", #selector(closeTab), "w", target: self),
                 item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]),
+                .separator(),
+                item("Import Passwords…", #selector(importPasswords), target: self),
             ]),
             submenu("Edit", [
                 item("Undo", Selector(("undo:")), "z"),
@@ -109,6 +111,7 @@ final class AppMenu: NSObject {
     @objc private func selectTab(_ sender: NSMenuItem) { browser.selectTab(number: sender.tag) }
     @objc private func nextTab() { browser.selectTab(after: 1) }
     @objc private func previousTab() { browser.selectTab(after: -1) }
+    @objc private func importPasswords() { browser.importPasswords() }
 
     private func zoom(_ title: String, _ step: Int, _ key: String) -> NSMenuItem {
         let item = item(title, #selector(zoom(_:)), key, target: self)
