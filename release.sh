@@ -1,0 +1,139 @@
+#!/bin/bash
+# Publishes a version of Nerda: what CHANGELOG.md has under [Unreleased]
+# becomes that version's section, a v-tag marks the commit, and a GitHub
+# Release carries Nerda.dmg (to install from) and Nerda.zip (what an
+# installed Nerda updates itself from), with the section as its notes. Both
+# are signed with Developer ID, notarized by Apple and stapled, so they open
+# on any Mac without a warning.
+#
+#   ./release.sh          the next patch after the latest tag: 0.0.1, 0.0.2, …
+#   ./release.sh 1.0.0    a version of your choosing
+#
+# docs/releasing.md has the whole process.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+REPO="kamafozilov/nerda.browser"
+# Every release is signed by one team: an installed Nerda takes an update
+# only from the team that signed it (Updater.swift), so it never changes
+# without a manual install for everyone. The team is NERDA_TEAM in
+# release.env, a file of this Mac's kept out of Git.
+[ -f release.env ] && . ./release.env
+TEAM="${NERDA_TEAM:-}"
+# Notarization credentials, kept in the keychain by
+#   xcrun notarytool store-credentials nerda --apple-id <email> --team-id <team>
+PROFILE="${NERDA_NOTARY_PROFILE:-nerda}"
+fail() { echo "release: $*" >&2; exit 1; }
+[ -n "$TEAM" ] || fail "NERDA_TEAM isn't set: put NERDA_TEAM=<team id> in release.env"
+
+LAST="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+if [ $# -ge 1 ]; then
+  VERSION="${1#v}"
+else
+  IFS=. read -r MAJOR MINOR PATCH <<< "${LAST#v}"
+  VERSION="${MAJOR:-0}.${MINOR:-0}.$(( ${PATCH:-0} + 1 ))"
+fi
+TAG="v$VERSION"
+
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$VERSION is not major.minor.patch"
+if [ -n "$LAST" ]; then
+  [ "$VERSION" != "${LAST#v}" ] && [ "$(printf '%s\n' "${LAST#v}" "$VERSION" | sort -V | tail -1)" = "$VERSION" ] \
+    || fail "$VERSION doesn't come after $LAST"
+fi
+command -v gh >/dev/null || fail "needs the GitHub CLI: brew install gh"
+gh auth status >/dev/null 2>&1 || fail "not signed in to GitHub: gh auth login"
+[ "$(git branch --show-current)" = main ] || fail "releases are made from main"
+[ -z "$(git status --porcelain)" ] || fail "commit or stash your changes first"
+git fetch --quiet --tags origin
+[ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || fail "main and origin/main differ: push or pull first"
+! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || fail "$TAG exists already"
+IDENTITY="$(security find-identity -v -p codesigning | grep -o "\"Developer ID Application: [^\"]*($TEAM)\"" | head -1 | tr -d '"' || true)"
+[ -n "$IDENTITY" ] || fail "no Developer ID Application certificate for team $TEAM in the keychain"
+xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1 \
+  || fail "no notarization credentials: xcrun notarytool store-credentials $PROFILE --apple-id <email> --team-id $TEAM"
+
+# What's new: the [Unreleased] section, up to the next section or the links.
+NOTES="$(awk '/^## \[Unreleased\]/ { on = 1; next } /^## \[/ || /^\[[^]]+\]: / { on = 0 } on' CHANGELOG.md | sed '/./,$!d')"
+[ -n "${NOTES//[[:space:]]/}" ] || fail "CHANGELOG.md has nothing under [Unreleased]"
+
+echo "Nerda $VERSION (after ${LAST:-nothing}):"
+echo
+echo "$NOTES"
+echo
+read -r -p "Build and publish $TAG? [y/N] " ANSWER
+[ "$ANSWER" = y ] || [ "$ANSWER" = Y ] || fail "stopped"
+
+NERDA_VERSION="$VERSION" NERDA_SIGN_IDENTITY="$IDENTITY" ./build.sh release
+APP="build/Nerda.app"
+codesign --verify --strict --deep "$APP" || fail "$APP's signature doesn't hold"
+SIGNED="$(codesign -dvv "$APP" 2>&1)"
+grep -q "^TeamIdentifier=$TEAM$" <<< "$SIGNED" || fail "$APP isn't signed by team $TEAM"
+grep -q "flags=.*runtime" <<< "$SIGNED" || fail "$APP isn't signed with the hardened runtime"
+
+# Sends a file to Apple and waits for the verdict; the log says why when it
+# isn't Accepted.
+notarize() {
+  local result id status
+  result="$(xcrun notarytool submit "$1" --keychain-profile "$PROFILE" --wait --output-format json)" || true
+  id="$(plutil -extract id raw - <<< "$result" 2>/dev/null || true)"
+  status="$(plutil -extract status raw - <<< "$result" 2>/dev/null || true)"
+  if [ "$status" != Accepted ]; then
+    [ -n "$id" ] && xcrun notarytool log "$id" --keychain-profile "$PROFILE" >&2
+    fail "Apple didn't notarize $1: ${status:-no answer}"
+  fi
+  echo "notarized: $1 ($id)"
+}
+
+ZIP="build/Nerda.zip"
+DMG="build/Nerda.dmg"
+rm -f "$ZIP" "$DMG"
+# The app first, its ticket stapled in, so it opens offline too; the ZIP the
+# updater fetches is made again from the stapled app.
+ditto -c -k --keepParent "$APP" "$ZIP"
+notarize "$ZIP"
+xcrun stapler staple -q "$APP"
+rm "$ZIP"
+ditto -c -k --keepParent "$APP" "$ZIP"
+# The disk image: the stapled app beside a shortcut to Applications, to drag
+# it onto; signed, notarized and stapled itself.
+STAGE="$(mktemp -d)"
+ditto "$APP" "$STAGE/Nerda.app"
+ln -s /Applications "$STAGE/Applications"
+hdiutil create -volname "Nerda $VERSION" -srcfolder "$STAGE" -ov -format UDZO -quiet "$DMG"
+rm -rf "$STAGE"
+codesign --timestamp --sign "$IDENTITY" "$DMG"
+notarize "$DMG"
+xcrun stapler staple -q "$DMG"
+# What a Mac that downloaded them checks: both tickets, and Gatekeeper's verdict.
+xcrun stapler validate -q "$APP" && xcrun stapler validate -q "$DMG" || fail "a ticket isn't stapled"
+spctl --assess --type execute "$APP" || fail "Gatekeeper refuses $APP"
+spctl --assess --type open --context context:primary-signature "$DMG" || fail "Gatekeeper refuses $DMG"
+printf '%s\n' "$NOTES" > build/notes.md
+
+# The section gets its version and date under a new, empty [Unreleased], and
+# the links at the bottom compare each version with the one before.
+URL="https://github.com/$REPO"
+SINCE="${LAST:-}"
+awk -v v="$VERSION" -v d="$(date +%Y-%m-%d)" -v url="$URL" -v last="$SINCE" '
+  /^## \[Unreleased\]/ { print; print ""; print "## [" v "] - " d; next }
+  /^\[Unreleased\]: / {
+    print "[Unreleased]: " url "/compare/v" v "...HEAD"
+    if (last == "") print "[" v "]: " url "/releases/tag/v" v
+    else print "[" v "]: " url "/compare/" last "...v" v
+    next
+  }
+  { print }
+' CHANGELOG.md > build/CHANGELOG.md
+mv build/CHANGELOG.md CHANGELOG.md
+
+git add CHANGELOG.md
+git commit --quiet -m "chore(release): $TAG"
+git tag -a "$TAG" -m "Nerda $VERSION"
+git push --quiet origin main "$TAG"
+
+# Not a pre-release, even below 1.0.0: the updater reads the latest release,
+# and GitHub leaves pre-releases out of it.
+gh release create "$TAG" "$DMG" "$ZIP" --repo "$REPO" --title "Nerda $VERSION" \
+  --notes-file build/notes.md --latest \
+  || fail "$TAG is pushed but the release isn't made; again with: gh release create $TAG $DMG $ZIP --repo $REPO --title 'Nerda $VERSION' --notes-file build/notes.md --latest"
+echo "released: $URL/releases/tag/$TAG"

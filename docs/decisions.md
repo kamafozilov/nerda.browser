@@ -22,6 +22,10 @@ Reference: [driceroland/Search](https://github.com/driceroland/Search) (MIT). We
 | 14 | Tools | Xcode (Instruments, debugger), `swift format` (in the toolchain) | Command Line Tools are enough to build |
 | 15 | Entry point | AppKit (`NSApplication`, `main.swift`); SwiftUI views through `NSHostingView` | Full control over windows; a SwiftUI `App` always requires some Scene |
 | 16 | Concurrency | Swift 6, default isolation `MainActor` | AppKit and WebKit are on the main thread anyway; background work is marked explicitly |
+| 17 | Versions | SemVer tags `vX.Y.Z`; 0.0.x, one patch step per release, until the public launch as 1.0.0; `CHANGELOG.md` in Keep a Changelog form | See [releasing.md](releasing.md) |
+| 18 | Dev and release | Nerda Dev (debug) is a separate app: its own bundle id, data folder and keychain item (`Edition.swift`, `build.sh`) | Working on Nerda must not touch the data of the Nerda in use |
+| 19 | Updates | Our own updater (`Updater.swift`, after Search's): GitHub Releases carry the DMG and a ZIP; a newer ZIP is checked by SHA-256, bundle id, version and signing team, then swapped in | No framework (#12): Sparkle would add a framework, an EdDSA key and a copy step to build.sh, for what about 300 lines do |
+| 20 | Signing | Releases: Developer ID Application, one fixed team (`NERDA_TEAM` in the untracked `release.env`), hardened runtime, notarized and stapled, universal (arm64 + x86_64). Development: the Apple Development certificate, as before | Opens on any Mac without warnings; the team is fixed because the updater only accepts its own |
 
 ## Known limitations
 
