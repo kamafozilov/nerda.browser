@@ -18,6 +18,8 @@ final class Tab: Identifiable {
     /// Kept at the top of the sidebar as a tile, and never put to sleep: the
     /// sites always open. See `Browser.setPinned`.
     var isPinned = false
+    /// Where a pinned tab was when pinned; double-clicking its tile goes back there.
+    var home: URL?
     /// The tab whose page opened this one, which closing it goes back to.
     @ObservationIgnored weak var opener: Tab?
     /// Told what the page does (the Browser), by every page the tab makes.
@@ -73,6 +75,8 @@ final class Tab: Identifiable {
         pageTitle = saved.title
         slept = (saved.state, saved.zoom)
         isPinned = saved.pinned == true
+        // Sessions from before homes: where it was left is the best guess.
+        home = saved.home ?? (isPinned ? saved.url : nil)
     }
 
     /// What it takes to open the tab again at the next launch. Only pages from
@@ -88,7 +92,7 @@ final class Tab: Identifiable {
             state = slept?.state
         }
         return Session.Tab(url: site, title: failure == nil ? pageTitle : "", state: state as? Data,
-                           zoom: page?.pageZoom ?? slept?.zoom ?? 1, pinned: isPinned ? true : nil)
+                           zoom: page?.pageZoom ?? slept?.zoom ?? 1, pinned: isPinned ? true : nil, home: home)
     }
 
     convenience init(url: URL) {
@@ -166,6 +170,12 @@ final class Tab: Identifiable {
         } else {
             webView.reload()
         }
+    }
+
+    /// A pinned tab back where it was pinned.
+    func goHome() {
+        guard let home else { return }
+        webView.load(URLRequest(url: home))
     }
 
     /// The steps ⌘+ and ⌘− go through, as Safari's do.

@@ -118,6 +118,7 @@ final class Browser: NSObject {
         moved.insert(tab, at: pinned ? min(max(position, 0), pins) : pins + min(max(position, 0), moved.count - pins))
         // Called on every step of a drag: nothing to tell when nothing moved.
         guard tab.isPinned != pinned || !moved.elementsEqual(tabs, by: ===) else { return }
+        if tab.isPinned != pinned { tab.home = pinned ? tab.site : nil }
         tab.isPinned = pinned
         tabs = moved
     }

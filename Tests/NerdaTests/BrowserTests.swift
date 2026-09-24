@@ -535,6 +535,40 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     #expect(restored.tabs.map(\.isPinned) == [true, false, false, false])
 }
 
+/// A pinned tab goes back to where it was pinned (its tile double-clicked),
+/// however far it has gone since, and still does after a relaunch.
+@MainActor
+@Test func pinnedTabsGoBackToWhereTheyWerePinned() async throws {
+    let folder = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let pages = try ["home", "away"].map { name in
+        let page = folder.appending(path: "\(name).html")
+        try "<title>\(name)</title>".write(to: page, atomically: true, encoding: .utf8)
+        return page
+    }
+    let file = folder.appending(path: "session.json")
+
+    let browser = Browser()
+    browser.open(pages[0])
+    try await arrive(browser.tabs[0], at: pages[0])
+    browser.setPinned(true, browser.tabs[0].id)
+    browser.tabs[0].webView.load(URLRequest(url: pages[1]))
+    try await arrive(browser.tabs[0], at: pages[1])
+    browser.sessionFile = file
+    browser.saveSession()
+
+    let restored = Browser()
+    restored.restore(from: file)
+    let tab = restored.tabs[0]
+    try await arrive(tab, at: pages[1])
+    tab.goHome()
+    try await arrive(tab, at: pages[0])
+
+    // Unpinned, it has nowhere to go back to.
+    restored.setPinned(false, tab.id)
+    #expect(tab.home == nil)
+}
+
 /// Dragged, a tab takes the place it is let go at, within its own kind or
 /// across into the other, and stays in that order.
 @MainActor

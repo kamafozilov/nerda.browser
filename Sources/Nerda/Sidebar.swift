@@ -201,6 +201,8 @@ struct Sidebar: View {
                         }
                         .opacity(dragged?.id == id ? 0 : 1)
                         .simultaneousGesture(drag(id))
+                        // Back to where it was pinned, from wherever it has been since.
+                        .simultaneousGesture(TapGesture(count: 2).onEnded { tab.goHome() })
                         .contextMenu {
                             Button("Unpin Tab") { withAnimation(.slide) { browser.setPinned(false, id) } }
                             Button("Close Tab") { withAnimation(.slide) { browser.close(id) } }

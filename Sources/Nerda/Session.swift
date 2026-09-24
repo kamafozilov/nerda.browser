@@ -13,6 +13,8 @@ struct Session: Codable {
         let zoom: CGFloat
         /// Optional, and left out unless set, so sessions saved before pins still open.
         let pinned: Bool?
+        /// A pinned tab's address when pinned (`Tab.home`); optional, as `pinned`.
+        let home: URL?
     }
 
     var tabs: [Tab]
