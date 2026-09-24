@@ -329,8 +329,30 @@ nonisolated enum Address {
             return url
         }
 
+        return search(text)
+    }
+
+    static func search(_ text: String) -> URL? {
         var search = URLComponents(string: "https://www.google.com/search")!
         search.queryItems = [URLQueryItem(name: "q", value: text)]
         return search.url
+    }
+
+    /// What Google thinks is being searched for, as it would suggest under its
+    /// own field; nothing when it can't be reached.
+    static func suggestions(for text: String) async -> [String] {
+        var request = URLComponents(string: "https://suggestqueries.google.com/complete/search")!
+        request.queryItems = [
+            URLQueryItem(name: "client", value: "firefox"),
+            URLQueryItem(name: "ie", value: "utf-8"),
+            URLQueryItem(name: "oe", value: "utf-8"),
+            URLQueryItem(name: "q", value: text),
+        ]
+        // ["query", ["suggestion", …], …]
+        guard let (data, _) = try? await URLSession.shared.data(from: request.url!),
+              let reply = try? JSONSerialization.jsonObject(with: data) as? [Any],
+              reply.count > 1, let suggestions = reply[1] as? [String]
+        else { return [] }
+        return suggestions
     }
 }

@@ -9,6 +9,8 @@ struct CommandBar: View {
 
     @State private var query = ""
     @State private var highlighted: Int?
+    /// Google's guesses at what is being typed, for the text they were asked for.
+    @State private var searches: [String] = []
     @FocusState private var focused: Bool
 
     private struct Suggestion: Identifiable {
@@ -22,7 +24,6 @@ struct CommandBar: View {
 
     // ponytail: a fixed list until there is history to suggest from.
     private static let topSites: [Suggestion] = [
-        ("Google", "google.com"),
         ("YouTube", "youtube.com"),
         ("Wikipedia", "wikipedia.org"),
         ("GitHub", "github.com"),
@@ -37,7 +38,11 @@ struct CommandBar: View {
         let matches = Self.topSites.filter {
             $0.title.localizedCaseInsensitiveContains(text) || $0.detail.localizedCaseInsensitiveContains(text)
         }
-        return [first] + matches.filter { $0.url != url }
+        let guesses = searches
+            .filter { $0.caseInsensitiveCompare(text) != .orderedSame }
+            .prefix(6)
+            .compactMap { guess in Address.search(guess).map { Suggestion(title: guess, detail: "", url: $0, isSearch: true) } }
+        return [first] + matches.filter { $0.url != url } + guesses
     }
 
     var body: some View {
@@ -90,6 +95,16 @@ struct CommandBar: View {
         .onAppear { focused = true }
         // Typing starts the list over: the first row is what Enter will do.
         .onChange(of: query) { highlighted = query.isEmpty ? nil : 0 }
+        // The last guesses stay up while the next are on their way, so the
+        // list doesn't flicker with every key; typing on cancels the ask.
+        .task(id: query) {
+            let text = query.trimmingCharacters(in: .whitespaces)
+            guard !text.isEmpty else { return searches = [] }
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled else { return }
+            let found = await Address.suggestions(for: text)
+            if !Task.isCancelled { searches = found }
+        }
     }
 
     private func open(_ index: Int?, in rows: [Suggestion]) {
