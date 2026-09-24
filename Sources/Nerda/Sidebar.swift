@@ -62,6 +62,8 @@ struct Sidebar: View {
                     .background(alignment: .top) { Color.clear.frame(height: 0).id(Self.listTop) }
                 }
                 .scrollIndicators(.never)
+                // Only scrolls once the tabs outgrow the sidebar.
+                .scrollBounceBehavior(.basedOnSize)
                 // Tabs fade out at the list's edges instead of being cut off
                 // there, and never scroll up under New Tab.
                 .mask {
