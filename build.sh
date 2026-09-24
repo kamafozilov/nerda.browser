@@ -22,6 +22,17 @@ mkdir -p "$APP/Contents/MacOS"
 vtool -set-build-version macos 15.4 "$(xcrun --show-sdk-version)" -replace \
   -output "$APP/Contents/MacOS/$NAME" ".build/$CONFIG/$NAME"
 
+# The icon, drawn in assets/AppIcon.svg, rendered with what macOS ships:
+# Quick Look draws the SVG, sips scales it, iconutil packs the sizes.
+ICONS="$(mktemp -d)"
+mkdir -p "$ICONS/AppIcon.iconset" "$APP/Contents/Resources"
+qlmanage -t -s 1024 -o "$ICONS" assets/AppIcon.svg >/dev/null
+for size in 16 32 128 256 512; do
+  sips -z $size $size "$ICONS/AppIcon.svg.png" --out "$ICONS/AppIcon.iconset/icon_${size}x${size}.png" >/dev/null
+  sips -z $((size * 2)) $((size * 2)) "$ICONS/AppIcon.svg.png" --out "$ICONS/AppIcon.iconset/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONS/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -30,6 +41,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>$NAME</string>
   <key>CFBundleExecutable</key><string>$NAME</string>
   <key>CFBundleIdentifier</key><string>dev.nerda.browser</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleVersion</key><string>$(date +%Y%m%d%H%M)</string>
