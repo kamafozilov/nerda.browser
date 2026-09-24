@@ -45,6 +45,7 @@ final class AppMenu: NSObject {
                 item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]),
                 item("Show All", #selector(NSApplication.unhideAllApplications(_:))),
                 .separator(),
+                item("Warn Before Quitting", #selector(toggleQuitWarning), target: self),
                 item("Quit Nerda", #selector(NSApplication.terminate(_:)), "q"),
             ]),
             submenu("File", [
@@ -114,6 +115,8 @@ final class AppMenu: NSObject {
         item.tag = step
         return item
     }
+
+    @objc private func toggleQuitWarning() { QuitConfirmation.isWanted.toggle() }
 
     @objc private func openVisit(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }
@@ -185,6 +188,9 @@ extension AppMenu: NSMenuItemValidation {
             return browser.selected?.webView.canGoBack == true
         case #selector(goForward):
             return browser.selected?.webView.canGoForward == true
+        case #selector(toggleQuitWarning):
+            item.state = QuitConfirmation.isWanted ? .on : .off
+            return true
         case #selector(clearHistory):
             return !History.shared.visits.isEmpty
         default:
@@ -235,6 +241,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.makeKeyAndOrderFront(nil)
         }
         return true
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // With no tabs there is nothing to lose.
+        guard QuitConfirmation.isWanted, !browser.tabs.isEmpty, !QuitConfirmation.systemIsQuitting else {
+            return .terminateNow
+        }
+        switch QuitConfirmation.ask() {
+        case .cancel:
+            return .terminateCancel
+        case .alwaysQuit:
+            QuitConfirmation.isWanted = false
+            return .terminateNow
+        case .quit:
+            return .terminateNow
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) { save() }
