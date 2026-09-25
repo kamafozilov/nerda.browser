@@ -10,6 +10,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Fixed
 
 - Selecting text lights only the text you picked, as in Chrome: a word, a line or a drag over several paragraphs. Before, a band of selection colour ran out to the window's edges and filled the space between paragraphs.
+- The window fills the screen again when the Dock hides or shows, or the display changes, where it left a gap at the bottom.
 
 ## [0.0.4] - 2026-09-25
 

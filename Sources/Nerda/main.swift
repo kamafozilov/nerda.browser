@@ -436,12 +436,32 @@ final class BrowserWindow: NSWindow {
         title = browser.isPrivate ? "Incognito" : "Nerda"
         if browser.isPrivate { appearance = NSAppearance(named: .darkAqua) }
         // Sized before it has content, so the content is laid out once, at that size.
-        if let screen = NSScreen.main {
-            setFrame(screen.visibleFrame, display: false)
-        }
+        fill(NSScreen.main)
+        // The Dock hidden or shown, or the display changed: the screen's free
+        // part is another size, and a window still filling it follows.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(screenChanged),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil
+        )
         contentView = NSHostingView(rootView: BrowserView(browser: browser, window: self)
             .environment(\.incognito, browser.isPrivate))
         browser.window = self
+    }
+
+    /// The frame `fill` last gave it: still this, the window was left filling the screen.
+    private var filled = NSRect.zero
+
+    private func fill(_ screen: NSScreen?) {
+        guard let screen else { return }
+        filled = screen.visibleFrame
+        setFrame(filled, display: isVisible)
+    }
+
+    /// When the Dock shows, AppKit shrinks a window it covers, but never grows
+    /// it back when the Dock hides: one filling either size is sized anew.
+    @objc private func screenChanged() {
+        guard let screen = screen ?? NSScreen.main else { return }
+        if frame == filled || frame == screen.visibleFrame { fill(screen) }
     }
 
     override func noResponder(for eventSelector: Selector) {
