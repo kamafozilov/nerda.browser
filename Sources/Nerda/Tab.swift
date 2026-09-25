@@ -22,8 +22,9 @@ final class Tab: Identifiable {
     /// Set when the last address could not be opened: the page shows why
     /// instead, and Reload tries that address again.
     var failure: (url: URL, message: String)?
-    /// Kept at the top of the sidebar as a tile, and never put to sleep: the
-    /// sites always open. See `Browser.setPinned`.
+    /// Kept at the top of the sidebar as a tile, and never put to sleep for
+    /// being idle: the sites always open. ⌘W lets its page go, tile and all
+    /// kept (`Browser.closeSelectedTab`). See `Browser.setPinned`.
     var isPinned = false
     /// Where a pinned tab was when pinned; double-clicking its tile goes back there.
     var home: URL?

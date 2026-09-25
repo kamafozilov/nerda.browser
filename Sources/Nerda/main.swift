@@ -590,14 +590,22 @@ extension Browser {
     }
 
     /// ⌘W. With the switcher up it is the switcher that goes, not the page
-    /// behind it. A pinned tab stays, as in Safari: the screen goes back to
-    /// the last tab below the tiles you were on, or else the first there.
+    /// behind it. A pinned tab keeps its tile but its page goes, memory and
+    /// all, as Arc's does: a click on the tile opens it again. The screen goes
+    /// back to the last tab below the tiles you were on, the first there, or
+    /// a new tab.
     func closeSelectedTab() {
         if commandBarOpen { return hideCommandBar() }
         guard let selected else { return }
         if selected.isPinned {
             if let next = recent.last(where: { !$0.isPinned }) ?? tabs.first(where: { !$0.isPinned }) {
                 selectedID = next.id
+            } else {
+                add(Tab())
+            }
+            Task {
+                let look = await selected.snapshot()
+                if selected.id != selectedID { selected.sleep(keeping: look) }
             }
             return
         }

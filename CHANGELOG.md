@@ -11,6 +11,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - Rest the pointer on a tab, in the sidebar or across the top, for a card with its title, its site and how much memory its page takes. Tabs other than the one on screen show a picture of their page; a sleeping tab shows the page as it went to sleep, and says it is sleeping.
 
+### Changed
+
+- ⌘W on a pinned tab now closes its page and gives its memory back, keeping its tile: click the tile to open it again, where you left it. Pinned sites still load on their own when Nerda opens.
+
 ## [0.0.1] - 2026-09-25
 
 ### Added
