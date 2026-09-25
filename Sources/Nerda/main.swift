@@ -523,6 +523,14 @@ extension Browser {
         withAnimation(.slide) { add(tab) }
     }
 
+    /// Clear History…, in the menus and on the history page: the history page,
+    /// with Delete browsing data over it.
+    func clearHistory() {
+        if isPrivate { return Windows.showRegular().clearHistory() }
+        openHistory()
+        clearingHistory = true
+    }
+
     /// Somewhere picked from the switcher or the History menu: on the new tab
     /// on screen, if that is where you are, or else in a tab of its own.
     func go(to url: URL) {

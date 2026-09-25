@@ -68,7 +68,7 @@ enum Bench {
         let blocking = Date.now
         Blocker.shared.start()
         await Blocker.shared.ready()
-        say(String(format: "Block list %@ in %.1f s; Nerda then %.0f MB", Blocker.shared.rules == nil ? "missing" : "ready",
+        say(String(format: "Block list %@ in %.1f s; Nerda then %.0f MB", Blocker.shared.rules.isEmpty ? "missing" : "ready",
                    since(blocking) / 1000, memory()["nerda"] ?? 0))
 
         typing(into: &results)

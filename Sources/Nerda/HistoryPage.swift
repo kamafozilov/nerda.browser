@@ -13,6 +13,8 @@ struct HistoryPage: View {
     /// anywhere asked for again, sorting thousands of pages each time.
     @State private var lines: [Line] = []
     @State private var hasPages = false
+    /// The list Delete browsing data's Period opened.
+    @State private var dropdown: Dropdown?
 
     var body: some View {
         ScrollView {
@@ -22,7 +24,7 @@ struct HistoryPage: View {
                         .font(.system(size: 26, weight: .medium))
                         .foregroundStyle(Palette.ink)
                     Spacer()
-                    Button("Clear History…") { History.shared.askToClear() }
+                    Button("Clear History…", action: browser.clearHistory)
                         .buttonStyle(SettingsButtonStyle())
                         .disabled(!hasPages)
                 }
@@ -65,14 +67,23 @@ struct HistoryPage: View {
             .padding(.horizontal, 32)
             .padding(.vertical, 56)
             .frame(maxWidth: .infinity)
+            .dialogBlur(browser.clearingHistory)
         }
         .scrollIndicators(.never)
         .background(Palette.card, in: RoundedRectangle(cornerRadius: BrowserView.cornerRadius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: BrowserView.cornerRadius, style: .continuous)
             .strokeBorder(Color.primary.opacity(0.08)))
+        .overlay {
+            if browser.clearingHistory {
+                DeleteDataDialog(browser: browser, escapes: dropdown == nil) { browser.clearingHistory = false }
+            }
+        }
         .padding(.top, 2)
+        .dropdownHost($dropdown)
         .background { PagesComeAndGo(changed: refresh) }
         .onAppear(perform: refresh)
+        // Not left to come up again over the next history page.
+        .onDisappear { browser.clearingHistory = false }
         .onChange(of: query, refresh)
     }
 

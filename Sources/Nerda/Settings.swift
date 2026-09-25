@@ -1,9 +1,10 @@
 import SwiftUI
+import WebKit
 
 /// The pages of Nerda's settings, listed down the settings tab's left. Only
 /// what works is listed: a page comes once it has something in it.
 enum SettingsPage: String, CaseIterable, Identifiable, Codable {
-    case general, appearance, shortcuts
+    case general, appearance, privacy, shortcuts
 
     var id: Self { self }
 
@@ -11,6 +12,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .general: "General"
         case .appearance: "Appearance"
+        case .privacy: "Security & Privacy"
         case .shortcuts: "Keyboard Shortcuts"
         }
     }
@@ -19,6 +21,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .general: "gearshape"
         case .appearance: "circle.lefthalf.filled"
+        case .privacy: "lock"
         case .shortcuts: "keyboard"
         }
     }
@@ -26,15 +29,16 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
     /// The heading it is listed under.
     var section: String {
         switch self {
-        case .general, .appearance, .shortcuts: "Personal"
+        case .general, .appearance, .privacy, .shortcuts: "Personal"
         }
     }
 
     /// What the page holds, so a search finds it by a setting as well as by its name.
     private var keywords: [String] {
         switch self {
-        case .general: ["default browser", "search engine", "google", "picture in picture", "video", "screenshot", "language", "spell", "ads", "trackers", "blocking", "privacy", "about", "version", "updates"]
+        case .general: ["default browser", "search engine", "google", "picture in picture", "video", "screenshot", "language", "spell", "about", "version", "updates"]
         case .appearance: ["theme", "dark", "light", "zoom", "tab style", "vertical", "horizontal", "sidebar", "transparency", "tinted", "transparent", "glass"]
+        case .privacy: ["security", "history", "delete", "clear", "cookies", "cache", "site data", "ads", "trackers", "adblock", "blocking", "filters", "easylist", "ublock", "adguard"]
         case .shortcuts: ["keyboard", "keys", "hotkeys"] + ShortcutsSettings.groups.flatMap { $0.shortcuts.map(\.title) }
         }
     }
@@ -60,6 +64,7 @@ struct SettingsView: View {
     /// The list a dropdown button opened, over everything else.
     @State private var dropdown: Dropdown?
     @State private var editingLanguages = false
+    @State private var deletingData = false
     @State private var languages = PreferredLanguage.chosen
 
     var body: some View {
@@ -107,6 +112,8 @@ struct SettingsView: View {
                         GeneralSettings(browser: browser, languages: languages) { editingLanguages = true }
                     case .appearance:
                         AppearanceSettings()
+                    case .privacy:
+                        PrivacySettings(browser: browser) { deletingData = true }
                     case .shortcuts:
                         ShortcutsSettings()
                     }
@@ -115,6 +122,7 @@ struct SettingsView: View {
                 .padding(.horizontal, 32)
                 .padding(.vertical, 56)
                 .frame(maxWidth: .infinity)
+                .dialogBlur(editingLanguages || deletingData)
             }
             .scrollIndicators(.never)
             // An open list stays where its button was: it goes when that moves.
@@ -132,14 +140,13 @@ struct SettingsView: View {
                         editingLanguages = false
                     }
                 }
+                if deletingData {
+                    DeleteDataDialog(browser: browser, escapes: dropdown == nil) { deletingData = false }
+                }
             }
         }
         .padding(.top, 2)
-        .coordinateSpace(.named(Dropdown.space))
-        .environment(\.openDropdown) { dropdown = $0 }
-        .overlay(alignment: .topLeading) {
-            if let dropdown { DropdownPanel(dropdown: dropdown) { self.dropdown = nil } }
-        }
+        .dropdownHost($dropdown)
     }
 }
 
@@ -160,13 +167,6 @@ private struct GeneralSettings: View {
                 DropdownButton(label: engine.name, site: engine.site,
                                options: SearchEngine.allCases.map { DropdownOption(id: $0.rawValue, title: $0.name, site: $0.site) },
                                selected: engine.rawValue) { engine = SearchEngine(rawValue: $0) ?? .google }
-            }
-        }
-        SettingsGroup {
-            SettingsRow(title: "Block ads and trackers", detail: "If a site has trouble, turn this off and reload it") {
-                SettingsToggle(title: "Block ads and trackers", isOn: Binding(
-                    get: { Blocker.shared.isEnabled }, set: { Blocker.shared.isEnabled = $0 }
-                ))
             }
         }
         SettingsGroup {
@@ -236,6 +236,413 @@ private struct AppearanceSettings: View {
                 (window as? BrowserWindow)?.browser.tabs.forEach { $0.defaultZoomChanged(from: old, to: new) }
             }
         }
+    }
+}
+
+/// What Nerda keeps of where you have been, and what it lets pages load.
+private struct PrivacySettings: View {
+    let browser: Browser
+    let deleteData: () -> Void
+
+    @Bindable private var blocker = Blocker.shared
+
+    var body: some View {
+        SettingsGroup(title: "Browsing history") {
+            SettingsRow(title: "Delete browsing history", detail: "Delete history, cookies, cache, and more", icon: "trash") {
+                Button("Delete", role: .destructive, action: deleteData)
+                    .buttonStyle(SettingsButtonStyle())
+                    .fixedSize()
+            }
+            SettingsLink(title: "View browsing history", icon: "clock.arrow.circlepath", action: browser.openHistory)
+        }
+        SettingsGroup(title: "Adblock") {
+            SettingsRow(title: "Block ads and trackers", detail: blockDetail, icon: "hand.raised") {
+                SettingsToggle(title: "Block ads and trackers", isOn: $blocker.isEnabled)
+            }
+            SettingsRow(title: "Manage filters", detail: blocker.chosen.count == 1 ? "1 filter on" : "\(blocker.chosen.count) filters on",
+                        icon: "slider.horizontal.3") {
+                FiltersButton()
+            }
+        }
+    }
+
+    private var blockDetail: String {
+        if blocker.refreshing { return "Updating filters…" }
+        if blocker.failed { return "Some filters couldn't be updated. Nerda tries again later" }
+        guard let updated = blocker.updated else { return "If a site has trouble, turn this off and reload it" }
+        return "Last updated \(updated.formatted(.relative(presentation: .named)))"
+    }
+}
+
+/// How far back Delete browsing data goes: Chrome's choices, all time first.
+enum DeleteRange: String, CaseIterable {
+    case all, quarterHour, hour, day, week, month
+
+    var name: String {
+        switch self {
+        case .all: "All time"
+        case .quarterHour: "Last 15 minutes"
+        case .hour: "Last hour"
+        case .day: "Last 24 hours"
+        case .week: "Last 7 days"
+        case .month: "Last 4 weeks"
+        }
+    }
+
+    /// The first moment deleted.
+    var since: Date {
+        let minutes: Double = switch self {
+        case .all: 0
+        case .quarterHour: 15
+        case .hour: 60
+        case .day: 24 * 60
+        case .week: 7 * 24 * 60
+        case .month: 28 * 24 * 60
+        }
+        return self == .all ? .distantPast : .now.addingTimeInterval(-minutes * 60)
+    }
+}
+
+/// What to delete, and from how far back, as Chrome and Aside ask it. Only
+/// what is safe to lose comes ticked, every time: cookies and site storage
+/// hold your sign-ins, so they go only when ticked on purpose. Passwords are
+/// Nerda's own, in the keychain, and never go this way.
+struct DeleteDataDialog: View {
+    let browser: Browser
+    let escapes: Bool
+    let done: () -> Void
+
+    @State private var range = DeleteRange.all
+    @State private var history = true
+    @State private var cache = true
+    @State private var downloads = true
+    @State private var cookies = false
+    @State private var storage = false
+    /// How many sites keep cookies, to say who you are signed out of.
+    @State private var sites: Int?
+    @State private var deleting = false
+
+    private static let cacheTypes: Set<String> = [
+        WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache,
+        WKWebsiteDataTypeFetchCache, WKWebsiteDataTypeOfflineWebApplicationCache,
+    ]
+    private static let cookieTypes: Set<String> = [WKWebsiteDataTypeCookies]
+    /// Local storage, IndexedDB, service workers and the rest sites keep.
+    private static let storageTypes = WKWebsiteDataStore.allWebsiteDataTypes().subtracting(cacheTypes).subtracting(cookieTypes)
+
+    var body: some View {
+        let since = range.since
+        let pages = History.shared.visits.values.count { $0.last >= since }
+        SettingsDialog(width: 380, escapes: escapes, cancel: done) {
+            Text("Delete browsing data")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            Text("Deletes what you choose from this Mac. Open tabs and saved passwords stay.")
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+            label("Period")
+                .padding(.top, 18)
+            DropdownButton(label: range.name,
+                           options: DeleteRange.allCases.map {
+                               DropdownOption(id: $0.rawValue, title: $0.name, separated: $0 == .all)
+                           },
+                           selected: range.rawValue, fill: true) { range = DeleteRange(rawValue: $0) ?? .all }
+            label("Items to delete")
+                .padding(.top, 18)
+            VStack(alignment: .leading, spacing: 10) {
+                item("Browsing history", pages == 0 ? "No pages visited in this period"
+                     : "\(pages == 1 ? "1 page" : "\(pages) pages") visited in this period, and their suggestions as you type",
+                     isOn: $history)
+                item("Cached images and files", "Kept to load sites faster. Sites may load more slowly the next time you visit",
+                     isOn: $cache)
+                item("Download history", "The list in Downloads. The files themselves stay", isOn: $downloads)
+                item("Cookies", (range == .all && sites != nil ? "From \(sites == 1 ? "1 site" : "\(sites!) sites"). " : "")
+                     + "Signs you out of most sites", isOn: $cookies)
+                item("Site storage", "What sites save on this Mac, such as drafts and offline data. May sign you out of some sites",
+                     isOn: $storage)
+            }
+            HStack(spacing: 8) {
+                Spacer()
+                Button("Cancel", action: done)
+                    .buttonStyle(SettingsButtonStyle())
+                Button(deleting ? "Deleting…" : "Delete", role: .destructive) { Task { await delete(since: since) } }
+                    .buttonStyle(SettingsButtonStyle())
+                    .disabled(deleting || !(history || cache || downloads || cookies || storage))
+            }
+            .padding(.top, 22)
+        }
+        .task { sites = await browser.dataStore.dataRecords(ofTypes: Self.cookieTypes).count }
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(Palette.ink)
+            .padding(.bottom, 8)
+    }
+
+    /// A choice, with what it deletes behind the ⓘ.
+    private func item(_ title: String, _ detail: String, isOn: Binding<Bool>) -> some View {
+        HStack(spacing: 5) {
+            Toggle(title, isOn: isOn)
+                .toggleStyle(SettingsCheckbox())
+            Image(systemName: "info.circle")
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.muted)
+                .help(detail)
+                .accessibilityLabel(detail)
+        }
+    }
+
+    private func delete(since: Date) async {
+        deleting = true
+        if history { History.shared.remove(since: since) }
+        if downloads {
+            for window in NSApp.windows { (window as? BrowserWindow)?.browser.clearDownloads(since: since) }
+        }
+        let types = (cache ? Self.cacheTypes : []).union(cookies ? Self.cookieTypes : []).union(storage ? Self.storageTypes : [])
+        if !types.isEmpty { await browser.dataStore.removeData(ofTypes: types, modifiedSince: since) }
+        done()
+    }
+}
+
+/// A square that fills in the text's colour when ticked, as Aside's do,
+/// rather than the system's accent-blue box.
+private struct SettingsCheckbox: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 4, style: .continuous)
+        Button { configuration.isOn.toggle() } label: {
+            HStack(spacing: 8) {
+                shape
+                    .fill(configuration.isOn ? AnyShapeStyle(Palette.ink) : AnyShapeStyle(.clear))
+                    .overlay(shape.strokeBorder(configuration.isOn ? .clear : Palette.muted, lineWidth: 1))
+                    .overlay {
+                        if configuration.isOn {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(Palette.ground)
+                        }
+                    }
+                    .frame(width: 15, height: 15)
+                configuration.label
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(Palette.ink)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityRepresentation { Toggle(isOn: configuration.$isOn) { configuration.label } }
+    }
+}
+
+/// Configure, by Manage filters: the filter lists, opened under it.
+private struct FiltersButton: View {
+    @Environment(\.openDropdown) private var open
+    @State private var frame = CGRect.zero
+
+    var body: some View {
+        Button {
+            open(Dropdown(anchor: frame, below: true, options: [], selected: nil, choose: { _ in },
+                          panel: (AnyView(FiltersPanel()), CGSize(width: 330, height: 440))))
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "slider.horizontal.3")
+                Text("Configure")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Palette.muted)
+            }
+        }
+        .buttonStyle(SettingsButtonStyle())
+        .fixedSize()
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Dropdown.space)) } action: { frame = $0 }
+    }
+}
+
+/// The filter lists to block with, by heading, each ticked on or off where it
+/// is (the panel stays), found by name; and lists of one's own, by address.
+private struct FiltersPanel: View {
+    @State private var query = ""
+    @State private var adding = false
+    @State private var address = ""
+    @FocusState private var addressFocused: Bool
+    private let blocker = Blocker.shared
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+                TextField("Search filters", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13.5))
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 40)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(sections, id: \.heading) { section in
+                        Text(section.heading)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Palette.muted)
+                            .padding(.horizontal, 9)
+                            .padding(.top, section.heading == sections.first?.heading ? 2 : 12)
+                            .padding(.bottom, 4)
+                        ForEach(section.lists) { list in
+                            FilterRow(list: list, chosen: blocker.isChosen(list),
+                                      remove: section.heading == Self.added ? { blocker.remove(list) } : nil) {
+                                blocker.toggle(list)
+                            }
+                        }
+                    }
+                    if sections.isEmpty {
+                        Text("No filters found")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Palette.muted)
+                            .padding(9)
+                    }
+                }
+                .padding(.horizontal, 5)
+                .padding(.bottom, 5)
+            }
+            .scrollIndicators(.never)
+            Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1)
+            footer
+                .font(.system(size: 13.5))
+                .padding(.horizontal, 14)
+                .frame(height: 44)
+        }
+    }
+
+    private static let added = "Added"
+
+    /// The catalogue, lists of one's own first, under what is typed.
+    private var sections: [(heading: String, lists: [FilterList])] {
+        let all = (blocker.added.isEmpty ? [] : [(Self.added, blocker.added)]) + FilterList.catalog
+        let typed = query.trimmingCharacters(in: .whitespaces)
+        return all.map { ($0.0, typed.isEmpty ? $0.1 : $0.1.filter { $0.title.localizedCaseInsensitiveContains(typed) }) }
+            .filter { !$0.1.isEmpty }
+    }
+
+    @ViewBuilder private var footer: some View {
+        if adding {
+            HStack(spacing: 8) {
+                TextField("Address of a filter list", text: $address)
+                    .textFieldStyle(.plain)
+                    .focused($addressFocused)
+                    .onSubmit(add)
+                    .onAppear { addressFocused = true }
+                Button("Add", action: add)
+                    .buttonStyle(SettingsButtonStyle())
+                    .disabled(url == nil)
+            }
+        } else {
+            HStack {
+                Button { adding = true } label: {
+                    Label("Add filter", systemImage: "plus")
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.ink)
+                Spacer()
+                Button(action: blocker.update) {
+                    Label(blocker.refreshing ? "Updating…" : "Update now", systemImage: "arrow.clockwise")
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.muted)
+                .disabled(blocker.refreshing)
+            }
+        }
+    }
+
+    /// What is typed, if it is a web address.
+    private var url: URL? {
+        guard let url = URL(string: address.trimmingCharacters(in: .whitespaces)),
+              ["http", "https"].contains(url.scheme), url.host() != nil else { return nil }
+        return url
+    }
+
+    private func add() {
+        guard let url else { return }
+        blocker.add(url)
+        address = ""
+        adding = false
+    }
+}
+
+/// One list: ticked when it is blocked with. One's own can be taken off.
+private struct FilterRow: View {
+    let list: FilterList
+    let chosen: Bool
+    let remove: (() -> Void)?
+    let toggle: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 8) {
+                Text(list.title)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+                if chosen {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                }
+                if let remove, hovering {
+                    Button(action: remove) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Palette.muted)
+                            .frame(width: 18, height: 18)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove")
+                }
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 32)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hovering ? Palette.wash : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(list.url.absoluteString)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+    }
+}
+
+/// A row that takes you somewhere else, the whole of it a button.
+private struct SettingsLink: View {
+    let title: String
+    var detail: String?
+    var icon: String?
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            SettingsRow(title: title, detail: detail, icon: icon) {
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+            }
+            .background(hovering ? Palette.hover : .clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovering)
     }
 }
 
@@ -582,49 +989,31 @@ private struct LanguagesDialog: View {
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        ZStack {
-            RoundedRectangle(cornerRadius: BrowserView.cornerRadius, style: .continuous)
-                .fill(.black.opacity(0.35))
-                .onTapGesture { done(nil) }
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Preferred languages")
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(Palette.ink)
-                Text("Websites use the first language in this list they have. Nerda uses it from its next launch.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.muted)
-                    .padding(.top, 6)
-                    .padding(.bottom, 16)
-                ForEach(languages, id: \.self) { language in
-                    Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
-                    row(language)
-                }
-                DropdownButton(label: "Add", icon: "plus", options: options(besides: languages),
-                               selected: nil, below: true) { languages.append($0) }
-                    .padding(.top, 14)
-                HStack(spacing: 8) {
-                    Spacer()
-                    Button("Cancel") { done(nil) }
-                        .buttonStyle(SettingsButtonStyle())
-                    Button("Save") { done(languages) }
-                        .buttonStyle(SettingsButtonStyle(prominent: true))
-                        .disabled(languages == original)
-                }
-                .padding(.top, 16)
+        SettingsDialog(width: 520, escapes: escapes, cancel: { done(nil) }) {
+            Text("Preferred languages")
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            Text("Websites use the first language in this list they have. Nerda uses it from its next launch.")
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.muted)
+                .padding(.top, 6)
+                .padding(.bottom, 16)
+            ForEach(languages, id: \.self) { language in
+                Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
+                row(language)
             }
-            .padding(20)
-            .frame(width: 520)
-            .background(Palette.ground, in: shape)
-            .overlay(shape.strokeBorder(Color.primary.opacity(0.12)))
-            .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
-        }
-        .background {
-            if escapes {
+            DropdownButton(label: "Add", icon: "plus", options: options(besides: languages),
+                           selected: nil, below: true) { languages.append($0) }
+                .padding(.top, 14)
+            HStack(spacing: 8) {
+                Spacer()
                 Button("Cancel") { done(nil) }
-                    .keyboardShortcut(.cancelAction)
-                    .hidden()
+                    .buttonStyle(SettingsButtonStyle())
+                Button("Save") { done(languages) }
+                    .buttonStyle(SettingsButtonStyle(prominent: true))
+                    .disabled(languages == original)
             }
+            .padding(.top, 16)
         }
     }
 
@@ -685,6 +1074,38 @@ private struct LanguagesDialog: View {
     }
 }
 
+/// A dialog over the settings, which dim under it (and blur, `dialogBlur`): a click on them, or Esc
+/// (when an open list isn't taking it), lets it go.
+private struct SettingsDialog<Content: View>: View {
+    let width: CGFloat
+    let escapes: Bool
+    let cancel: () -> Void
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        ZStack {
+            RoundedRectangle(cornerRadius: BrowserView.cornerRadius, style: .continuous)
+                .fill(.black.opacity(0.35))
+                .onTapGesture(perform: cancel)
+            VStack(alignment: .leading, spacing: 0) { content }
+                .padding(20)
+                .frame(width: width)
+                .background(Palette.ground, in: shape)
+                .overlay(shape.strokeBorder(Color.primary.opacity(0.12)))
+                .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
+                .accessibilityAddTraits(.isModal)
+        }
+        .background {
+            if escapes {
+                Button("Cancel", action: cancel)
+                    .keyboardShortcut(.cancelAction)
+                    .hidden()
+            }
+        }
+    }
+}
+
 /// Six dots: what a row is dragged by.
 private struct Grip: View {
     var body: some View {
@@ -712,6 +1133,9 @@ struct Dropdown {
     let options: [DropdownOption]
     let selected: String?
     let choose: (String) -> Void
+    /// Something of its own in place of the options, this big (the filter
+    /// lists), its right edge under the button's.
+    var panel: (content: AnyView, size: CGSize)?
 }
 
 struct DropdownOption {
@@ -721,10 +1145,30 @@ struct DropdownOption {
     var site: URL?
     /// Or the symbol.
     var symbol: String?
+    /// A line under it, between it and the rest.
+    var separated = false
 }
 
 extension EnvironmentValues {
     @Entry var openDropdown: (Dropdown) -> Void = { _ in }
+}
+
+extension View {
+    /// A page under a `SettingsDialog`, out of focus, as Aside's is. Blurred
+    /// itself: a material over it would show the desktop instead.
+    func dialogBlur(_ open: Bool) -> some View {
+        blur(radius: open ? 6 : 0)
+            .animation(.easeOut(duration: 0.15), value: open)
+    }
+
+    /// Where the `DropdownButton`s in it open their lists: over all of it.
+    func dropdownHost(_ dropdown: Binding<Dropdown?>) -> some View {
+        coordinateSpace(.named(Dropdown.space))
+            .environment(\.openDropdown) { dropdown.wrappedValue = $0 }
+            .overlay(alignment: .topLeading) {
+                if let open = dropdown.wrappedValue { DropdownPanel(dropdown: open) { dropdown.wrappedValue = nil } }
+            }
+    }
 }
 
 /// A choice among several, as a button that opens them in a list: its label
@@ -738,6 +1182,8 @@ private struct DropdownButton: View {
     let options: [DropdownOption]
     let selected: String?
     var below = false
+    /// As wide as it is given, as a field, its chevron at the far end.
+    var fill = false
     let choose: (String) -> Void
 
     @Environment(\.openDropdown) private var open
@@ -753,15 +1199,17 @@ private struct DropdownButton: View {
                 if let site { Favicon(site: site, size: 14, plate: false) }
                 if let symbol { Image(systemName: symbol).font(.system(size: 12)) }
                 Text(label)
+                if fill { Spacer(minLength: 0) }
                 if icon == nil {
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Palette.muted)
                 }
             }
+            .frame(maxWidth: fill ? .infinity : nil)
         }
         .buttonStyle(SettingsButtonStyle())
-        .fixedSize()
+        .fixedSize(horizontal: !fill, vertical: true)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Dropdown.space)) } action: { frame = $0 }
     }
 }
@@ -775,22 +1223,28 @@ private struct DropdownPanel: View {
     @State private var lit: String?
 
     private static let rowHeight: CGFloat = 32
+    private static let separatorHeight: CGFloat = 9
 
     var body: some View {
         GeometryReader { space in
-            let height = min(CGFloat(dropdown.options.count), 8.5) * Self.rowHeight + 10
-            let width = max(dropdown.anchor.width + 10, 200)
+            let lines = CGFloat(dropdown.options.count { $0.separated }) * Self.separatorHeight
+            let panel = dropdown.panel
+            let height = panel?.size.height ?? min(CGFloat(dropdown.options.count), 8.5) * Self.rowHeight + lines + 10
+            let width = panel?.size.width ?? max(dropdown.anchor.width + 10, 200)
+            let left = panel == nil ? dropdown.anchor.minX - 5 : dropdown.anchor.maxX - width
             let top = dropdown.below ? dropdown.anchor.maxY + 4 : dropdown.anchor.minY - 5
             ZStack(alignment: .topLeading) {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture(perform: close)
-                list
-                    .frame(width: width, height: height)
-                    .menuPanel()
-                    // Kept inside the settings, whichever edge it is near.
-                    .offset(x: min(dropdown.anchor.minX - 5, space.size.width - width - 8),
-                            y: max(8, min(top, space.size.height - height - 8)))
+                Group {
+                    if let panel { panel.content } else { list }
+                }
+                .frame(width: width, height: height)
+                .menuPanel()
+                // Kept inside the settings, whichever edge it is near.
+                .offset(x: max(8, min(left, space.size.width - width - 8)),
+                        y: max(8, min(top, space.size.height - height - 8)))
             }
         }
         .background {
@@ -807,6 +1261,11 @@ private struct DropdownPanel: View {
                 VStack(spacing: 0) {
                     ForEach(dropdown.options, id: \.id) { option in
                         row(option)
+                        if option.separated {
+                            Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1)
+                                .padding(.horizontal, 4)
+                                .frame(height: Self.separatorHeight)
+                        }
                     }
                 }
                 .padding(5)
@@ -933,7 +1392,9 @@ private struct SettingsGroup<Content: View>: View {
                     }
                 }
             }
-            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(Color.primary.opacity(0.045))
+            // A row lit under the pointer keeps to the card's corners.
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
     }
 }
@@ -951,9 +1412,9 @@ private struct SettingsRow<Control: View>: View {
         HStack(alignment: alignment, spacing: 12) {
             if let icon {
                 Image(systemName: icon)
-                    .font(.system(size: 16))
-                    .foregroundStyle(Palette.ink)
-                    .padding(.trailing, -2)
+                    .font(.system(size: 15))
+                    .foregroundStyle(Palette.muted)
+                    .frame(width: 20)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -975,7 +1436,8 @@ private struct SettingsRow<Control: View>: View {
 }
 
 /// Buttons on the settings' cards: outlined, or, for the one thing to do on a
-/// card (checking for updates), filled in the text's colour.
+/// card (checking for updates), filled in the text's colour; one that
+/// deletes (`role: .destructive`), red on a wash of red.
 struct SettingsButtonStyle: ButtonStyle {
     var prominent = false
 
@@ -983,13 +1445,15 @@ struct SettingsButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
+        let destructive = configuration.role == .destructive
         configuration.label
             .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(prominent ? Palette.ground : Palette.ink)
+            .foregroundStyle(destructive ? AnyShapeStyle(.red) : prominent ? AnyShapeStyle(Palette.ground) : AnyShapeStyle(Palette.ink))
             .padding(.horizontal, 10)
             .frame(height: 28)
-            .background(prominent ? AnyShapeStyle(Palette.ink) : AnyShapeStyle(Color.primary.opacity(0.05)), in: shape)
-            .overlay(shape.strokeBorder(Color.primary.opacity(prominent ? 0 : 0.12)))
+            .background(destructive ? AnyShapeStyle(Color.red.opacity(0.15))
+                        : prominent ? AnyShapeStyle(Palette.ink) : AnyShapeStyle(Color.primary.opacity(0.05)), in: shape)
+            .overlay(shape.strokeBorder(Color.primary.opacity(prominent || destructive ? 0 : 0.12)))
             .opacity(!isEnabled ? 0.4 : configuration.isPressed ? 0.7 : 1)
             .contentShape(shape)
     }

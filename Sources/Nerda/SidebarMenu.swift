@@ -118,7 +118,7 @@ struct SidebarMenu: View {
             }
             MenuDivider()
             MenuRow(icon: "clock.arrow.circlepath", title: "Show All History", shortcut: "⌘Y") { run(browser.openHistory) }
-            MenuRow(icon: "trash", title: "Clear History…") { run { History.shared.askToClear() } }
+            MenuRow(icon: "trash", title: "Clear History…") { run(browser.clearHistory) }
         }
         .frame(width: 300)
     }

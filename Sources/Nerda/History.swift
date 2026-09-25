@@ -135,20 +135,19 @@ final class History {
         changed()
     }
 
-    func clear() {
-        visits = [:]
+    /// Pages last visited from then on, for Delete browsing data.
+    // ponytail: only a page's last visit is kept, so one visited before and
+    // again since goes whole. Keep every visit's date if that matters.
+    func remove(since date: Date) {
+        visits = visits.filter { $0.value.last < date }
         built = nil
         save()
     }
 
-    /// History › Clear History…, and the history page: asks first.
-    func askToClear() {
-        let alert = NSAlert()
-        alert.messageText = "Clear all history?"
-        alert.informativeText = "The pages you visited will no longer be suggested as you type. Open tabs stay as they are."
-        alert.addButton(withTitle: "Clear History")
-        alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn { clear() }
+    func clear() {
+        visits = [:]
+        built = nil
+        save()
     }
 
     /// The pages visited last, latest first.

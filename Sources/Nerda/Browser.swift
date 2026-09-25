@@ -48,6 +48,8 @@ final class Browser: NSObject {
     var commandBarRequests = 0
     /// The same, for the field on a new tab (⌘T).
     var newTabRequests = 0
+    /// Delete browsing data is open over the history page (Clear History…).
+    var clearingHistory = false
     /// The address bar's address is being typed over (⌘L), to take the tab on
     /// screen somewhere else.
     var editingAddress = false
@@ -287,8 +289,9 @@ final class Browser: NSObject {
         tabs.first { $0.id == id }?.page?.evaluateJavaScript(Fullscreen.exit)
     }
 
-    func clearDownloads() {
-        downloads.removeAll { $0.state != .running }
+    /// Those done, or only those started from `since` on (Delete browsing data).
+    func clearDownloads(since: Date = .distantPast) {
+        downloads.removeAll { $0.state != .running && $0.started >= since }
     }
 
     func tab(for webView: WKWebView) -> Tab? {

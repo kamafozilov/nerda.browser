@@ -11,6 +11,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - Rest the pointer on a tab, in the sidebar or across the top, for a card with its title, its site and how much memory its page takes. Tabs other than the one on screen show a picture of their page; a sleeping tab shows the page as it went to sleep, and says it is sleeping.
 - A Keyboard Shortcuts page in Settings lists every key Nerda answers to, by tabs, page and window, each with a line on what it does.
+- A Security & Privacy page in Settings. Delete browsing history asks how far back to go (the last 15 minutes up to all time) and what to delete: the pages you visited, cached images and files, download history, cookies or site storage. Only what is safe to lose comes ticked, so you stay signed in unless you tick cookies yourself. History › Clear History… and the history page open the same choices. View browsing history opens the history page.
+- Block ads and trackers has moved to Security & Privacy. Manage filters › Configure picks the lists Nerda blocks with from uBlock Origin's catalogue (uBlock filters, AdGuard, malware and phishing lists, cookie notices, regional lists and more), found by name, or adds a list of your own by its address. EasyList and EasyPrivacy stay on until you choose otherwise; lists are kept on your Mac, so turning one on fetches only that one.
 
 ### Changed
 

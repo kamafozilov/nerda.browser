@@ -8,6 +8,7 @@ final class Download: Identifiable {
     enum State { case running, finished, failed, cancelled }
 
     let id = UUID()
+    let started = Date.now
     @ObservationIgnored let task: WKDownload
     /// Where it is being saved; nil until WebKit asks.
     var file: URL?

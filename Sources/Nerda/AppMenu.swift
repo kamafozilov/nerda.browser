@@ -200,7 +200,7 @@ final class AppMenu: NSObject {
         browser.go(to: url)
     }
 
-    @objc private func clearHistory() { History.shared.askToClear() }
+    @objc private func clearHistory() { shown.clearHistory() }
 
     @objc private func showFind() { browser.showFindBar() }
     @objc private func findNext() { browser.find() }

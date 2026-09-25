@@ -1443,7 +1443,7 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     defer { UserDefaults.standard.set(previousSetting, forKey: "blockAdsAndTrackers") }
     blocker.isEnabled = true
     blocker.install(in: configuration.userContentController)
-    blocker.use(list)
+    blocker.use([list])
     navigation.finished = false
     page.reload()
     for _ in 0..<250 where !navigation.finished { try await Task.sleep(for: .milliseconds(20)) }
@@ -1481,7 +1481,7 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     // A refresh while disabled stays disabled. Turning it back on uses the new list.
     let updated = try #require(try await store.compileContentRuleList(forIdentifier: "updated",
         encodedContentRuleList: ContentRules.encode("/updated-resource$xmlhttprequest")!))
-    blocker.use(updated)
+    blocker.use([updated])
     #expect(try await fetch("updated-resource"))
     blocker.isEnabled = true
     #expect(try await !fetch("updated-resource"))
@@ -1569,4 +1569,38 @@ private final class BlockerNavigation: NSObject, WKNavigationDelegate {
     #expect(zoomed.webView.pageZoom == 1.15)
     #expect(asleep.webView.pageZoom == 1.25)
     for tab in [plain, zoomed, asleep] { tab.silence() }
+}
+
+@MainActor @Test func deletingHistoryKeepsPagesVisitedBeforeTheRange() {
+    let history = History()
+    let old = URL(string: "https://old.example/")!
+    let new = URL(string: "https://new.example/")!
+    history.visit(old, title: "Old", at: .now.addingTimeInterval(-2 * 60 * 60))
+    history.visit(new, title: "New")
+    history.remove(since: DeleteRange.hour.since)
+    #expect(history.visits.keys.sorted { $0.absoluteString < $1.absoluteString } == [old])
+    history.remove(since: DeleteRange.all.since)
+    #expect(history.visits.isEmpty)
+}
+
+/// Hosts files and `$all` filters, as the malware and server lists write them.
+@Test func hostsLinesAndAllFiltersBlockTheirNames() throws {
+    let host = try #require(ContentRules.rule("127.0.0.1 ads.example # a comment"))
+    #expect(host.0["trigger"] as? [String: Any] != nil && !host.1)
+    #expect(((host.0["trigger"] as? [String: Any])?["url-filter"] as? String) == ContentRules.urlFilter("||ads.example^"))
+    #expect(ContentRules.rule("0.0.0.0 tracker.example")?.1 == false)
+    #expect(ContentRules.rule("127.0.0.1 localhost") == nil)
+    #expect(ContentRules.rule("# This hosts file is brought to you by") == nil)
+    #expect(ContentRules.rule("||malware.example^$all") != nil)
+}
+
+/// More rules than one list takes go in parts, each with every exception.
+@Test func manyRulesAreCompiledInParts() throws {
+    let text = (0..<5).map { "||ads\($0).example^" }.joined(separator: "\n") + "\n@@||good.example^"
+    let parts = try #require(ContentRules.encode(text, partsOf: 12))
+    let decoded = try parts.map { try #require(try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [[String: Any]]) }
+    let exceptions = decoded[0].count { ($0["action"] as? [String: String])?["type"] == "ignore-previous-rules" }
+    #expect(decoded.allSatisfy { $0.count <= 12 })
+    #expect(decoded.allSatisfy { part in part.count { ($0["action"] as? [String: String])?["type"] == "ignore-previous-rules" } == exceptions })
+    #expect(decoded.reduce(0) { $0 + $1.count { ($0["action"] as? [String: String])?["type"] == "block" } } == 5)
 }
