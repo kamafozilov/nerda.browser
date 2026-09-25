@@ -88,10 +88,11 @@ struct TabPeek: View {
     }
 }
 
-/// Puts its one card at `at` in the space it is given, moved back along
-/// `clamping` where it would run past that space's end.
+/// Puts its one card's `anchor` at `at` in the space it is given, moved back
+/// along `clamping` where it would run past that space's ends.
 struct PeekPlacement: Layout {
     let at: CGPoint
+    var anchor: UnitPoint = .topLeading
     let clamping: Axis.Set
     private static let margin: CGFloat = 8
 
@@ -102,17 +103,18 @@ struct PeekPlacement: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard let card = subviews.first else { return }
         let size = card.sizeThatFits(.unspecified)
-        var origin = CGPoint(x: bounds.minX + at.x, y: bounds.minY + at.y)
-        if clamping.contains(.horizontal) { origin.x = max(min(origin.x, bounds.maxX - size.width - Self.margin), bounds.minX) }
-        if clamping.contains(.vertical) { origin.y = max(min(origin.y, bounds.maxY - size.height - Self.margin), bounds.minY) }
+        var origin = CGPoint(x: bounds.minX + at.x - anchor.x * size.width,
+                             y: bounds.minY + at.y - anchor.y * size.height)
+        if clamping.contains(.horizontal) { origin.x = max(min(origin.x, bounds.maxX - size.width - Self.margin), bounds.minX + Self.margin) }
+        if clamping.contains(.vertical) { origin.y = max(min(origin.y, bounds.maxY - size.height - Self.margin), bounds.minY + Self.margin) }
         card.place(at: origin, proposal: ProposedViewSize(size))
     }
 }
 
 extension View {
     /// The tab under the pointer (`hovered`) as the one whose card shows
-    /// (`peeked`): the first once the pointer has rested on it half a
-    /// second, as a tooltip; while one shows, the next at once. Off the tabs
+    /// (`peeked`): the first once the pointer has rested on it 0.7 s,
+    /// as a tooltip; while one shows, the next at once. Off the tabs
     /// for a moment (the gap between two), the card stays. A menu opening
     /// (the tab's, right-clicked) puts it away, until the pointer moves on.
     func peeking(_ hovered: Tab.ID?, _ peeked: Binding<Tab.ID?>) -> some View {
@@ -126,7 +128,7 @@ extension View {
                 return
             }
             if peeked.wrappedValue == nil {
-                try? await Task.sleep(for: .milliseconds(500))
+                try? await Task.sleep(for: .milliseconds(700))
                 if Task.isCancelled { return }
             }
             peeked.wrappedValue = hovered

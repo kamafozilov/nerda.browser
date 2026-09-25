@@ -208,7 +208,8 @@ struct Sidebar: View {
         // The card of the tab the pointer rests on, over the page beside it.
         .overlay(alignment: .topLeading) {
             if dragged == nil, let peeked, let index = rest.firstIndex(where: { $0.id == peeked }) {
-                PeekPlacement(at: CGPoint(x: width + 4, y: rowFrame(index).minY - 4), clamping: .vertical) {
+                // Its middle level with the tab's, however tall it is.
+                PeekPlacement(at: CGPoint(x: width + 4, y: rowFrame(index).midY), anchor: .leading, clamping: .vertical) {
                     TabPeek(tab: rest[index], selected: peeked == browser.selectedID)
                 }
                 .allowsHitTesting(false)
