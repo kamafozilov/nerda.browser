@@ -118,7 +118,7 @@ struct TabStrip: View {
             if dragged == nil, let peeked, let index = items.firstIndex(of: peeked.id), let tab = browser.tabs.first(where: { $0.id == peeked.id }) {
                 PeekPlacement(at: CGPoint(x: layout.tabs.minX + CGFloat(index) * tabWidth, y: Self.height + 2),
                               clamping: .horizontal) {
-                    TabPeek(tab: tab, look: peeked.look)
+                    TabPeek(tab: tab, look: peeked.id == browser.selectedID ? nil : peeked.look)
                 }
                 .allowsHitTesting(false)
                 .transition(.opacity)

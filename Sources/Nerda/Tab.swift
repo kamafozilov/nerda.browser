@@ -574,6 +574,9 @@ final class Tab: Identifiable {
         // out of sight has its timers slowed further the longer it stays so.
         set(configuration.preferences, "_setDNSPrefetchingEnabled:", true)
         set(configuration.preferences, "_setHiddenPageDOMTimerThrottlingAutoIncreases:", true)
+        // Picture in picture, for Auto Picture-in-Picture and a player's own
+        // button: without it WebKit says no video supports it.
+        set(configuration.preferences, "_setAllowsPictureInPictureMediaPlayback:", true)
         // A page out of sight that keeps over half a core busy for WebKit's
         // 8 minutes (an ad gone wrong) has its process ended; the tab sleeps
         // (Browser.webViewWebContentProcessDidTerminate) and loads again when

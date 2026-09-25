@@ -210,7 +210,7 @@ struct Sidebar: View {
             if dragged == nil, let peeked, let index = rest.firstIndex(where: { $0.id == peeked.id }) {
                 // Its middle level with the tab's, however tall it is.
                 PeekPlacement(at: CGPoint(x: width + 4, y: rowFrame(index).midY), anchor: .leading, clamping: .vertical) {
-                    TabPeek(tab: rest[index], look: peeked.look)
+                    TabPeek(tab: rest[index], look: peeked.id == browser.selectedID ? nil : peeked.look)
                 }
                 .allowsHitTesting(false)
                 .transition(.opacity)

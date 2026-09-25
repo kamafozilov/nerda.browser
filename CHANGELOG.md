@@ -14,9 +14,11 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Changed
 
 - Nerda's icon is simpler: the N on its own, without the orbit around it.
+- Warn before quitting has moved from the Nerda menu to Settings › General, where every setting now has its icon beside it.
 
 ### Fixed
 
+- Auto Picture-in-Picture works: a video playing with sound (YouTube and the rest) now floats over everything when you leave its tab, and goes back into the page when you return. WebKit had picture in picture turned off for every video, the player's own button included.
 - A Settings page short enough to fit no longer slides about under a trackpad swipe; the filter lists and dropdowns in Settings stay still the same way.
 - The Downloads button at the foot of the sidebar is now the same size as the menu button beside it.
 - The arrow keys set the volume and seek again on YouTube after you switch to theater mode. Before, they scrolled the page, because the player lost the keyboard when it moved into its theater frame.

@@ -36,7 +36,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
     /// What the page holds, so a search finds it by a setting as well as by its name.
     private var keywords: [String] {
         switch self {
-        case .general: ["default browser", "search engine", "google", "picture in picture", "video", "screenshot", "language", "spell", "about", "version", "updates"]
+        case .general: ["default browser", "search engine", "google", "picture in picture", "video", "screenshot", "language", "spell", "quit", "warn", "about", "version", "updates"]
         case .appearance: ["theme", "dark", "light", "zoom", "tab style", "vertical", "horizontal", "sidebar", "transparency", "tinted", "transparent", "glass"]
         case .privacy: ["security", "history", "delete", "clear", "cookies", "cache", "site data", "ads", "trackers", "adblock", "blocking", "filters", "easylist", "ublock", "adguard"]
         case .shortcuts: ["keyboard", "keys", "hotkeys"] + ShortcutsSettings.groups.flatMap { $0.shortcuts.map(\.title) }
@@ -160,34 +160,41 @@ private struct GeneralSettings: View {
     @AppStorage(PictureInPicture.key) private var pictureInPicture = false
     @AppStorage(Screenshot.key) private var screenshot = true
     @AppStorage(SpellCheck.key) private var spellCheck = true
+    @AppStorage(QuitConfirmation.key) private var warnsBeforeQuitting = true
 
     var body: some View {
         DefaultBrowserCard()
         SettingsGroup(title: "Preferences") {
-            SettingsRow(title: "Default search engine", detail: "Used for searches from the address bar") {
+            SettingsRow(title: "Default search engine", detail: "Used for searches from the address bar", icon: "magnifyingglass") {
                 DropdownButton(label: engine.name, site: engine.site,
                                options: SearchEngine.allCases.map { DropdownOption(id: $0.rawValue, title: $0.name, site: $0.site) },
                                selected: engine.rawValue) { engine = SearchEngine(rawValue: $0) ?? .google }
             }
         }
         SettingsGroup {
-            SettingsRow(title: "Auto Picture-in-Picture", detail: "Show floating player when switching from a video tab") {
+            SettingsRow(title: "Auto Picture-in-Picture", detail: "Show floating player when switching from a video tab",
+                        icon: "pip") {
                 SettingsToggle(title: "Auto Picture-in-Picture", isOn: $pictureInPicture)
             }
-            SettingsRow(title: "Screenshot", detail: "Capture the current page from the right-click menu") {
+            SettingsRow(title: "Screenshot", detail: "Capture the current page from the right-click menu", icon: "camera.viewfinder") {
                 SettingsToggle(title: "Screenshot", isOn: $screenshot)
             }
         }
         SettingsGroup {
-            SettingsRow(title: "Preferred languages", detail: languagesDetail) {
+            SettingsRow(title: "Preferred languages", detail: languagesDetail, icon: "globe") {
                 Button("Configure", systemImage: "slider.horizontal.3", action: editLanguages)
                     .buttonStyle(SettingsButtonStyle())
             }
-            SettingsRow(title: "Spell check", detail: "Check spelling as you type") {
+            SettingsRow(title: "Spell check", detail: "Check spelling as you type", icon: "textformat.abc") {
                 // Stored by WebKit itself, which the toggle hears back.
                 SettingsToggle(title: "Spell check", isOn: Binding(get: { spellCheck }, set: {
                     SpellCheck.set($0, pages: browser.tabs.compactMap(\.page))
                 }))
+            }
+        }
+        SettingsGroup {
+            SettingsRow(title: "Warn before quitting", detail: "Ask before ⌘Q closes every window", icon: "power") {
+                SettingsToggle(title: "Warn before quitting", isOn: $warnsBeforeQuitting)
             }
         }
         AboutSettings()
