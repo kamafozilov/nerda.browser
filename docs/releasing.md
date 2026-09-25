@@ -59,7 +59,7 @@ Every release is signed by that one team. An installed Nerda only takes an updat
    - checks both tickets and Gatekeeper's verdict on both, and stops before anything is committed if one fails;
    - turns `[Unreleased]` into `[0.0.x] - date` under a new, empty `[Unreleased]`, and updates the compare links at the bottom;
    - commits `chore(release): v0.0.x`, tags `v0.0.x`, pushes both;
-   - creates the GitHub Release with both files and the section as its notes, marked Latest (never as a pre-release: the updater reads only the latest release).
+   - creates the GitHub Release with both files, `release.json` for the updater, and the section as its notes, marked Latest (never as a pre-release: the updater reads only the latest release).
 3. Installed copies see it within six hours or at their next launch. Nerda › Check for Updates… sees it at once.
 
 If the release step fails after the push, the script prints the `gh release create` command that finishes it.
@@ -76,7 +76,7 @@ The first release build asks once for the login keychain password when it reache
 
 ## How an update is installed
 
-`Sources/Nerda/Updater.swift` reads `https://api.github.com/repos/kamafozilov/nerda.browser/releases/latest`. When its tag is newer than the running version, Nerda shows the release notes. "Install and Relaunch" then:
+`Sources/Nerda/Updater.swift` reads `release.json` from the latest release (`https://github.com/kamafozilov/nerda.browser/releases/latest/download/release.json`), which `release.sh` writes in the shape of GitHub's API: tag, notes, page, and `Nerda.zip` with its SHA-256. Not the API itself, which answers only 60 requests an hour to an address without a GitHub account, and a provider's shared address runs out of them. When its tag is newer than the running version, Nerda shows the release notes. "Install and Relaunch" then:
 
 1. downloads `Nerda.zip` and checks it against the SHA-256 that GitHub lists (a release without one isn't taken);
 2. checks that the new app has the same bundle id, a newer version, and a valid signature, everything inside it included, from a Developer ID Application certificate Apple gave the same team;

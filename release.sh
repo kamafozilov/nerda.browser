@@ -2,7 +2,8 @@
 # Publishes a version of Nerda: what CHANGELOG.md has under [Unreleased]
 # becomes that version's section, a v-tag marks the commit, and a GitHub
 # Release carries Nerda.dmg (to install from) and Nerda.zip (what an
-# installed Nerda updates itself from), with the section as its notes. Both
+# installed Nerda updates itself from) and release.json (what it reads to
+# find them), with the section as its notes. Both
 # are signed with Developer ID, notarized by Apple and stapled, so they open
 # on any Mac without a warning.
 #
@@ -140,9 +141,20 @@ git commit --quiet -m "chore(release): $TAG"
 git tag -a "$TAG" -m "Nerda $VERSION"
 git push --quiet origin main "$TAG"
 
+# What installed copies read to find the release (Updater.swift): GitHub's
+# API shape, served as one of the release's files.
+SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
+FEED="build/release.json"
+plutil -create xml1 "$FEED"
+plutil -insert tag_name -string "$TAG" "$FEED"
+plutil -insert body -string "$NOTES" "$FEED"
+plutil -insert html_url -string "$URL/releases/tag/$TAG" "$FEED"
+plutil -insert assets -json "[{\"name\":\"Nerda.zip\",\"browser_download_url\":\"$URL/releases/download/$TAG/Nerda.zip\",\"digest\":\"sha256:$SHA\"}]" "$FEED"
+plutil -convert json "$FEED"
+
 # Not a pre-release, even below 1.0.0: the updater reads the latest release,
 # and GitHub leaves pre-releases out of it.
-gh release create "$TAG" "$DMG" "$ZIP" --repo "$REPO" --title "Nerda $VERSION" \
+gh release create "$TAG" "$DMG" "$ZIP" "$FEED" --repo "$REPO" --title "Nerda $VERSION" \
   --notes-file build/notes.md --latest \
-  || fail "$TAG is pushed but the release isn't made; again with: gh release create $TAG $DMG $ZIP --repo $REPO --title 'Nerda $VERSION' --notes-file build/notes.md --latest"
+  || fail "$TAG is pushed but the release isn't made; again with: gh release create $TAG $DMG $ZIP $FEED --repo $REPO --title 'Nerda $VERSION' --notes-file build/notes.md --latest"
 echo "released: $URL/releases/tag/$TAG"

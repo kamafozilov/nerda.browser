@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Nerda › Check for Updates… finds new versions again where it said "Couldn't check for updates" because too many people share your internet address.
+
 ## [0.0.3] - 2026-09-25
 
 ### Added

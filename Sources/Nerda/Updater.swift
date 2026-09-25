@@ -43,10 +43,13 @@ import SwiftUI
 final class Updater {
     static let shared = Updater()
 
-    /// The latest release, as GitHub's API gives it. NERDA_UPDATES points a
-    /// test run at a file of the same shape elsewhere (docs/releasing.md).
+    /// The latest release, as release.sh describes it in release.json, one of
+    /// its files, in the shape GitHub's API gives it. Not the API itself: it
+    /// takes 60 requests an hour from an address without an account, and a
+    /// provider's shared address runs out of them. NERDA_UPDATES points a test
+    /// run at a file of the same shape elsewhere (docs/releasing.md).
     nonisolated static let feed = override
-        ?? URL(string: "https://api.github.com/repos/kamafozilov/nerda.browser/releases/latest")!
+        ?? URL(string: "https://github.com/kamafozilov/nerda.browser/releases/latest/download/release.json")!
     /// Over https, or on this Mac, the only place plain http is taken from.
     nonisolated static let override: URL? = {
         guard let text = ProcessInfo.processInfo.environment["NERDA_UPDATES"], let url = URL(string: text),
@@ -206,8 +209,7 @@ final class Updater {
     }
 
     nonisolated private static func latest() async throws -> Release {
-        var request = URLRequest(url: feed, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        let request = URLRequest(url: feed, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw Swap.Refused.feed }
         let decoder = JSONDecoder()
