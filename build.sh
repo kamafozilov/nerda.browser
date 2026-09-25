@@ -5,6 +5,8 @@
 #   ./build.sh          release build: build/Nerda.app, the Nerda people use
 #   ./build.sh debug    debug build: build/Nerda Dev.app, a separate app with
 #                       its own bundle id, data and keychain item (Edition.swift)
+#   ./build.sh bench    build/Nerda Bench.app, for bench.sh: a development build
+#                       with data of its own, optimized as a release is
 #
 # The version is NERDA_VERSION (release.sh sets it), else the latest v* tag.
 # NERDA_SIGN_IDENTITY names the certificate to sign with (release.sh sets
@@ -16,6 +18,9 @@ CONFIG="${1:-release}"
 if [ "$CONFIG" = release ]; then
   NAME="Nerda"
   ID="dev.nerda.browser"
+elif [ "$CONFIG" = bench ]; then
+  NAME="Nerda Bench"
+  ID="dev.nerda.browser.bench"
 else
   NAME="Nerda Dev"
   ID="dev.nerda.browser.debug"
@@ -27,10 +32,12 @@ VERSION="${VERSION:-0.0.0}"
 
 # A release runs on Apple silicon and Intel Macs alike; a debug build is
 # built for this Mac only, which is quicker.
-ARCHS=()
-[ "$CONFIG" = release ] && ARCHS=(--arch arm64 --arch x86_64)
-swift build -c "$CONFIG" ${ARCHS[@]+"${ARCHS[@]}"}
-BINARY="$(swift build -c "$CONFIG" ${ARCHS[@]+"${ARCHS[@]}"} --show-bin-path)/Nerda"
+FLAGS=(-c "$CONFIG")
+[ "$CONFIG" = release ] && FLAGS+=(--arch arm64 --arch x86_64)
+# Timed as people get it, with the development build's Bench.swift in.
+[ "$CONFIG" = bench ] && FLAGS=(-c release -Xswiftc -DDEBUG)
+swift build "${FLAGS[@]}"
+BINARY="$(swift build "${FLAGS[@]}" --show-bin-path)/Nerda"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
@@ -52,6 +59,10 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
+# The pictures behind a new tab's field (Backdrop.swift, assets/backgrounds/CREDITS.md).
+mkdir -p "$APP/Contents/Resources/Backgrounds"
+cp assets/backgrounds/*.heic "$APP/Contents/Resources/Backgrounds/"
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -67,6 +78,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHumanReadableCopyright</key><string>© 2026 Kamron Fozilov</string>
   <key>LSMinimumSystemVersion</key><string>15.4</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>CFBundleURLTypes</key><array><dict>
+    <key>CFBundleURLName</key><string>Web addresses</string>
+    <key>CFBundleTypeRole</key><string>Viewer</string>
+    <key>CFBundleURLSchemes</key><array><string>http</string><string>https</string></array>
+  </dict></array>
   <!-- Without these, macOS ends the app the moment a page (a video call) asks
        for the camera or microphone. -->
   <key>NSCameraUsageDescription</key><string>A website you open wants to use the camera.</string>

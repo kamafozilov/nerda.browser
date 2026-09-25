@@ -26,9 +26,9 @@ struct FindBar: View {
                     .fixedSize()
             }
             Divider().frame(height: 16)
-            BarButton(symbol: "chevron.up", label: "Previous Match") { browser.find(backwards: true) }
-            BarButton(symbol: "chevron.down", label: "Next Match") { browser.find() }
-            BarButton(symbol: "xmark", label: "Done", action: browser.hideFindBar)
+            FindButton(symbol: "chevron.up", label: "Previous Match") { browser.find(backwards: true) }
+            FindButton(symbol: "chevron.down", label: "Next Match") { browser.find() }
+            FindButton(symbol: "xmark", label: "Done", action: browser.hideFindBar)
         }
         .padding(.leading, 12)
         .padding(.trailing, 6)
@@ -44,7 +44,7 @@ struct FindBar: View {
     }
 }
 
-private struct BarButton: View {
+private struct FindButton: View {
     let symbol: String
     let label: String
     let action: () -> Void

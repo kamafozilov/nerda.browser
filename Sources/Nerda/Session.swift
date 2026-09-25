@@ -5,7 +5,8 @@ import Foundation
 /// every change, and at the latest every few seconds.
 struct Session: Codable {
     struct Tab: Codable {
-        let url: URL
+        /// None for the settings and history tabs.
+        let url: URL?
         let title: String
         /// WebKit's own record of the page (`interactionState`): its history,
         /// back and forward, and where it was scrolled to.
@@ -15,6 +16,12 @@ struct Session: Codable {
         let pinned: Bool?
         /// A pinned tab's address when pinned (`Tab.home`); optional, as `pinned`.
         let home: URL?
+        /// The settings tab, open on this page of them.
+        var settings: SettingsPage? = nil
+        /// The history tab.
+        var history: Bool? = nil
+        /// The name the tab was given in place of its page's title.
+        var name: String? = nil
     }
 
     var tabs: [Tab]
@@ -28,20 +35,21 @@ extension Browser {
     /// Opens the tabs saved in `file`, asleep but the one on screen, and from
     /// then on keeps `file` up to date. A file that can't be read (from a
     /// newer version, or cut short) is set aside rather than overwritten.
+    /// New tabs aren't saved: they are nowhere. Left on one, or with none to
+    /// open, it starts on a new tab, as other browsers do.
     func restore(from file: URL) {
         sessionFile = file
+        defer { if tabs.isEmpty { add(Tab()) } }
         guard tabs.isEmpty, let data = try? Data(contentsOf: file) else { return }
         guard let session = try? JSONDecoder().decode(Session.self, from: data) else {
             try? data.write(to: file.deletingLastPathComponent().appending(path: "session-unreadable.json"))
             return
         }
-        for saved in session.tabs.reversed() { add(Tab(restoring: saved), inBackground: true) }
+        for saved in session.tabs.reversed() { add(Tab(restoring: saved), inBackground: true, last: false) }
         guard !tabs.isEmpty else { return }
         // Pinned sites are there at once, as they always are.
         for tab in tabs where tab.isPinned { _ = tab.webView }
-        let index = session.selected.flatMap { tabs.indices.contains($0) ? $0 : nil } ?? 0
-        selectedID = tabs[index].id
-        commandBarOpen = false
+        if let index = session.selected, tabs.indices.contains(index) { selectedID = tabs[index].id } else { add(Tab()) }
     }
 
     /// The tabs now, as they would be saved.

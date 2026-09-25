@@ -2,38 +2,58 @@ import SwiftUI
 import WebKit
 
 /// One browser window: its tabs, newest first, which one is showing, and what
-/// is open around them. A tab only exists once there is somewhere to go, so
-/// there are no empty "New Tab" tabs.
+/// is open around them. There is always a tab: with nothing else open, a new
+/// one, asking where to go.
 @Observable
 final class Browser: NSObject {
     private(set) var tabs: [Tab] = [] {
         // However a tab goes, its page goes quiet now, not once the last
         // reference to it is let go, which something may yet hold on to.
         didSet {
-            for tab in oldValue where !tabs.contains(where: { $0 === tab }) { tab.silence() }
+            for tab in oldValue where !tabs.contains(where: { $0 === tab }) {
+                tab.silence()
+                recent.removeAll { $0 === tab }
+            }
             sessionChanged()
         }
     }
+    /// The open tabs in the order they were on screen, the one on screen
+    /// last: closing it goes back down this, as Vivaldi does.
+    @ObservationIgnored private(set) var recent: [Tab] = []
     var selectedID: Tab.ID? {
         didSet {
             tabs.first { $0.id == oldValue }?.lastSeen = .now
+            if let selected {
+                recent.removeAll { $0 === selected }
+                recent.append(selected)
+            }
             // As in Chrome, going to another tab takes the page out of full screen.
             if selectedID != oldValue { exitPageFullscreen() }
             // Accounts listed under a box of the tab left behind.
             if selectedID != oldValue { passwordChoices = nil }
+            if selectedID != oldValue, PictureInPicture.isOn {
+                tabs.first { $0.id == oldValue }?.page?.evaluateJavaScript(PictureInPicture.enter)
+                selected?.page?.evaluateJavaScript(PictureInPicture.exit)
+            }
             sessionChanged()
         }
     }
     var sidebarOpen = true
-    /// Open at launch too: there are no tabs until you say where to go.
-    var commandBarOpen = true {
+    /// The tab switcher (⌘⇧A): the open tabs, and anywhere else to go.
+    var commandBarOpen = false {
         didSet { if commandBarOpen { exitPageFullscreen() } }
     }
-    /// Counts ⌘Ts, so one with the bar already open still puts the keyboard in it.
+    /// Counts asks for the switcher or the address, so one with it already
+    /// open still puts the keyboard in it.
     var commandBarRequests = 0
+    /// The same, for the field on a new tab (⌘T).
+    var newTabRequests = 0
     /// The address bar's address is being typed over (⌘L), to take the tab on
     /// screen somewhere else.
     var editingAddress = false
+    /// An incognito window hidden behind its lock, until Touch ID or the
+    /// Mac's password opens it (see `Windows.lock`).
+    var locked = false
     /// The tab whose page shows one of its elements (a video) over the whole
     /// window, as it asked to. Always the one on screen.
     private(set) var fullscreenTab: Tab.ID?
@@ -69,10 +89,21 @@ final class Browser: NSObject {
     @ObservationIgnored var pendingSave: Task<Void, Never>?
     @ObservationIgnored var savedSession: Data?
     @ObservationIgnored private var sessionTimer: Timer?
+    /// The window it is shown in, which closing its last tab closes; none in tests.
+    @ObservationIgnored weak var window: NSWindow?
 
     var selected: Tab? { tabs.first { $0.id == selectedID } }
 
-    override init() {
+    /// Where its pages keep cookies, cache and site data: the one on disk, or
+    /// for an incognito window, one in memory, gone with the window.
+    let dataStore: WKWebsiteDataStore
+    /// An incognito window's: no history kept, no session saved, nothing on disk.
+    var isPrivate: Bool { !dataStore.isPersistent }
+    /// What its fields suggest from: your history, or in incognito, nothing of it.
+    var history: History { isPrivate ? History.empty : .shared }
+
+    init(dataStore: WKWebsiteDataStore = .default()) {
+        self.dataStore = dataStore
         super.init()
         // Checked each minute, loosely, so the system can fold it in with other wake-ups.
         sleepTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
@@ -93,6 +124,13 @@ final class Browser: NSObject {
         memoryPressure?.activate()
     }
 
+    /// An incognito window's browser goes with its window.
+    isolated deinit {
+        sleepTimer?.invalidate()
+        sessionTimer?.invalidate()
+        memoryPressure?.cancel()
+    }
+
     /// Tabs out of sight at least this long, and not busy (playing, on a call),
     /// sleep. Pinned ones never do: being always ready is what they are for.
     func sleepIdleTabs(unseenFor age: TimeInterval) {
@@ -108,13 +146,18 @@ final class Browser: NSObject {
     /// A tab for `url`, on screen, or for a link opened in the background
     /// (⌘-click), behind the one that is.
     func open(_ url: URL, inBackground: Bool = false) {
-        add(Tab(url: url), inBackground: inBackground)
+        let tab = Tab()
+        add(tab, inBackground: inBackground)
+        tab.go(to: url)
     }
 
-    /// Pinned tabs come first, in their own order; the rest follow, newest first.
-    func add(_ tab: Tab, inBackground: Bool = false) {
+    /// Pinned tabs come first, in their own order; the rest follow, newest
+    /// first, under the sidebar's New Tab, or across the top, newest `last`,
+    /// by its + button.
+    func add(_ tab: Tab, inBackground: Bool = false, last: Bool = TabStyle.current == .horizontal) {
+        tab.dataStore = dataStore
         tab.delegate = self
-        tabs.insert(tab, at: tab.isPinned ? 0 : pinnedCount)
+        tabs.insert(tab, at: tab.isPinned ? 0 : last ? tabs.count : pinnedCount)
         if !inBackground { selectedID = tab.id }
     }
 
@@ -126,10 +169,30 @@ final class Browser: NSObject {
         move(id, pinned: pinned, to: pinned ? .max : 0)
     }
 
+    /// The tab on screen, at once: a press and the click it ends in both ask.
+    func select(_ id: Tab.ID) {
+        if selectedID != id { selectedID = id }
+    }
+
+    /// A tab's own name; an empty one gives it back its page's title.
+    func rename(_ id: Tab.ID, to name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        tabs.first { $0.id == id }?.name = name.isEmpty ? nil : name
+        sessionChanged()
+    }
+
+    /// The keyboard back on the page on screen, once something of ours
+    /// that had it (a field) is done with it.
+    func focusPage() {
+        if let page = selected?.page { page.window?.makeFirstResponder(page) }
+    }
+
     /// Puts a tab at `position` among the pinned tabs, or among the rest,
     /// pinning or unpinning it on the way; past the end is the end.
     func move(_ id: Tab.ID, pinned: Bool, to position: Int) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        // A new tab, or the settings, has no site to pin.
+        guard !pinned || tabs[index].hasPage else { return }
         // Moved in one change: `tabs` taking it out on its own would silence its page.
         var moved = tabs
         let tab = moved.remove(at: index)
@@ -142,19 +205,23 @@ final class Browser: NSObject {
         tabs = moved
     }
 
-    /// Closing the tab on screen hands the screen back to the page that opened
-    /// it (a popup's), or else to the one that slides into its place, or to
-    /// the one above when there is none below, as browsers do.
+    /// Closing the tab on screen goes back to the tab on screen before it,
+    /// wherever that is in the list: the page that opened a popup or a new
+    /// tab, unless you went elsewhere since. With none seen before it (just
+    /// after launch), to the one that slides into its place, or to the one
+    /// above when there is none below.
     func close(_ id: Tab.ID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
-        let closed = tabs.remove(at: index)
+        tabs.remove(at: index)
         if passwordOffer?.tab == id { passwordOffer = nil }
         if selectedID == id {
-            let opener = tabs.first { $0 === closed.opener }
-            selectedID = opener?.id ?? (tabs.indices.contains(index) ? tabs[index].id : tabs.last?.id)
+            selectedID = recent.last?.id ?? (tabs.indices.contains(index) ? tabs[index].id : tabs.last?.id)
         }
-        // With nothing left, straight back to asking where to go, as at launch.
-        if tabs.isEmpty { commandBarOpen = true }
+        // With nothing left, the window goes, as in other browsers: an
+        // incognito one, and incognito with it. Without a window, a new tab.
+        if tabs.isEmpty {
+            if let window { window.close() } else { add(Tab()) }
+        }
     }
 
     /// Closing the window closes its tabs, as Safari does: nothing keeps
@@ -166,7 +233,7 @@ final class Browser: NSObject {
         sessionFile = nil
         tabs.removeAll()
         selectedID = nil
-        commandBarOpen = true
+        commandBarOpen = false
     }
 
     /// ⌘1 to ⌘8, top down; ⌘9 is always the last, as in every browser.
@@ -184,7 +251,7 @@ final class Browser: NSObject {
 
     /// The next match on the page, or the one before; round to the start past the end.
     func find(backwards: Bool = false) {
-        guard let page = selected?.webView, !findQuery.isEmpty else { return findMissing = false }
+        guard let page = selected?.page, !findQuery.isEmpty else { return findMissing = false }
         let configuration = WKFindConfiguration()
         configuration.backwards = backwards
         let query = findQuery
@@ -196,14 +263,15 @@ final class Browser: NSObject {
 
     /// A page going full screen, or coming back. Only the page on screen, and
     /// only straight after a click or key press: the page checks that too, but
-    /// it could be got round there.
+    /// it could be got round there. The pointer only passing by is not one.
     func page(_ page: WKWebView, wantsFullscreen: Bool) {
         guard let tab = tab(for: page) else { return }
         guard wantsFullscreen else {
             if fullscreenTab == tab.id { fullscreenTab = nil }
             return
         }
-        let sinceInput = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+        let sinceInput = [CGEventType.leftMouseDown, .leftMouseUp, .rightMouseDown, .otherMouseDown, .keyDown]
+            .map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity
         guard tab.id == selectedID, !commandBarOpen, sinceInput < 1 else {
             page.evaluateJavaScript(Fullscreen.exit)
             return
@@ -236,8 +304,13 @@ extension Browser: WKUIDelegate {
         for action: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
+        if (webView as? SwipingWebView)?.takeIncognitoAsk() == true, let url = action.request.url {
+            // Only the web: loaded from here, a page's link to a file on this
+            // Mac (file:) would open where a page itself may not take you.
+            if ["http", "https"].contains(url.scheme?.lowercased() ?? "") { Windows.openIncognito(url) }
+            return nil
+        }
         let tab = Tab(configuration: configuration)
-        tab.opener = self.tab(for: webView)
         withAnimation(.slide) { add(tab) }
         return tab.webView
     }
@@ -267,7 +340,7 @@ extension Browser: WKUIDelegate {
 
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
                  initiatedByFrame frame: WKFrameInfo) async -> [URL]? {
-        guard let window = window(showing: webView) else { return nil }
+        guard let window = await window(showing: webView) else { return nil }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = parameters.allowsMultipleSelection
         panel.canChooseDirectories = parameters.allowsDirectories
@@ -279,11 +352,11 @@ extension Browser: WKUIDelegate {
         return host.isEmpty ? "This page says" : "\(host) says"
     }
 
-    /// A sheet over the page, whose tab comes on screen first if it wasn't:
-    /// a question should show what it is about.
+    /// A sheet over the page, once its tab is on screen: a question should
+    /// show what it is about.
     private func ask(_ title: String, _ message: String, over webView: WKWebView,
                      buttons: [String] = ["OK"], field: NSTextField? = nil) async -> NSApplication.ModalResponse {
-        guard let window = window(showing: webView) else { return .cancel }
+        guard let window = await window(showing: webView) else { return .cancel }
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
@@ -293,9 +366,19 @@ extension Browser: WKUIDelegate {
         return await alert.beginSheetModal(for: window)
     }
 
-    private func window(showing webView: WKWebView) -> NSWindow? {
-        if let tab = tab(for: webView) { selectedID = tab.id }
-        return NSApp.mainWindow ?? NSApp.windows.first { $0.isVisible }
+    /// The page's own window, once its tab is the one on screen. A page out of
+    /// sight waits for you to go to it, as in Chrome, rather than bring its
+    /// tab forward: an alert would otherwise take you away from the tab you
+    /// are on, to whatever the page wanted to show. nil if the tab goes, or
+    /// sleeps, meanwhile.
+    // ponytail: looked at five times a second, only while a tab out of sight has something to ask.
+    private func window(showing webView: WKWebView) async -> NSWindow? {
+        guard let tab = tab(for: webView) else { return nil }
+        while tab.id != selectedID || locked {
+            try? await Task.sleep(for: .milliseconds(200))
+            guard tab.page === webView, tabs.contains(where: { $0 === tab }) else { return nil }
+        }
+        return webView.window ?? window
     }
 }
 
@@ -316,12 +399,15 @@ extension Browser: WKNavigationDelegate {
             return .cancel
         }
 
-        // ⌘-click or a middle click: a tab of its own, behind this one.
-        if action.navigationType == .linkActivated,
-           action.modifierFlags.contains(.command) || action.buttonNumber == 2 {
+        // ⌘-click: a tab of its own, behind this one.
+        if action.navigationType == .linkActivated, action.modifierFlags.contains(.command) {
             withAnimation(.slide) { open(url, inBackground: true) }
             return .cancel
         }
+        // A middle click (the buttons as a mask: 4 is the middle one) is opened
+        // behind by Tab.middleClick, as not every WebKit asks here for it. This
+        // WebKit would also take the page itself there.
+        if action.navigationType == .linkActivated, action.buttonNumber == 4 { return .cancel }
         return .allow
     }
 
@@ -339,7 +425,11 @@ extension Browser: WKNavigationDelegate {
             Task { webView.load(URLRequest(url: url)) }
             return .cancel
         }
-        let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
+        let http = response.response as? HTTPURLResponse
+        // A redirect is followed, whatever it says it is: youtube.com sends its
+        // move to www.youtube.com as application/binary, which would be saved.
+        if let status = http?.statusCode, (300..<400).contains(status) { return .allow }
+        let disposition = http?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
         return response.canShowMIMEType && !disposition.lowercased().hasPrefix("attachment") ? .allow : .download
     }
 
@@ -362,6 +452,7 @@ extension Browser: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         retried = nil
+        tab(for: webView)?.pageDidCommit()
         tab(for: webView)?.failure = nil
         tab(for: webView)?.recordVisit()
         if let tab = tab(for: webView) { hideChoices(on: tab) }
@@ -381,6 +472,25 @@ extension Browser: WKNavigationDelegate {
         if error.code == NSURLErrorCancelled || (error.domain == "WebKitErrorDomain" && error.code == 102) { return }
         guard let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL else { return }
         tab(for: webView)?.failure = (url, error.localizedDescription)
+    }
+
+    /// A certificate the Mac doesn't trust is refused, as ever, except on this
+    /// Mac itself: a local server with a certificate of its own, as developers
+    /// run, opens, as Chrome and Search let it. Nothing can be in between there.
+    func webView(_ webView: WKWebView, respondTo challenge: URLAuthenticationChallenge) async
+        -> (URLSession.AuthChallengeDisposition, URLCredential?) {
+        let space = challenge.protectionSpace
+        guard space.authenticationMethod == NSURLAuthenticationMethodServerTrust, let trust = space.serverTrust,
+              Self.isThisMac(space.host) else { return (.performDefaultHandling, nil) }
+        return (.useCredential, URLCredential(trust: trust))
+    }
+
+    /// localhost and its names, and the loopback addresses (127.x.x.x, ::1).
+    nonisolated static func isThisMac(_ host: String) -> Bool {
+        let host = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        return host == "localhost" || host.hasSuffix(".localhost") || host == "::1"
+            || (parts.count == 4 && parts.first == "127" && parts.allSatisfy { UInt8($0) != nil })
     }
 
     /// The page's process died (out of memory, or a WebKit bug): it would stay
@@ -431,7 +541,7 @@ extension Browser: WKDownloadDelegate {
 }
 
 /// What was typed, as somewhere to go: an address as it is, anything else
-/// as a Google search.
+/// as a search, on the search engine chosen in the settings.
 nonisolated enum Address {
     static func url(from input: String) -> URL? {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -449,23 +559,15 @@ nonisolated enum Address {
     }
 
     static func search(_ text: String) -> URL? {
-        var search = URLComponents(string: "https://www.google.com/search")!
-        search.queryItems = [URLQueryItem(name: "q", value: text)]
-        return search.url
+        SearchEngine.current.search(text)
     }
 
-    /// What Google thinks is being searched for, as it would suggest under its
-    /// own field; nothing when it can't be reached.
+    /// What the search engine thinks is being searched for, as it would suggest
+    /// under its own field; nothing when it can't be reached.
     static func suggestions(for text: String) async -> [String] {
-        var request = URLComponents(string: "https://suggestqueries.google.com/complete/search")!
-        request.queryItems = [
-            URLQueryItem(name: "client", value: "firefox"),
-            URLQueryItem(name: "ie", value: "utf-8"),
-            URLQueryItem(name: "oe", value: "utf-8"),
-            URLQueryItem(name: "q", value: text),
-        ]
         // ["query", ["suggestion", …], …]
-        guard let (data, _) = try? await URLSession.shared.data(from: request.url!),
+        guard let request = SearchEngine.current.guesses(text),
+              let (data, _) = try? await URLSession.shared.data(from: request),
               let reply = try? JSONSerialization.jsonObject(with: data) as? [Any],
               reply.count > 1, let suggestions = reply[1] as? [String]
         else { return [] }

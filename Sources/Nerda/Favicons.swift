@@ -33,9 +33,21 @@ final class Favicons {
         return url.port.map { "\(scheme)://\(host):\($0)" } ?? "\(scheme)://\(host)"
     }
 
+    /// The icons kept on disk for these sites, read now: at launch, so the
+    /// tabs come back with their icons in their first frame.
+    func preload(_ sites: [URL]) {
+        guard let folder else { return }
+        for site in Set(sites.compactMap(Self.origin(of:))) where images[site] == nil {
+            let file = folder.appending(path: site.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? site)
+            if let data = try? Data(contentsOf: file), let image = NSImage(data: data) { keep(image, for: site) }
+        }
+    }
+
     /// The site's /favicon.ico, or `icon` when the page names its own; that
-    /// one is tried even after /favicon.ico failed.
-    func load(_ site: String, icon: URL? = nil) async {
+    /// one is tried even after /favicon.ico failed. Not `keep`, as for an
+    /// incognito window, it is fetched leaving nothing on disk, and kept
+    /// only while Nerda runs.
+    func load(_ site: String, icon: URL? = nil, keep: Bool = true) async {
         // Two rows asking for the same site share one fetch.
         if let task = inFlight[site] { await task.value }
         guard images[site] == nil, icon != nil || !failed.contains(site),
@@ -43,13 +55,16 @@ final class Favicons {
 
         let task = Task {
             let file = folder?.appending(path: site.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? site)
-            if icon == nil, let file, let data = try? Data(contentsOf: file), let image = NSImage(data: data) {
-                keep(image, for: site)
-            } else if let (data, _) = try? await URLSession.shared.data(from: url), let image = NSImage(data: data) {
-                keep(image, for: site)
-                if let file {
-                    try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    try? data.write(to: file, options: .atomic)
+            if icon == nil, let file, let found = await Self.decode(file: file) {
+                self.keep(found.image, found.tint, for: site)
+            } else if let (data, _) = try? await (keep ? URLSession.shared : Self.ephemeral).data(from: url),
+                      let found = await Self.decode(data) {
+                self.keep(found.image, found.tint, for: site)
+                if keep, let file {
+                    await Task.detached(priority: .utility) {
+                        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        try? data.write(to: file, options: .atomic)
+                    }.value
                 }
             } else {
                 failed.insert(site)
@@ -60,9 +75,26 @@ final class Favicons {
         inFlight[site] = nil
     }
 
+    /// Fetches without a cache or cookies on disk.
+    private static let ephemeral = URLSession(configuration: .ephemeral)
+
+    /// An icon, and its colours, read and worked out off the main thread: a
+    /// page listing many sites (the history page) otherwise read and decoded
+    /// each one's icon there, as its line came into view.
+    nonisolated private static func decode(file: URL? = nil, _ data: Data? = nil) async -> (image: NSImage, tint: Tint?)? {
+        await Task.detached(priority: .userInitiated) {
+            guard let data = data ?? file.flatMap({ try? Data(contentsOf: $0) }), let image = NSImage(data: data) else { return nil }
+            return (image, Tint(image))
+        }.value
+    }
+
     private func keep(_ image: NSImage, for site: String) {
+        keep(image, Tint(image), for: site)
+    }
+
+    private func keep(_ image: NSImage, _ tint: Tint?, for site: String) {
         images[site] = image
-        tints[site] = Tint(image)
+        tints[site] = tint
         failed.remove(site)
     }
 }
@@ -70,7 +102,7 @@ final class Favicons {
 /// The colours of a site's icon, for its pinned tile to wear while on screen:
 /// its hues (Google's four, YouTube's red), or for a dark icon without any
 /// (GitHub's), its black. A light grey one has none to give.
-nonisolated struct Tint {
+nonisolated struct Tint: Sendable {
     let colors: [NSColor]
     /// No hues: `colors` is the icon's one grey.
     let isGrey: Bool
@@ -141,6 +173,7 @@ struct Favicon: View {
     var plate = true
 
     private var store: Favicons { .shared }
+    @Environment(\.incognito) private var incognito
 
     var body: some View {
         let origin = Favicons.origin(of: site)
@@ -165,7 +198,7 @@ struct Favicon: View {
         .background(plate ? .white.opacity(0.9) : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .animation(.easeOut(duration: 0.15), value: image != nil)
         .task(id: origin) {
-            if let origin { await store.load(origin) }
+            if let origin { await store.load(origin, keep: !incognito) }
         }
     }
 }

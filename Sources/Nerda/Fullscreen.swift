@@ -14,6 +14,16 @@ import WebKit
 // can't be found to take along.
 enum Fullscreen {
     static let script = WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
+    /// What carries the page's word to the browser: a script in a world of
+    /// its own, where the browser's message handler is. A handler in the
+    /// page's world would show every page `window.webkit`, which Safari never
+    /// does: the mark of an app's web view, which Google answers with CAPTCHAs
+    /// and some sign-ins with "This browser or app may not be secure".
+    static let bridge = WKUserScript(source: """
+        document.addEventListener('\(event)-enter', () => webkit.messageHandlers.fullscreen.postMessage(true), true);
+        document.addEventListener('\(event)-exit', () => webkit.messageHandlers.fullscreen.postMessage(false), true);
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .defaultClient)
+    private static let event = "nerda-fullscreen"
     static let messages = Messages()
     /// What takes a page out of full screen, as its own Esc would.
     static let exit = "document.exitFullscreen().catch(() => {})"
@@ -29,7 +39,8 @@ enum Fullscreen {
 
     private static let source = #"""
         (() => {
-            const browser = window.webkit?.messageHandlers?.fullscreen;
+            // To the browser, through `bridge`.
+            const tellBrowser = (entered) => document.dispatchEvent(new Event(`\#(event)-${entered ? 'enter' : 'exit'}`));
             const marker = 'data-nerda-fullscreen';
             const key = 'nerda-fullscreen';
             const nativeExit = Document.prototype.exitFullscreen;
@@ -88,7 +99,7 @@ enum Fullscreen {
                 for (const name of [type, 'webkit' + type]) target.dispatchEvent(new Event(name, { bubbles: true, composed: true }));
             });
             // The frame this document is in shows that frame too, and so on up to the page's, which tells the browser.
-            const tellUp = (what) => window === top ? browser?.postMessage(what === 'enter') : parent.postMessage({ [key]: what }, '*');
+            const tellUp = (what) => window === top ? tellBrowser(what === 'enter') : parent.postMessage({ [key]: what }, '*');
 
             function show(element) {
                 if (shown === element) return;
@@ -200,7 +211,7 @@ enum Fullscreen {
                 if (event.key !== 'Escape') return;
                 if (window !== top) return top.postMessage({ [key]: 'escape' }, '*');
                 // Also when the browser went full screen for the page without the page showing anything.
-                if (shown) exit(); else browser?.postMessage(false);
+                if (shown) exit(); else tellBrowser(false);
             }, true);
         })();
         """#

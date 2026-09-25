@@ -7,7 +7,8 @@ import Foundation
 /// release build updates itself.
 nonisolated enum Edition {
     #if DEBUG
-    static let name = "Nerda Dev"
+    /// Nerda Bench (`./build.sh bench`) is a development build too, with data of its own.
+    static let name = Bundle.main.bundleIdentifier == "dev.nerda.browser.bench" ? "Nerda Bench" : "Nerda Dev"
     /// Whether it checks for and installs newer releases (Updater.swift).
     static let updates = false
     #else

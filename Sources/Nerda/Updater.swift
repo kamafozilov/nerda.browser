@@ -15,7 +15,7 @@ import SwiftUI
 // and the signing team, so the keychain opens for it as for the old one.
 // Development builds never update (Edition.updates).
 //
-// The disk part (Swap) follows Updater.swift in Search
+// The disk part (Swap), and the Developer ID requirement, follow Updater.swift in Search
 // (https://github.com/driceroland/Search):
 //
 //   Copyright (c) 2026 Office Commun
@@ -39,15 +39,24 @@ import SwiftUI
 //   OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 //   USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+@Observable
 final class Updater {
     static let shared = Updater()
 
     /// The latest release, as GitHub's API gives it. NERDA_UPDATES points a
-    /// test run at a file of the same shape elsewhere, and is the only way
-    /// plain http is taken.
-    nonisolated static let feed = override.flatMap(URL.init(string:))
+    /// test run at a file of the same shape elsewhere (docs/releasing.md).
+    nonisolated static let feed = override
         ?? URL(string: "https://api.github.com/repos/kamafozilov/nerda.browser/releases/latest")!
-    nonisolated static let override = ProcessInfo.processInfo.environment["NERDA_UPDATES"]
+    /// Over https, or on this Mac, the only place plain http is taken from.
+    nonisolated static let override: URL? = {
+        guard let text = ProcessInfo.processInfo.environment["NERDA_UPDATES"], let url = URL(string: text),
+              isSafe(url) else { return nil }
+        return url
+    }()
+
+    nonisolated static func isSafe(_ url: URL) -> Bool {
+        url.scheme == "https" || url.scheme == "http" && Browser.isThisMac(url.host() ?? "")
+    }
 
     nonisolated struct Release: Sendable {
         let version: String
@@ -60,8 +69,24 @@ final class Updater {
         let sha256: String?
     }
 
-    enum State { case idle, checking, installing }
+    enum State: Equatable {
+        case idle, checking, upToDate, available(String), installing, failed(String)
+
+        var isBusy: Bool { self == .checking || self == .installing }
+
+        var detail: String {
+            switch self {
+            case .idle: "Check for the latest version."
+            case .checking: "Checking for updates…"
+            case .upToDate: "Nerda is up to date."
+            case .available(let version): "Version \(version) is available."
+            case .installing: "Installing update. Nerda will relaunch…"
+            case .failed(let message): message
+            }
+        }
+    }
     private(set) var state = State.idle
+    var canCheck: Bool { Edition.updates && !state.isBusy }
     /// Quitting to come back as the new one: no asking first.
     private(set) var relaunching = false
     /// The version last put in front of the user: not offered again unasked
@@ -89,19 +114,21 @@ final class Updater {
 
     /// `asked`: from Check for Updates…, which always answers, even "none".
     func check(asked: Bool) {
-        guard state == .idle else { return }
+        guard canCheck else { return }
         state = .checking
         Task {
             let found = try? await Self.latest()
-            state = .idle
             guard let found else {
+                state = .failed("Couldn't check for updates. Check your connection and try again.")
                 if asked { tell("Couldn't check for updates", "Check your connection and try again.") }
                 return
             }
             if Version.isNewer(found.version, than: Self.current) {
+                state = .available(found.version)
                 if asked || offered != found.version { offer(found) }
-            } else if asked {
-                tell("You're up to date", "Nerda \(Self.current) is the newest version.")
+            } else {
+                state = .upToDate
+                if asked { tell("You're up to date", "Nerda \(Self.current) is the newest version.") }
             }
         }
     }
@@ -131,7 +158,7 @@ final class Updater {
                 try await Task.detached(priority: .userInitiated) { try await Swap.install(release) }.value
                 relaunch()
             } catch {
-                state = .idle
+                state = .failed("Couldn't install the update. Try again.")
                 let alert = NSAlert()
                 alert.messageText = "Couldn't install Nerda \(release.version)"
                 alert.informativeText = ((error as? Swap.Refused)?.reason ?? "The download didn't finish.")
@@ -151,7 +178,7 @@ final class Updater {
     private func relaunch() {
         relaunching = true
         var open = ["/usr/bin/open"]
-        if let override = Self.override { open += ["--env", "NERDA_UPDATES=\(override)"] }
+        if let override = Self.override { open += ["--env", "NERDA_UPDATES=\(override.absoluteString)"] }
         let waiter = Process()
         waiter.executableURL = URL(fileURLWithPath: "/bin/sh")
         waiter.arguments = [
@@ -186,8 +213,7 @@ final class Updater {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         let found = try decoder.decode(GitHubRelease.self, from: data)
-        guard let zip = found.assets.first(where: { $0.name == "Nerda.zip" }),
-              zip.browserDownloadUrl.scheme == "https" || override != nil
+        guard let zip = found.assets.first(where: { $0.name == "Nerda.zip" }), isSafe(zip.browserDownloadUrl)
         else { throw Swap.Refused.feed }
         return Release(
             version: found.tagName.hasPrefix("v") ? String(found.tagName.dropFirst()) : found.tagName,
@@ -196,6 +222,20 @@ final class Updater {
             archive: zip.browserDownloadUrl,
             sha256: zip.digest.flatMap { $0.hasPrefix("sha256:") ? String($0.dropFirst(7)) : nil }
         )
+    }
+
+    /// What a shipped Nerda meets, as `codesign -d -r-` prints it: Apple's
+    /// anchor, the Developer ID intermediate (…6.2.6) and a Developer ID
+    /// Application certificate (…6.1.13) of this team, for this bundle id. A
+    /// certificate made up with the team's name in it meets none of that.
+    nonisolated static func developerID(team: String, identifier: String) -> SecRequirement? {
+        let text = "anchor apple generic and identifier \"\(identifier)\""
+            + " and certificate 1[field.1.2.840.113635.100.6.2.6]"
+            + " and certificate leaf[field.1.2.840.113635.100.6.1.13]"
+            + " and certificate leaf[subject.OU] = \"\(team)\""
+        var requirement: SecRequirement?
+        guard SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess else { return nil }
+        return requirement
     }
 
     nonisolated private struct GitHubRelease: Decodable {
@@ -295,7 +335,8 @@ nonisolated private enum Swap {
         let (got, response) = try await URLSession.shared.download(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw Refused.download }
         try files.moveItem(at: got, to: zip)
-        if let expected = release.sha256, try digest(of: zip) != expected.lowercased() { throw Refused.hash }
+        // GitHub gives every asset's; one without is not taken.
+        guard let expected = release.sha256, try digest(of: zip) == expected.lowercased() else { throw Refused.hash }
 
         let unpacked = scratch.appending(path: "unpacked")
         try run("/usr/bin/ditto", "-x", "-k", zip.path, unpacked.path)
@@ -329,17 +370,20 @@ nonisolated private enum Swap {
     }
 
     /// Trusted not for having arrived but for being this app, newer, with a
-    /// signature that holds up under the strict check, by the same team.
+    /// signature that holds up under the strict check, everything inside it
+    /// included, from a Developer ID certificate Apple gave the same team.
     private static func verify(_ bundle: URL, team: String) throws {
         guard let info = NSDictionary(contentsOf: bundle.appending(path: "Contents/Info.plist")),
-              info["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier
+              let identifier = Bundle.main.bundleIdentifier, info["CFBundleIdentifier"] as? String == identifier
         else { throw Refused.wrongApp }
         guard Version.isNewer(info["CFBundleShortVersionString"] as? String ?? "", than: Updater.current) else {
             throw Refused.notNewer
         }
         var code: SecStaticCode?
+        let strict = SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures | kSecCSCheckNestedCode)
         guard SecStaticCodeCreateWithPath(bundle as CFURL, [], &code) == errSecSuccess, let code,
-              SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures), nil) == errSecSuccess
+              let requirement = Updater.developerID(team: team, identifier: identifier),
+              SecStaticCodeCheckValidity(code, strict, requirement) == errSecSuccess
         else { throw Refused.wrongTeam }
         guard teamID(of: bundle) == team else { throw Refused.wrongTeam }
     }

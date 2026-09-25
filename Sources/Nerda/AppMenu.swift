@@ -1,14 +1,20 @@
 import AppKit
 import SwiftUI
+import WebKit
 
 /// The menu bar. Besides listing what the app can do, it is how the standard
 /// shortcuts work at all: ⌘A, ⌘C, ⌘V, ⌘Z and the rest are the Edit menu's
 /// items, sent down the responder chain to whatever text field has focus.
 final class AppMenu: NSObject {
-    let browser: Browser
+    /// The regular window's, for when no window of Nerda's is in front.
+    private let regular: Browser
+
+    /// What the menu works on: the browser of the window in front, an
+    /// incognito one's included.
+    private var browser: Browser { (NSApp.mainWindow as? BrowserWindow)?.browser ?? regular }
 
     init(browser: Browser) {
-        self.browser = browser
+        regular = browser
     }
 
     func install() {
@@ -32,12 +38,15 @@ final class AppMenu: NSObject {
         let historyMenu = submenu("History", [
             item("Back", #selector(goBack), "[", target: self),
             item("Forward", #selector(goForward), "]", target: self),
+            item("Show All History", #selector(openHistory), "y", target: self),
         ])
 
         let bar = NSMenu()
         bar.items = [
             submenu("Nerda", [
                 item("About Nerda", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+                .separator(),
+                item("Settings…", #selector(openSettings), ",", target: self),
                 // Development builds don't update themselves.
                 Edition.updates
                     ? item("Check for Updates…", #selector(checkForUpdates), target: self)
@@ -54,6 +63,10 @@ final class AppMenu: NSObject {
             ]),
             submenu("File", [
                 item("New Tab", #selector(newTab), "t", target: self),
+                item("New Incognito Window", #selector(newIncognitoWindow), "n", [.command, .shift], target: self),
+                // ⌘⇧A, as Chrome's Search Tabs: a key sites leave to the browser,
+                // where ⌘K is often a site's own.
+                item("Search Tabs…", #selector(searchTabs), "a", [.command, .shift], target: self),
                 item("Open Location…", #selector(openLocation), "l", target: self),
                 item("Close Tab", #selector(closeTab), "w", target: self),
                 item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]),
@@ -81,12 +94,17 @@ final class AppMenu: NSObject {
                 item("Collapse Tabs", #selector(toggleSidebar), "s", target: self),
                 .separator(),
                 item("Reload Page", #selector(reload), "r", target: self),
+                // ⌘⇧R, as Chrome's and Firefox's hard reload.
+                item("Hard Reload Page", #selector(hardReload), "r", [.command, .shift], target: self),
                 .separator(),
                 zoom("Zoom In", 1, "+"),
                 // ⌘= as well as ⌘+: they're the same key on most keyboards.
                 hidden(zoom("Zoom In", 1, "=")),
                 zoom("Zoom Out", -1, "-"),
                 zoom("Actual Size", 0, "0"),
+                .separator(),
+                item("Choose New Tab Picture…", #selector(choosePicture), target: self),
+                item("Use Nerda's Pictures", #selector(useOwnPictures), target: self),
             ]),
             historyMenu,
             windowMenu,
@@ -97,20 +115,65 @@ final class AppMenu: NSObject {
         NSApp.servicesMenu = servicesMenu.submenu
 
         // A focused page takes ⌃Tab as a key of its own, so it would never
-        // reach the menu: it is caught on its way in instead.
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [browser] event in
+        // reach the menu: it is caught on its way in instead. So are the keys
+        // that are the browser's whatever the page does with them, as in
+        // Chrome: a page that took ⌘W or ⌘T for itself would keep you in it.
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            guard event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift] else { return event }
-            MainActor.assumeIsolated { browser.selectTab(after: modifiers.contains(.shift) ? -1 : 1) }
-            return nil
+            if event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift] {
+                MainActor.assumeIsolated { if !browser.locked { browser.selectTab(after: modifiers.contains(.shift) ? -1 : 1) } }
+                return nil
+            }
+            // ⌘1 to ⌘9 by the key, not the character it types: on AZERTY that
+            // is & é " ' and the rest, which no menu item has.
+            if modifiers == .command, let index = Self.digitKeys.firstIndex(of: event.keyCode),
+               event.window?.attachedSheet == nil, NSApp.modalWindow == nil {
+                MainActor.assumeIsolated { if !browser.locked { browser.selectTab(number: index + 1) } }
+                return nil
+            }
+            return MainActor.assumeIsolated { Self.browserKey(event) } ? nil : event
         }
     }
 
-    @objc private func newTab() { browser.showCommandBar() }
-    @objc private func openLocation() { browser.editAddress() }
+    /// The keys 1 to 9 of the row above the letters, by their place.
+    private static let digitKeys: [UInt16] = [18, 19, 20, 21, 23, 22, 26, 28, 25]
+    /// ⌘T and the rest by their place, as on a US keyboard, for a layout that
+    /// types no Latin letters (Russian, Uzbek Cyrillic): there ⌘T types "е".
+    private static let latinKeys: [UInt16: String] = [17: "t", 13: "w", 37: "l", 12: "q", 43: ",", 0: "a", 45: "n"]
+
+    /// ⌘T, ⌘W, ⌘L, ⌘Q and ⌘, and ⌘⇧W, ⌘⇧A and ⌘⇧N, straight to the menu while
+    /// a page has the keyboard (and no sheet or dialog is up).
+    private static func browserKey(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        guard let window = event.window, window.firstResponder is WKWebView, window.attachedSheet == nil,
+              NSApp.modalWindow == nil, let typed = event.charactersIgnoringModifiers?.lowercased() else { return false }
+        let key = typed.allSatisfy(\.isASCII) ? typed : latinKeys[event.keyCode] ?? typed
+        let reserved = modifiers == .command && ["t", "w", "l", "q", ","].contains(key)
+            || modifiers == [.command, .shift] && ["w", "a", "n"].contains(key)
+        return reserved && NSApp.mainMenu?.performKeyEquivalent(with: event) == true
+    }
+
+    /// With no window in front (the last tab closed its window), ⌘T brings
+    /// the regular one back on a new tab, as Chrome opens a window for it.
+    @objc private func newTab() {
+        if let browser = (NSApp.mainWindow as? BrowserWindow)?.browser { return browser.newTab() }
+        let browser = Windows.showRegular()
+        if browser.selected?.isBlank != true { browser.newTab() }
+    }
+
+    /// The browser of the window in front; with none, the regular window,
+    /// brought back, for what opens a tab or a field in it.
+    private var shown: Browser { (NSApp.mainWindow as? BrowserWindow)?.browser ?? Windows.showRegular() }
+
+    @objc private func newIncognitoWindow() { Windows.openIncognito() }
+    @objc private func openSettings() { shown.openSettings() }
+    @objc private func openHistory() { shown.openHistory() }
+    @objc private func searchTabs() { shown.showCommandBar() }
+    @objc private func openLocation() { shown.editAddress() }
     @objc private func closeTab() { browser.closeSelectedTab() }
     @objc private func toggleSidebar() { browser.toggleSidebar() }
     @objc private func reload() { browser.selected?.reload() }
+    @objc private func hardReload() { browser.selected?.reload(fromOrigin: true) }
     @objc private func goBack() { browser.selected?.webView.goBack() }
     @objc private func goForward() { browser.selected?.webView.goForward() }
     @objc private func zoom(_ sender: NSMenuItem) { browser.selected?.zoom(sender.tag) }
@@ -118,6 +181,8 @@ final class AppMenu: NSObject {
     @objc private func nextTab() { browser.selectTab(after: 1) }
     @objc private func previousTab() { browser.selectTab(after: -1) }
     @objc private func importPasswords() { browser.importPasswords() }
+    @objc private func useOwnPictures() { Backdrop.shared.wallpaper = .daily }
+    @objc private func choosePicture() { Backdrop.shared.askForPicture() }
 
     private func zoom(_ title: String, _ step: Int, _ key: String) -> NSMenuItem {
         let item = item(title, #selector(zoom(_:)), key, target: self)
@@ -130,18 +195,12 @@ final class AppMenu: NSObject {
 
     @objc private func openVisit(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }
+        let browser = shown
         if browser.commandBarOpen { browser.hideCommandBar() }
-        withAnimation(.slide) { browser.open(url) }
+        browser.go(to: url)
     }
 
-    @objc private func clearHistory() {
-        let alert = NSAlert()
-        alert.messageText = "Clear all history?"
-        alert.informativeText = "The pages you visited will no longer be suggested as you type. Open tabs stay as they are."
-        alert.addButton(withTitle: "Clear History")
-        alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn { History.shared.clear() }
-    }
+    @objc private func clearHistory() { History.shared.askToClear() }
 
     @objc private func showFind() { browser.showFindBar() }
     @objc private func findNext() { browser.find() }
@@ -178,31 +237,41 @@ final class AppMenu: NSObject {
 extension AppMenu: NSMenuItemValidation {
     /// Asked each time a menu opens or a shortcut is pressed.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        // A locked incognito window's tabs are out of reach; what goes to the
+        // regular window, or unlocks first (a new incognito window), is not.
+        if browser.locked {
+            return [#selector(openSettings), #selector(openHistory), #selector(newIncognitoWindow),
+                    #selector(checkForUpdates), #selector(toggleQuitWarning), #selector(importPasswords),
+                    #selector(choosePicture), #selector(useOwnPictures)].contains(item.action)
+        }
         switch item.action {
         case #selector(toggleSidebar):
             item.title = browser.sidebarOpen ? "Collapse Tabs" : "Show Tabs"
-            return true
+            // Tabs across the top have no sidebar to collapse.
+            return TabStyle.current == .vertical
         case #selector(closeTab):
             return browser.commandBarOpen || browser.selectedID != nil
-        case #selector(reload), #selector(zoom(_:)):
+        case #selector(reload), #selector(hardReload), #selector(zoom(_:)):
             // Actual Size only once there is a zoom to undo.
-            guard let tab = browser.selected else { return false }
-            return item.action != #selector(zoom(_:)) || item.tag != 0 || tab.webView.pageZoom != 1
+            guard let tab = browser.selected, tab.hasPage else { return false }
+            return item.action != #selector(zoom(_:)) || item.tag != 0 || tab.webView.pageZoom != PageZoom.current
         case #selector(showFind):
-            return browser.selected != nil
+            return browser.selected?.hasPage == true
         case #selector(findNext), #selector(findPrevious):
-            return browser.selected != nil && !browser.findQuery.isEmpty
+            return browser.selected?.hasPage == true && !browser.findQuery.isEmpty
         case #selector(nextTab), #selector(previousTab):
             return browser.tabs.count > 1
         case #selector(goBack):
-            return browser.selected?.webView.canGoBack == true
+            return browser.selected?.canGoBack == true
         case #selector(goForward):
-            return browser.selected?.webView.canGoForward == true
+            return browser.selected?.canGoForward == true
         case #selector(checkForUpdates):
-            return Updater.shared.state == .idle
+            return Updater.shared.canCheck
         case #selector(toggleQuitWarning):
             item.state = QuitConfirmation.isWanted ? .on : .off
             return true
+        case #selector(useOwnPictures):
+            return Backdrop.shared.wallpaper != .daily
         case #selector(clearHistory):
             return !History.shared.visits.isEmpty
         default:
@@ -212,10 +281,10 @@ extension AppMenu: NSMenuItemValidation {
 }
 
 extension AppMenu: NSMenuDelegate {
-    /// Under Back and Forward, the pages visited last, as Safari lists them;
+    /// Under Back, Forward and Show All History, the pages visited last, as Safari lists them;
     /// each opens in a tab of its own.
     func menuNeedsUpdate(_ menu: NSMenu) {
-        while menu.items.count > 2 { menu.removeItem(at: 2) }
+        while menu.items.count > 3 { menu.removeItem(at: 3) }
         menu.addItem(.separator())
         for visit in History.shared.recent(15) {
             let title = visit.title.isEmpty ? visit.url.absoluteString : visit.title
@@ -226,7 +295,7 @@ extension AppMenu: NSMenuDelegate {
             }
             menu.addItem(item)
         }
-        if menu.items.count > 3 { menu.addItem(.separator()) }
+        if menu.items.count > 4 { menu.addItem(.separator()) }
         menu.addItem(item("Clear History…", #selector(clearHistory), target: self))
     }
 }
@@ -242,8 +311,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         self.browser = browser
     }
 
+    /// An incognito window's closing lets go of it, and with the last one,
+    /// of all it held (see `Windows`).
     func windowWillClose(_ notification: Notification) {
         browser.closeAll()
+        if browser.isPrivate { Windows.closed(self) }
     }
 
     /// The window comes back with the tabs it closed with.
@@ -253,6 +325,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.makeKeyAndOrderFront(nil)
         }
         return true
+    }
+
+    /// Links from other apps always open in the regular window.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        let links = urls.filter {
+            ["http", "https"].contains($0.scheme?.lowercased() ?? "") && $0.host?.isEmpty == false
+        }
+        guard !links.isEmpty else { return }
+        if browser.tabs.isEmpty { browser.restore(from: Session.file) }
+        if browser.commandBarOpen { browser.hideCommandBar() }
+        browser.endAddressEdit()
+        for url in links { browser.go(to: url) }
+        window.deminiaturize(nil)
+        window.makeKeyAndOrderFront(nil)
+        application.activate()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

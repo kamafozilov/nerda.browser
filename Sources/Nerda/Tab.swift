@@ -27,8 +27,13 @@ final class Tab: Identifiable {
     var isPinned = false
     /// Where a pinned tab was when pinned; double-clicking its tile goes back there.
     var home: URL?
-    /// The tab whose page opened this one, which closing it goes back to.
-    @ObservationIgnored weak var opener: Tab?
+    /// A name of your own for the tab (double-click it in the sidebar), kept
+    /// in place of the page's title wherever the tab goes.
+    var name: String?
+    /// Nerda's settings, open on this page of them, in place of a web page.
+    var settings: SettingsPage?
+    /// Every page visited (⌘Y), in place of a web page.
+    var showsHistory = false
     /// Told what the page does (the Browser), by every page the tab makes.
     @ObservationIgnored weak var delegate: (any WKUIDelegate & WKNavigationDelegate)? {
         didSet {
@@ -36,6 +41,9 @@ final class Tab: Identifiable {
             page?.navigationDelegate = delegate
         }
     }
+    /// Where the page keeps its cookies, cache and site data: on disk, or for
+    /// an incognito window's tabs, in memory until that window closes.
+    @ObservationIgnored var dataStore = WKWebsiteDataStore.default()
     /// When the tab was last on screen, so it sleeps only once it has been away a while.
     @ObservationIgnored var lastSeen = Date.now
     /// The page, while awake.
@@ -44,6 +52,8 @@ final class Tab: Identifiable {
     /// was scrolled to, and its zoom.
     @ObservationIgnored private var slept: (state: Any?, zoom: CGFloat)?
     @ObservationIgnored private var observations: [NSObject] = []
+    /// The page's top edge, as last sampled (`recolor`): by WebKit, or here.
+    @ObservationIgnored private var topColor: NSColor?
     /// The address last put in history, so a page is counted once per visit,
     /// not again when it wakes or reloads.
     @ObservationIgnored private var recorded: URL?
@@ -57,6 +67,13 @@ final class Tab: Identifiable {
     /// The page, woken first if the tab was asleep.
     var webView: WKWebView { page ?? wake() }
     var isAsleep: Bool { page == nil }
+    /// A new tab: nowhere yet, and no page until it is told where to go.
+    var isBlank: Bool { url == nil && page == nil && settings == nil && !showsHistory }
+    /// A web page to show, rather than a new tab's field or the settings.
+    var hasPage: Bool { !isBlank && settings == nil && !showsHistory }
+
+    /// An incognito window's: nothing it does is kept (history, icons on disk).
+    var isPrivate: Bool { !dataStore.isPersistent }
 
     /// The site the tab is about: the one that failed, if one did.
     var site: URL? { failure?.url ?? url }
@@ -64,17 +81,23 @@ final class Tab: Identifiable {
     /// The page's own title; until it has one, the site's name, or for an
     /// address without one (file:, about:blank), the address itself.
     var title: String {
+        if let settings { return "Settings › \(settings.title)" }
+        if showsHistory { return "History" }
+        if let name { return name }
         if failure == nil, !pageTitle.isEmpty { return pageTitle }
-        guard let site else { return "Untitled" }
+        guard let site else { return "New Tab" }
         guard let host = site.host(percentEncoded: false), !host.isEmpty else { return site.absoluteString }
         let name = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
         // localhost:3000 and localhost:8080 are two different sites.
         return site.port.map { "\(name):\($0)" } ?? name
     }
 
-    /// A page's own tab, or, given the configuration WebKit hands over, one for a
-    /// window a page opens, so that it can still talk to its opener (sign-in popups).
-    init(configuration: WKWebViewConfiguration = Tab.configuration) {
+    /// A new tab, asking where to go; its page is made once it goes somewhere.
+    init() {}
+
+    /// A tab for a window a page opens, on the configuration WebKit hands over,
+    /// so that it can still talk to its opener (sign-in popups).
+    init(configuration: WKWebViewConfiguration) {
         page = makePage(configuration)
     }
 
@@ -88,11 +111,20 @@ final class Tab: Identifiable {
         isPinned = saved.pinned == true
         // Sessions from before homes: where it was left is the best guess.
         home = saved.home ?? (isPinned ? saved.url : nil)
+        settings = saved.settings
+        showsHistory = saved.history == true
+        name = saved.name
     }
 
-    /// What it takes to open the tab again at the next launch. Only pages from
-    /// the web or disk: a blob: or data: address can't be opened again.
+    /// What it takes to open the tab again at the next launch: the settings, or
+    /// a page from the web or disk (a blob: or data: address can't be opened again).
     var saved: Session.Tab? {
+        if let settings {
+            return Session.Tab(url: nil, title: "", state: nil, zoom: 1, pinned: nil, home: nil, settings: settings)
+        }
+        if showsHistory {
+            return Session.Tab(url: nil, title: "", state: nil, zoom: 1, pinned: nil, home: nil, history: true)
+        }
         guard let site, ["http", "https", "file"].contains(site.scheme) else { return nil }
         let state: Any?
         if let page {
@@ -103,18 +135,40 @@ final class Tab: Identifiable {
             state = slept?.state
         }
         return Session.Tab(url: site, title: failure == nil ? pageTitle : "", state: state as? Data,
-                           zoom: page?.pageZoom ?? slept?.zoom ?? 1, pinned: isPinned ? true : nil, home: home)
+                           zoom: page?.pageZoom ?? slept?.zoom ?? 1, pinned: isPinned ? true : nil, home: home,
+                           name: name)
     }
 
     convenience init(url: URL) {
         self.init()
+        go(to: url)
+    }
+
+    /// Takes the tab to `url`, a new one included.
+    func go(to url: URL) {
+        settings = nil
+        showsHistory = false
+        // Woken first, while it has nowhere to go, or it would load `url` twice.
+        let page = webView
         self.url = url
-        webView.load(URLRequest(url: url))
+        page.load(URLRequest(url: url))
     }
 
     private func makePage(_ configuration: WKWebViewConfiguration) -> WKWebView {
+        Self.matchScreenRate(configuration.preferences)
         let page = SwipingWebView(frame: .zero, configuration: configuration)
+        _ = Self.powerWatch
+        Self.pages.add(page)
         page.isInspectable = true
+        // A sleeping page wakes at its own zoom (`wake`), set after this.
+        page.pageZoom = PageZoom.current
+        // See-through until its first page arrives (`pageDidCommit`): a new or
+        // woken page is otherwise white while the site answers, a flash in dark
+        // mode. The card's own ground shows instead, as another browser keeps
+        // what was there. A page that goes on to another keeps its last one
+        // meanwhile, WebKit's own doing.
+        // WebKit SPI: should it go, the page is white meanwhile, as it was.
+        Self.set(page, "_setDrawsBackground:", false)
         page.uiDelegate = delegate
         page.navigationDelegate = delegate
         // WebKit reports these on the main thread, where the tab lives.
@@ -130,7 +184,7 @@ final class Tab: Identifiable {
             page.observe(\.title) { [weak self] page, _ in
                 MainActor.assumeIsolated {
                     self?.pageTitle = page.title ?? ""
-                    if let url = page.url, let title = page.title { History.shared.name(url, title) }
+                    if self?.isPrivate == false, let url = page.url, let title = page.title { History.shared.name(url, title) }
                 }
             },
             page.observe(\.isLoading) { [weak self] page, _ in
@@ -147,29 +201,143 @@ final class Tab: Identifiable {
                 MainActor.assumeIsolated { self?.progress = page.estimatedProgress }
             },
             page.observe(\.themeColor) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.recolor() }
+                MainActor.assumeIsolated { self?.pageRecolored() }
             },
             page.observe(\.underPageBackgroundColor) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.recolor() }
+                MainActor.assumeIsolated { self?.pageRecolored() }
             },
-            KeyObserver(page, Self.sampledTopColor) { [weak self] in self?.recolor() },
+            KeyObserver(page, Self.sampledTopColor) { [weak self] in self?.sampled() },
         ]
+        // This page took the process kept ready; the next one is readied once it is under way.
+        DispatchQueue.main.async { Self.warmUp() }
         return page
     }
 
-    /// The colour along the page's top edge, as WebKit samples it for Safari:
-    /// what the address bar touches, which sites' theme colours often aren't
-    /// (GitHub's, YouTube's). WebKit has none when the edge isn't one colour;
-    /// then the page's theme colour, or its background.
-    // WebKit SPI, as Safari's own: should it go, the theme colour is the fallback.
+    /// Connects to `url`'s server (its address looked up, the connection and
+    /// its encryption set up) ahead of a page asking for it, as Safari's
+    /// address bar does: ~250–500 ms off a first visit's wait.
+    // WebKit SPI: should it go, pages connect when they load, as they did.
+    static func preconnect(to url: URL) {
+        let preconnect = NSSelectorFromString("_preconnectToServer:")
+        guard ["http", "https"].contains(url.scheme), let pool = processPool as? NSObject,
+              pool.responds(to: preconnect) else { return }
+        pool.perform(preconnect, with: url)
+    }
+
+    /// A link to another site the pointer rests on is connected to on the way
+    /// to a click on it, as Chrome does: each site once a page, 20 at most.
+    /// In a world of its own, so the page can't ask for connections itself.
+    private static let linkHover = WKUserScript(source: """
+        (() => {
+            const asked = new Set([location.origin]);
+            let resting;
+            addEventListener('mouseover', event => {
+                clearTimeout(resting);
+                if (!event.isTrusted) return;
+                const link = event.target.closest?.('a[href]');
+                if (!link || asked.size > 20) return;
+                let url;
+                try { url = new URL(link.href); } catch { return; }
+                if (!/^https?:$/.test(url.protocol) || asked.has(url.origin)) return;
+                resting = setTimeout(() => {
+                    asked.add(url.origin);
+                    webkit.messageHandlers.preconnect.postMessage(url.origin);
+                }, 100);
+            }, { capture: true, passive: true });
+        })();
+        """, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient)
+
+    private static let preconnects = Preconnects()
+
+    final class Preconnects: NSObject, WKScriptMessageHandler {
+        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard let origin = message.body as? String, let url = URL(string: origin) else { return }
+            Tab.preconnect(to: url)
+        }
+    }
+
+    /// A middle click on a link opens it in a tab of its own, behind this one,
+    /// as ⌘-click does. WebKit leaves the middle button to the page and asks
+    /// the browser nothing, so the click is heard here: a real one (not one a
+    /// page made up), on a link, that the page left alone.
+    private static let middleClick = WKUserScript(source: """
+        addEventListener('auxclick', event => {
+            if (event.button !== 1 || !event.isTrusted || event.defaultPrevented) return;
+            const link = event.composedPath().find(element => element instanceof HTMLAnchorElement || element instanceof HTMLAreaElement);
+            if (link?.href) webkit.messageHandlers.middleClick.postMessage(link.href);
+        });
+        """, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient)
+
+    private static let middleClicks = MiddleClicks()
+
+    final class MiddleClicks: NSObject, WKScriptMessageHandler {
+        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.frameInfo.isMainFrame, let page = message.webView, let browser = page.uiDelegate as? Browser,
+                  let address = message.body as? String, let url = URL(string: address),
+                  ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
+            withAnimation(.slide) { browser.open(url, inBackground: true) }
+        }
+    }
+
+    /// Starts a page's process ahead of the page that will need it, as Safari
+    /// and Chrome keep one: a tab opened or woken then starts in ~20 ms, not
+    /// ~60 ms. WebKit keeps at most one, and lets it go under memory pressure.
+    // WebKit SPI: should it go, pages start their own processes, as they did.
+    static func warmUp() {
+        let warm = NSSelectorFromString("_warmInitialProcess")
+        if let pool = processPool as? NSObject, pool.responds(to: warm) { pool.perform(warm) }
+    }
+
+    /// The colour along the page's top edge: what the address bar touches,
+    /// which sites' theme colours often aren't (GitHub's, YouTube's). None
+    /// when the edge isn't one colour; then the page's theme colour, or its background.
     private func recolor() {
         guard let page else { return }
-        let sampled = page.responds(to: NSSelectorFromString(Self.sampledTopColor))
-            ? page.value(forKey: Self.sampledTopColor) as? NSColor : nil
-        color = sampled ?? page.themeColor ?? page.underPageBackgroundColor
+        color = topColor ?? page.themeColor ?? page.underPageBackgroundColor
+    }
+
+    /// WebKit samples the top edge once a page is in, as it does for Safari.
+    // WebKit SPI, as Safari's own: should it go, the theme colour is the fallback.
+    private func sampled() {
+        guard let page else { return }
+        topColor = page.value(forKey: Self.sampledTopColor) as? NSColor
+        recolor()
     }
 
     private static let sampledTopColor = "_sampledPageTopColor"
+
+    /// The page's own colours changed after WebKit's sample: light or dark
+    /// mode switched, or the site's own theme. WebKit won't sample again until
+    /// the next page, and the bar would keep the old colour (dark over a
+    /// light page), so the edge is sampled here from a snapshot of it, which
+    /// a hidden page gives too. While a page loads, WebKit's sample is on its way.
+    // ponytail: a snapshot's vivid colours come out a shade off the page's (greys,
+    // most sites' tops, match); the next load's WebKit sample puts it right.
+    private func pageRecolored() {
+        guard let page, topColor != nil, !page.isLoading else { return recolor() }
+        let edge = WKSnapshotConfiguration()
+        edge.rect = CGRect(x: 0, y: 0, width: page.bounds.width, height: 1)
+        Task {
+            let strip = try? await page.takeSnapshot(configuration: edge)
+            guard self.page === page else { return }
+            topColor = strip.flatMap(Self.color(across:))
+            recolor()
+        }
+    }
+
+    /// The colour across a strip of the page, if it is one: five points along
+    /// it within 5 of 255 of each other, about what WebKit allows (`configuration`).
+    static func color(across strip: NSImage) -> NSColor? {
+        guard let image = strip.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        let row = NSBitmapImageRep(cgImage: image)
+        let points = (0..<5).compactMap { row.colorAt(x: (row.pixelsWide - 1) * $0 / 4, y: 0)?.usingColorSpace(.sRGB) }
+        guard points.count == 5, let first = points.first else { return nil }
+        let even = points.allSatisfy { point in
+            max(abs(point.redComponent - first.redComponent), abs(point.greenComponent - first.greenComponent),
+                abs(point.blueComponent - first.blueComponent)) <= 5 / 255
+        }
+        return even ? first : nil
+    }
 
     /// Lets the page go, keeping what it takes to bring it back. Its process
     /// ends with it, and with that the memory, which is most of a tab's cost.
@@ -177,14 +345,16 @@ final class Tab: Identifiable {
         guard let page else { return }
         slept = (page.interactionState, page.pageZoom)
         observations = []
+        topColor = nil
         page.removeFromSuperview()
         self.page = nil
         isLoading = false
+        Self.endServiceWorkers()
     }
 
     @discardableResult
     private func wake() -> WKWebView {
-        let page = makePage(Self.configuration)
+        let page = makePage(Self.configuration(dataStore))
         self.page = page
         if let slept { page.pageZoom = slept.zoom }
         if let state = slept?.state {
@@ -196,19 +366,30 @@ final class Tab: Identifiable {
         return page
     }
 
+    /// A page is in: from here on it draws its own background, white for a
+    /// site that gives none, as it means to be. WebKit holds the new page back
+    /// until it has something to show, so the ground under it never shows through.
+    func pageDidCommit() {
+        if let page { Self.set(page, "_setDrawsBackground:", true) }
+    }
+
     /// Puts the page's address in history, once it is really there: loaded,
     /// not just asked for (a mistyped address that fails is not a visit).
     func recordVisit() {
-        guard let page, let url = page.url, url != recorded,
+        guard !isPrivate, let page, let url = page.url, url != recorded,
               page.backForwardList.currentItem?.url == url else { return }
         recorded = url
         History.shared.visit(url, title: page.title ?? "")
     }
 
     /// Reload, or after a failure, another go at the address that failed.
-    func reload() {
+    /// From origin, the page and what it loads are fetched anew, not taken
+    /// from the cache.
+    func reload(fromOrigin: Bool = false) {
         if let failure {
-            webView.load(URLRequest(url: failure.url))
+            webView.load(URLRequest(url: failure.url, cachePolicy: fromOrigin ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy))
+        } else if fromOrigin {
+            webView.reloadFromOrigin()
         } else {
             webView.reload()
         }
@@ -220,19 +401,23 @@ final class Tab: Identifiable {
         webView.load(URLRequest(url: home))
     }
 
-    /// The steps ⌘+ and ⌘− go through, as Safari's do.
-    private static let zoomLevels: [CGFloat] = [0.5, 0.67, 0.75, 0.85, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3]
-
-    /// One step in or out (+1, −1), or back to actual size (0).
-    // ponytail: per tab; Safari keeps zoom per site across launches, once settings are saved.
+    /// One step in or out (+1, −1), or back to the zoom pages open at (0).
+    // ponytail: per tab; Safari keeps zoom per site across launches.
     func zoom(_ step: Int) {
         let now = webView.pageZoom
         let next: CGFloat? = switch step {
-        case 0: 1
-        case 1...: Self.zoomLevels.first { $0 > now + 0.01 }
-        default: Self.zoomLevels.last { $0 < now - 0.01 }
+        case 0: PageZoom.current
+        case 1...: PageZoom.levels.first { $0 > now + 0.01 }
+        default: PageZoom.levels.last { $0 < now - 0.01 }
         }
         if let next { webView.pageZoom = next }
+    }
+
+    /// The zoom pages open at changed: a page left at the old one takes the
+    /// new one, asleep or awake; one zoomed on its own (⌘+, ⌘−) keeps its zoom.
+    func defaultZoomChanged(from old: CGFloat, to new: CGFloat) {
+        if let page, abs(page.pageZoom - old) < 0.01 { page.pageZoom = new }
+        if let zoom = slept?.zoom, abs(zoom - old) < 0.01 { slept?.zoom = new }
     }
 
     /// Something the user would notice stopping: sound or video playing, or
@@ -250,6 +435,24 @@ final class Tab: Identifiable {
         page.setAllMediaPlaybackSuspended(true)
         page.setCameraCaptureState(.none)
         page.setMicrophoneCaptureState(.none)
+        Self.endServiceWorkers()
+    }
+
+    @ObservationIgnored private static var endingWorkers: Task<Void, Never>?
+
+    /// A site's service worker keeps a process of its own (hundreds of MB for
+    /// a news site's) long after its pages sleep or close. Half a minute on,
+    /// as Chrome ends idle ones, they end; those of pages still open start
+    /// again when needed, as service workers are made to.
+    // WebKit SPI: should it go, workers end when WebKit sees fit, as they did.
+    static func endServiceWorkers() {
+        endingWorkers?.cancel()
+        endingWorkers = Task {
+            try? await Task.sleep(for: .seconds(30))
+            let end = NSSelectorFromString("_terminateServiceWorkers")
+            guard !Task.isCancelled, let pool = processPool as? NSObject, pool.responds(to: end) else { return }
+            pool.perform(end)
+        }
     }
 
     /// Once the page is in, and only if /favicon.ico gave nothing: the icon
@@ -259,7 +462,7 @@ final class Tab: Identifiable {
         guard let page, let site = Favicons.origin(of: url), Favicons.shared.images[site] == nil else { return }
         Task {
             let icon = try? await page.callAsyncJavaScript(Self.findIcon, contentWorld: .defaultClient) as? String
-            await Favicons.shared.load(site, icon: icon.flatMap(URL.init(string:)))
+            await Favicons.shared.load(site, icon: icon.flatMap(URL.init(string:)), keep: !isPrivate)
         }
     }
 
@@ -277,24 +480,130 @@ final class Tab: Identifiable {
         } catch { return href; }
         """
 
-    private static var configuration: WKWebViewConfiguration {
+    private static let processPool = WKWebViewConfiguration().value(forKey: "processPool")
+
+    private static func configuration(_ dataStore: WKWebsiteDataStore) -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = dataStore
+        // One pool for every tab. Left to itself each configuration makes its
+        // own, and each pool reads every font on the Mac before its first page
+        // can start, holding up the window ~30 ms for each tab opened or woken.
+        // By key: Apple deprecated the property as having no effect, which it
+        // still has (measured on macOS 27).
+        configuration.setValue(processPool, forKey: "processPool")
         configuration.applicationNameForUserAgent = applicationName
+        // A window a page opens only from a click or a key, as in Safari: on
+        // the Mac, WebKit otherwise lets a page open them whenever it likes,
+        // on load or on a timer, and each one takes you away to it.
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         // WebKit's full screen, under our own (see Fullscreen). Pages a page
         // opens (popups) are given this configuration's, script and all.
         configuration.preferences.isElementFullscreenEnabled = true
         configuration.userContentController.addUserScript(Fullscreen.script)
-        configuration.userContentController.add(Fullscreen.messages, contentWorld: .page, name: "fullscreen")
+        configuration.userContentController.addUserScript(Fullscreen.bridge)
+        configuration.userContentController.add(Fullscreen.messages, contentWorld: .defaultClient, name: "fullscreen")
         Passwords.install(in: configuration.userContentController)
+        // The first page made starts the blocker: WebKit is being started for
+        // it anyway. Cached rules arrive asynchronously; navigation never waits.
+        Blocker.shared.start()
+        Blocker.shared.install(in: configuration.userContentController)
+        configuration.userContentController.addUserScript(googleSignIn)
+        configuration.userContentController.addUserScript(geminiButton)
+        configuration.userContentController.addUserScript(linkHover)
+        configuration.userContentController.add(preconnects, contentWorld: .defaultClient, name: "preconnect")
+        configuration.userContentController.addUserScript(middleClick)
+        configuration.userContentController.add(middleClicks, contentWorld: .defaultClient, name: "middleClick")
         // WebKit samples the page's top edge only when asked, allowing this
         // much difference across it (as Safari does), for `recolor`.
-        let sample = NSSelectorFromString("_setSampledPageTopColorMaxDifference:")
-        if configuration.responds(to: sample) {
-            typealias Setter = @convention(c) (AnyObject, Selector, Double) -> Void
-            unsafeBitCast(configuration.method(for: sample), to: Setter.self)(configuration, sample, 5)
-        }
+        set(configuration, "_setSampledPageTopColorMaxDifference:", 5.0)
+        // As Safari has them, where WebKit leaves them off for other apps:
+        // the sites a page links to are looked up ahead of a click, and a page
+        // out of sight has its timers slowed further the longer it stays so.
+        set(configuration.preferences, "_setDNSPrefetchingEnabled:", true)
+        set(configuration.preferences, "_setHiddenPageDOMTimerThrottlingAutoIncreases:", true)
+        // A page out of sight that keeps over half a core busy for WebKit's
+        // 8 minutes (an ad gone wrong) has its process ended; the tab sleeps
+        // (Browser.webViewWebContentProcessDidTerminate) and loads again when
+        // next shown. Never one on screen, or playing sound.
+        set(configuration, "_setCPULimit:", 0.5)
         return configuration
     }
+
+    /// Calls a setter of WebKit's own (SPI, as Safari uses), if WebKit still has it.
+    private static func set(_ object: NSObject, _ setter: String, _ value: Double) {
+        let selector = NSSelectorFromString(setter)
+        guard object.responds(to: selector) else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, Double) -> Void
+        unsafeBitCast(object.method(for: selector), to: Setter.self)(object, selector, value)
+    }
+
+    private static func set(_ object: NSObject, _ setter: String, _ value: Bool) {
+        let selector = NSSelectorFromString(setter)
+        guard object.responds(to: selector) else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
+        unsafeBitCast(object.method(for: selector), to: Setter.self)(object, selector, value)
+    }
+
+    /// Pages drawn at the screen's own rate, up to 120 a second on a ProMotion
+    /// screen, as in Chrome; WebKit holds them near 60, as Safari does. In Low
+    /// Power Mode they keep WebKit's 60: a page that animates draws half as
+    /// often. WebKit reads it as the page is made, before its view is: a tab
+    /// follows a change of mode once its page is made again (woken, or opened).
+    private static func matchScreenRate(_ preferences: WKPreferences) {
+        let setter = NSSelectorFromString("_setEnabled:forFeature:")
+        guard let near60, preferences.responds(to: setter) else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, Bool, AnyObject) -> Void
+        unsafeBitCast(preferences.method(for: setter), to: Setter.self)(
+            preferences, setter, ProcessInfo.processInfo.isLowPowerModeEnabled, near60)
+    }
+
+    /// Every page made, while it lives.
+    private static let pages = NSHashTable<WKWebView>.weakObjects()
+
+    /// Low Power Mode turned on or off reaches the pages already open too,
+    /// not only those made from then on: WebKit takes it up as each is next
+    /// loaded (reloaded, or gone somewhere), rather than when it is woken.
+    private static let powerWatch = NotificationCenter.default.addObserver(
+        forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main
+    ) { _ in
+        MainActor.assumeIsolated {
+            for page in pages.allObjects { matchScreenRate(page.configuration.preferences) }
+        }
+    }
+
+    /// WebKit's switch for it, one of the flags Safari lists under Develop ›
+    /// Feature Flags; nil in a WebKit without it, which then keeps its own rate.
+    static let near60: NSObject? = {
+        let features = NSSelectorFromString("_features")
+        let type: AnyObject = WKPreferences.self
+        guard type.responds(to: features),
+              let all = type.perform(features)?.takeUnretainedValue() as? [NSObject] else { return nil }
+        return all.first { $0.value(forKey: "key") as? String == "PreferPageRenderingUpdatesNear60FPSEnabled" }
+    }()
+
+    /// Google's "Sign in with Google" prompt is a light page in an iframe. On a
+    /// dark site, WebKit gives an iframe whose colours don't match the site's
+    /// a solid background of its own, white here, round the prompt's corners.
+    /// Matched to the prompt's, the iframe is see-through, as Google means it to be.
+    private static let googleSignIn = WKUserScript(source: """
+        const style = document.createElement('style');
+        style.textContent = 'iframe[src^="https://accounts.google.com/gsi/"] { color-scheme: normal !important; }';
+        document.documentElement.append(style);
+        """, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient)
+
+    /// Google's "Ask Gemini" button (Gmail's, among others) is a square picture
+    /// cut to a star by the clip-path of the box round it. Hovered, the rings
+    /// behind it spin, WebKit lifts the picture onto a layer of its own, and a
+    /// clip-path on a box not itself on one no longer cuts it: the whole square
+    /// shows, black round the star (Safari too). On a layer of its own, the box
+    /// cuts all that is in it. Google's class names, which may change.
+    private static let geminiButton = WKUserScript(source: """
+        {
+            const style = document.createElement('style');
+            style.textContent = '.HFMVod { will-change: transform; }';
+            document.documentElement.append(style);
+        }
+        """, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient)
 
     /// Sites serve their full pages only to browsers that say they are Safari;
     /// without this Google, for one, sends its bare fallback. Safari's own
@@ -340,19 +649,29 @@ struct PageView: NSViewRepresentable {
     /// Whether the page takes the keyboard when it comes on screen, so Space
     /// scrolls it. Not while the command bar has it.
     let takesFocus: Bool
-    /// How much of the page's left side the sidebar covers. The page lays
-    /// itself out in the rest, without the web view changing size.
-    var coveredLeading: CGFloat = 0
 
     func makeNSView(context: Context) -> NSView { NSView() }
 
     func updateNSView(_ view: NSView, context: Context) {
-        // First, so that a sleeping tab's page is woken and among the rest.
-        let shown = selected?.webView
-        let pages = tabs.compactMap(\.page)
-        // Closed tabs' pages go (sleeping ones take themselves out).
-        for page in view.subviews where !pages.contains(where: { $0 === page }) {
+        // First, so that a sleeping tab's page is woken and among the rest. A
+        // new tab has none to show, and none is made for it.
+        let shown = selected.flatMap { $0.hasPage ? $0.webView : nil }
+        let awake = tabs.compactMap(\.page)
+        // Closed tabs' pages go (sleeping ones take themselves out). Only
+        // pages: in its own full screen (a bare `<video controls>`), WebKit
+        // leaves a stand-in of its own here.
+        for page in view.subviews where page is WKWebView && !awake.contains(where: { $0 === page }) {
             page.removeFromSuperview()
+        }
+        // A page in WebKit's full screen, or on its way in or out, is WebKit's
+        // to place: put back here, its video would go black, its sound playing on.
+        let pages = awake.filter { $0.fullscreenState == .notInFullscreen }
+        // The page with the keyboard, if one has it. It is handed on before
+        // that page hides: a page hidden with the keyboard has AppKit look
+        // through every view in the window for the next to take it.
+        let window = view.window
+        let focused = (window?.firstResponder as? NSView).flatMap { responder in
+            pages.first { responder === $0 || responder.isDescendant(of: $0) }
         }
         for page in pages {
             let arriving = page.superview !== view || page.isHidden
@@ -361,23 +680,19 @@ struct PageView: NSViewRepresentable {
                 page.autoresizingMask = [.width, .height]
                 view.addSubview(page)
             }
-            cover(page)
-            page.isHidden = page !== shown
-            if page === shown, arriving, takesFocus {
+            guard page === shown else { continue }
+            page.isHidden = false
+            guard arriving, takesFocus else { continue }
+            if let window, focused != nil {
+                window.makeFirstResponder(page)
+            } else {
                 DispatchQueue.main.async { page.window?.makeFirstResponder(page) }
             }
         }
-    }
-
-    private func cover(_ webView: WKWebView) {
-        guard #available(macOS 26, *), webView.obscuredContentInsets.left != coveredLeading else { return }
-        webView.obscuredContentInsets = NSEdgeInsets(top: 0, left: coveredLeading, bottom: 0, right: 0)
-    }
-
-    /// Whether pages can be told what covers them (macOS 26), rather than be
-    /// made narrower, which WebKit catches up with a frame or more late.
-    static var canBeCovered: Bool {
-        if #available(macOS 26, *) { true } else { false }
+        // With no page on screen (a new tab, the settings), the keyboard
+        // leaves the one hidden behind: Space would pause its video unseen.
+        if shown == nil, focused != nil { window?.makeFirstResponder(nil) }
+        for page in pages where page !== shown { page.isHidden = true }
     }
 }
 

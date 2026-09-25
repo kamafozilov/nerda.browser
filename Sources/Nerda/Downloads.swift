@@ -81,13 +81,21 @@ nonisolated enum Downloads {
     }
 }
 
-/// The sidebar's corner button for this session's downloads. While any are
+/// The sidebar's corner button for this session's downloads. A download
+/// starting flies into it from the pointer, as in Safari; while any are
 /// running a ring round it fills with their progress; it bounces as one lands.
 struct DownloadsButton: View {
     let browser: Browser
     @Binding var shown: Bool
+    /// Where its list opens: above it, in the sidebar's bottom corner, or
+    /// below it, at the window's top.
+    var arrowEdge = Edge.top
 
     @State private var hovering = false
+    /// Where the button is in the window, for a download to fly into.
+    @State private var frame = CGRect.zero
+    @State private var flight: Flight?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let running = browser.downloads.filter { $0.state == .running }
@@ -113,9 +121,29 @@ struct DownloadsButton: View {
         .accessibilityLabel("Downloads")
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
-        .popover(isPresented: $shown, arrowEdge: .top) {
+        .popover(isPresented: $shown, arrowEdge: arrowEdge) {
             DownloadsList(browser: browser)
         }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
+        .overlay {
+            if let flight { FlyingFile(flight: flight) { self.flight = nil }.id(flight.id) }
+        }
+        // Downloads are only ever added at the top.
+        .onChange(of: browser.downloads.count) { old, new in
+            guard new > old, !reduceMotion, let download = browser.downloads.first else { return }
+            flight = Flight(name: download.name, from: Self.pointer(from: frame))
+        }
+    }
+
+    /// The pointer, which has just clicked the link, from the button's middle;
+    /// the window's middle when it is elsewhere (a download from the keyboard).
+    private static func pointer(from frame: CGRect) -> CGSize {
+        guard let window = NSApp.keyWindow, let content = window.contentView else { return .zero }
+        let bounds = content.bounds
+        var point = window.mouseLocationOutsideOfEventStream
+        if !bounds.contains(point) { point = CGPoint(x: bounds.midX, y: bounds.midY) }
+        // AppKit counts up from the bottom, SwiftUI down from the top.
+        return CGSize(width: point.x - frame.midX, height: bounds.height - point.y - frame.midY)
     }
 
     /// All running downloads as one: bytes in over bytes expected, where known.
@@ -124,6 +152,40 @@ struct DownloadsButton: View {
         let total = sized.reduce(0) { $0 + $1.total }
         guard total > 0 else { return nil }
         return Double(sized.reduce(0) { $0 + $1.received }) / Double(total)
+    }
+}
+
+private struct Flight {
+    let id = UUID()
+    let name: String
+    /// Where it sets off, from the button's middle.
+    let from: CGSize
+}
+
+/// The file's icon, falling in an arc from where the download started into
+/// the button, shrinking as it goes.
+private struct FlyingFile: View {
+    let flight: Flight
+    let landed: () -> Void
+
+    @State private var across = false
+    @State private var down = false
+
+    var body: some View {
+        Image(nsImage: NSWorkspace.shared.icon(for: UTType(filenameExtension: (flight.name as NSString).pathExtension) ?? .data))
+            .resizable()
+            .frame(width: 48, height: 48)
+            .scaleEffect(down ? 0.3 : 1)
+            .opacity(down ? 0.4 : 1)
+            // Steady across, gathering speed downward: an arc, as if thrown.
+            .offset(x: across ? 0 : flight.from.width)
+            .offset(y: down ? 0 : flight.from.height)
+            .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
+            .allowsHitTesting(false)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.6)) { across = true }
+                withAnimation(.easeIn(duration: 0.6)) { down = true } completion: { landed() }
+            }
     }
 }
 
@@ -141,20 +203,67 @@ private struct ProgressRing: View {
                     .rotationEffect(.degrees(-90))
                     .animation(.linear(duration: 0.2), value: fraction)
             } else {
-                // Keeps turning without anything to redraw on the app's side.
-                TimelineView(.animation) { context in
-                    Circle()
-                        .trim(from: 0, to: 0.25)
-                        .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                        .rotationEffect(.degrees(context.date.timeIntervalSinceReferenceDate * 360))
-                }
+                TurningArc()
             }
         }
         .frame(width: 20, height: 20)
     }
 }
 
-private struct DownloadsList: View {
+/// A quarter of the ring going round once a second. Core Animation turns it,
+/// outside the app: SwiftUI turning it (a TimelineView) redrew it on the main
+/// thread every frame for as long as the download ran.
+private struct TurningArc: NSViewRepresentable {
+    func makeNSView(context: Context) -> ArcView { ArcView() }
+    func updateNSView(_ view: ArcView, context: Context) {}
+
+    final class ArcView: NSView {
+        private let arc = CAShapeLayer()
+
+        init() {
+            super.init(frame: .zero)
+            wantsLayer = true
+            arc.fillColor = nil
+            arc.lineWidth = 2
+            arc.lineCap = .round
+            arc.strokeEnd = 0.25
+            layer?.addSublayer(arc)
+            setAccessibilityElement(false)
+        }
+
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func layout() {
+            super.layout()
+            arc.frame = bounds
+            arc.path = CGPath(ellipseIn: bounds, transform: nil)
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            viewDidChangeEffectiveAppearance()
+            guard window != nil, arc.animation(forKey: "turn") == nil else { return }
+            let turn = CABasicAnimation(keyPath: "transform.rotation.z")
+            // Clockwise: AppKit's layers count angles up from the bottom.
+            turn.toValue = -2 * Double.pi
+            turn.duration = 1
+            turn.repeatCount = .infinity
+            turn.isRemovedOnCompletion = false
+            arc.add(turn, forKey: "turn")
+        }
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            effectiveAppearance.performAsCurrentDrawingAppearance { arc.strokeColor = NSColor.controlAccentColor.cgColor }
+        }
+
+        // Clicks go to the button under it.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+/// This session's downloads: under the corner button, and beside the sidebar menu's Downloads.
+struct DownloadsList: View {
     let browser: Browser
 
     /// Rows beyond this many scroll, so the popover stays within reach.

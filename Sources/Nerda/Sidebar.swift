@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// The column down the left, on glass: pinned sites as tiles at the top, then
-/// the tabs, newest first, under the button that opens another, and downloads
-/// in the corner. Pinned beside the page, or, while collapsed, brought out
-/// over it from the window's edge. Tabs and tiles are dragged into another
+/// the tabs, newest first, under the button that opens another, and along the
+/// bottom, the app's menu and downloads. Pinned beside the page, or, while
+/// collapsed, brought out over it from the window's edge. Tabs and tiles are dragged into another
 /// order; a tab dragged onto the tiles is pinned, a tile dragged down among
 /// the tabs unpinned.
 struct Sidebar: View {
@@ -11,6 +11,8 @@ struct Sidebar: View {
     /// Beside the page (true), or floating over it (false).
     let pinned: Bool
     @Binding var downloadsShown: Bool
+    /// The menu in the bottom corner (see `SidebarMenu`), drawn over the whole window.
+    @Binding var menuShown: Bool
     /// Dragged wider or narrower at its right edge; see `SidebarResizer`.
     @Binding var width: Double
 
@@ -29,13 +31,17 @@ struct Sidebar: View {
     nonisolated private static let space = "sidebar"
 
     @State private var dragged: Drag?
+    /// Where the pointer is while dragging, in the sidebar's space. Only the
+    /// copy under it reads it, so a move redraws that copy, not every row.
+    @State private var pointer = Pointer()
+    /// Where a tab from the list would go among the tiles, while it is dragged
+    /// over them: set only when that changes.
+    @State private var gap: Int?
     @State private var layout = Layout()
 
     /// A tab or tile being dragged.
     private struct Drag {
         let id: Tab.ID
-        /// Where the pointer is, in the sidebar's space.
-        var at: CGPoint
         /// From the middle of what was taken hold of to the pointer, so the
         /// same spot stays under it.
         let grab: CGSize
@@ -58,7 +64,12 @@ struct Sidebar: View {
             ZStack(alignment: .trailing) {
                 Color.clear
                     .contentShape(Rectangle())
-                    .gesture(WindowDragGesture())
+                    .titleBar()
+                #if DEBUG
+                DevBadge()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 88)
+                #endif
                 if !pinned {
                     SidebarToggle(open: false, toggle: browser.toggleSidebar)
                         .padding(.trailing, 10)
@@ -66,13 +77,16 @@ struct Sidebar: View {
             }
             .frame(height: Self.topRow)
 
-            tiles
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.tiles = $0 }
-                .padding(.horizontal, 8)
-                .padding(.top, 8)
+            // Incognito tabs go with their window: nothing there to keep pinned.
+            if !browser.isPrivate {
+                tiles
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.tiles = $0 }
+                    .padding(.horizontal, 8)
+                    .padding(.top, 8)
+            }
 
             // Fixed: always within reach, however far down the tabs go.
-            SidebarRow(icon: "plus", title: "New Tab", dimmed: true, action: browser.showCommandBar)
+            SidebarRow(icon: "plus", title: "New Tab", dimmed: true, action: browser.newTab)
                 .padding(.horizontal, 8)
                 .padding(.top, 8)
 
@@ -85,22 +99,32 @@ struct Sidebar: View {
                             // playing, after it is closed.
                             let id = tab.id
                             SidebarRow(
-                                icon: "globe",
+                                icon: tab.settings != nil ? "gearshape" : tab.showsHistory ? "clock.arrow.circlepath" : "globe",
                                 site: tab.site,
                                 loading: tab.isLoading,
                                 title: tab.title,
                                 selected: id == browser.selectedID,
-                                close: { withAnimation(.slide) { browser.close(id) } }
+                                close: { withAnimation(.slide) { browser.close(id) } },
+                                // A new tab, or the settings, keeps the name it has.
+                                rename: tab.hasPage ? { name in
+                                    if let name { browser.rename(id, to: name) }
+                                    browser.focusPage()
+                                } : nil,
+                                press: { browser.select(id) }
                             ) {
-                                withAnimation(.easeOut(duration: 0.14)) { browser.selectedID = id }
+                                browser.select(id)
                             }
                             // Its place stays empty while it is dragged: where it will land.
                             .opacity(dragged?.id == id ? 0 : 1)
-                            .simultaneousGesture(drag(id))
-                            .contextMenu {
-                                Button("Pin Tab") { withAnimation(.slide) { browser.setPinned(true, id) } }
-                                Button("Close Tab") { withAnimation(.slide) { browser.close(id) } }
+                            // A sleeping tab's site is connected to on the way to a click
+                            // on it. By its id, as the buttons hold it.
+                            .onHover { over in
+                                guard over, let tab = browser.tabs.first(where: { $0.id == id }), tab.isAsleep,
+                                      let site = tab.site else { return }
+                                Tab.preconnect(to: site)
                             }
+                            .simultaneousGesture(drag(id))
+                            .contextMenu { TabMenu(browser: browser, id: id) }
                             .transition(.asymmetric(
                                 insertion: .move(edge: .top).combined(with: .opacity),
                                 removal: .opacity
@@ -142,37 +166,37 @@ struct Sidebar: View {
             }
 
             HStack {
-                DownloadsButton(browser: browser, shown: $downloadsShown)
+                SidebarMenuButton(shown: $menuShown, incognito: browser.isPrivate)
                 Spacer()
+                DownloadsButton(browser: browser, shown: $downloadsShown)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
         }
         .frame(width: width)
         .coordinateSpace(.named(Self.space))
+        // Off the tabs: their own menus are the ones that show on them.
+        .contextMenu { TabsMenu(browser: browser) }
         .background { background }
         .overlay(alignment: .trailing) { SidebarResizer(width: $width) }
         // What is dragged follows the pointer, over everything in the sidebar.
         // A tab over the tiles turns into one, the size of the gap opened for it.
         .overlay(alignment: .topLeading) {
             if let dragged, let tab = browser.tabs.first(where: { $0.id == dragged.id }) {
-                let gap = gap
                 let becomingTile = gap != nil
                 let size = gap.map { TileGrid.frame($0, of: pins.count + 1, in: layout.tiles).size } ?? dragged.size
-                let grab = becomingTile ? .zero : dragged.grab
-                Group {
-                    if tab.isPinned || becomingTile {
-                        PinnedTile(site: tab.site, loading: false, title: tab.title, selected: true) {}
-                    } else {
-                        SidebarRow(icon: "globe", site: tab.site, title: tab.title, selected: true) {}
+                UnderPointer(pointer: pointer, grab: becomingTile ? .zero : dragged.grab, size: size, width: width) {
+                    Group {
+                        if tab.isPinned || becomingTile {
+                            PinnedTile(site: tab.site, loading: false, title: tab.title, selected: true) {}
+                        } else {
+                            SidebarRow(icon: "globe", site: tab.site, title: tab.title, selected: true) {}
+                        }
                     }
+                    .frame(width: size.width, height: size.height)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
                 }
-                .frame(width: size.width, height: size.height)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
-                // Across, kept within the sidebar, as the tabs are.
-                .position(x: min(max(dragged.at.x - grab.width, size.width / 2 + 8), width - size.width / 2 - 8),
-                          y: dragged.at.y - grab.height)
                 .animation(.snappy(duration: 0.2), value: becomingTile)
                 .allowsHitTesting(false)
             }
@@ -182,10 +206,10 @@ struct Sidebar: View {
     private var pins: [Tab] { Array(browser.tabs.prefix { $0.isPinned }) }
     private var rest: [Tab] { Array(browser.tabs.drop { $0.isPinned }) }
 
-    /// Where a tab from the list would go among the tiles, while it is dragged over them.
-    private var gap: Int? {
-        guard let dragged, rest.contains(where: { $0.id == dragged.id }), overTiles(dragged.at) else { return nil }
-        return TileGrid.index(at: dragged.at, of: pins.count + 1, in: layout.tiles)
+    /// Where a tab from the list would go among the tiles, dragged to `point` over them.
+    private func gap(for id: Tab.ID, at point: CGPoint) -> Int? {
+        guard rest.contains(where: { $0.id == id }), overTiles(point) else { return nil }
+        return TileGrid.index(at: point, of: pins.count + 1, in: layout.tiles)
     }
 
     /// With no tiles yet, where to drag one is always shown, dashed. With
@@ -200,17 +224,15 @@ struct Sidebar: View {
                 if let id {
                     if let tab = browser.tabs.first(where: { $0.id == id }) {
                         PinnedTile(site: tab.site, loading: tab.isLoading, title: tab.title,
-                                   selected: id == browser.selectedID) {
-                            withAnimation(.easeOut(duration: 0.14)) { browser.selectedID = id }
+                                   selected: id == browser.selectedID,
+                                   press: { browser.select(id) }) {
+                            browser.select(id)
                         }
                         .opacity(dragged?.id == id ? 0 : 1)
                         .simultaneousGesture(drag(id))
                         // Back to where it was pinned, from wherever it has been since.
                         .simultaneousGesture(TapGesture(count: 2).onEnded { tab.goHome() })
-                        .contextMenu {
-                            Button("Unpin Tab") { withAnimation(.slide) { browser.setPinned(false, id) } }
-                            Button("Close Tab") { withAnimation(.slide) { browser.close(id) } }
-                        }
+                        .contextMenu { TabMenu(browser: browser, id: id) }
                         .transition(.scale(scale: 0.8).combined(with: .opacity))
                     }
                 } else if pins.isEmpty {
@@ -229,7 +251,9 @@ struct Sidebar: View {
         DragGesture(minimumDistance: 6, coordinateSpace: .named(Self.space))
             .onChanged { value in
                 if dragged == nil { dragged = start(id, at: value.startLocation) }
-                dragged?.at = value.location
+                pointer.at = value.location
+                let over = gap(for: id, at: value.location)
+                if over != gap { gap = over }
                 reorder(id, at: value.location)
             }
             .onEnded { drop(id, at: $0.location) }
@@ -245,7 +269,7 @@ struct Sidebar: View {
         } else {
             return nil
         }
-        return Drag(id: id, at: point, grab: CGSize(width: point.x - frame.midX, height: point.y - frame.midY),
+        return Drag(id: id, grab: CGSize(width: point.x - frame.midX, height: point.y - frame.midY),
                     size: frame.size)
     }
 
@@ -267,14 +291,15 @@ struct Sidebar: View {
     /// Onto the tiles, a tab is pinned where it is let go; a tile let go below
     /// them is unpinned there. Anywhere else, it stays where the drag put it.
     private func drop(_ id: Tab.ID, at point: CGPoint) {
-        let gap = gap
+        let landing = gap
         withAnimation(.slide) {
             dragged = nil
+            gap = nil
             guard let tab = browser.tabs.first(where: { $0.id == id }) else { return }
             if tab.isPinned, belowTiles(point), (0...width).contains(point.x) {
                 browser.move(id, pinned: false, to: rowIndex(at: point.y, of: rest.count + 1))
-            } else if let gap {
-                browser.move(id, pinned: true, to: gap)
+            } else if let landing {
+                browser.move(id, pinned: true, to: landing)
             }
         }
     }
@@ -298,7 +323,7 @@ struct Sidebar: View {
     /// same sliding as at rest. Pinned, it is one with the window's glass
     /// around the page; floating, an edge and a shadow lift it off the page.
     private var background: some View {
-        SidebarGlass()
+        SidebarGlass(incognito: browser.isPrivate)
             .overlay(alignment: .trailing) {
                 if !pinned { Rectangle().fill(Palette.hairline).frame(width: 1) }
             }
@@ -340,10 +365,63 @@ private struct TileGrid: Layout {
     }
 }
 
+/// Where the pointer is while a tab or tile is dragged.
+@Observable
+final class Pointer {
+    var at = CGPoint.zero
+}
+
+/// What is dragged, under the pointer: the one view a move of the pointer
+/// draws again. Across, kept within the sidebar, as the tabs are.
+private struct UnderPointer<Content: View>: View {
+    let pointer: Pointer
+    let grab: CGSize
+    let size: CGSize
+    let width: CGFloat
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content.position(x: min(max(pointer.at.x - grab.width, size.width / 2 + 8), width - size.width / 2 - 8),
+                         y: pointer.at.y - grab.height)
+    }
+}
+
+#if DEBUG
+/// Beside the traffic lights, so a development build is never taken for the
+/// Nerda in use.
+struct DevBadge: View {
+    var body: some View {
+        Text(Edition.name.dropFirst("Nerda ".count))
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Palette.muted)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Palette.wash, in: Capsule())
+            .allowsHitTesting(false)
+    }
+}
+#endif
+
 /// The frosted desktop behind the window that macOS puts under sidebars
 /// (Finder's, Mail's), greyed while the window is in the background as theirs
-/// are. SwiftUI's own materials only blur what is in the window.
-struct SidebarGlass: NSViewRepresentable {
+/// are, and tinted if asked (Settings › Appearance › Transparency); in an
+/// incognito window, a plain dark grey instead.
+struct SidebarGlass: View {
+    var incognito = false
+
+    @AppStorage(Transparency.key) private var transparency = Transparency.transparent
+
+    var body: some View {
+        if incognito {
+            Palette.incognito
+        } else {
+            Glass().overlay { if transparency == .tinted { Palette.tint } }
+        }
+    }
+}
+
+/// SwiftUI's own materials only blur what is in the window.
+private struct Glass: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = .sidebar
@@ -412,9 +490,17 @@ private struct SidebarRow: View {
     var dimmed = false
     /// Given, the row shows a close button while the pointer is over it.
     var close: (() -> Void)?
+    /// Given, a double-click makes the title editable in place: Return or a
+    /// click away keeps the new name (nil for Esc, which keeps the old).
+    var rename: ((String?) -> Void)?
+    /// Done as the button goes down, not up, as browsers select a tab: a
+    /// click's whole press sooner. `action` still does it from the keyboard.
+    var press: (() -> Void)?
     let action: () -> Void
 
     @State private var hovering = false
+    @State private var renaming = false
+    @Environment(\.incognito) private var incognito
 
     private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
 
@@ -424,10 +510,17 @@ private struct SidebarRow: View {
                 TabIcon(site: site, loading: loading, fallback: icon)
                     .font(.system(size: 14, weight: dimmed ? .light : .regular))
                     .frame(width: 22)
-                Text(title)
-                    .font(.system(size: 14))
-                    .foregroundStyle(dimmed ? Palette.muted : Palette.ink)
-                    .lineLimit(1)
+                if renaming {
+                    RenameField(title: title) { name in
+                        renaming = false
+                        rename?(name)
+                    }
+                } else {
+                    Text(title)
+                        .font(.system(size: 14))
+                        .foregroundStyle(dimmed ? Palette.muted : Palette.ink)
+                        .lineLimit(1)
+                }
             }
             .padding(.leading, 10)
             // Room for the close button, so a long title stops short of it.
@@ -436,17 +529,20 @@ private struct SidebarRow: View {
             .frame(height: Sidebar.rowHeight)
             .background {
                 shape
-                    .fill(selected ? Palette.wash : hovering ? Palette.hover : .clear)
+                    .fill(selected ? wash : hovering ? hover : .clear)
                     .shadow(color: .black.opacity(selected ? 0.15 : 0), radius: 2, y: 1)
             }
-            .overlay { shape.strokeBorder(selected ? Palette.rim : .clear) }
+            .overlay { shape.strokeBorder(selected ? rim : .clear) }
             .contentShape(shape)
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in press?() })
+        // The first click has selected the tab, as a single one does.
+        .simultaneousGesture(TapGesture(count: 2).onEnded { if rename != nil { renaming = true } })
         // Over the row rather than inside it, so a click on it closes the tab
         // without also selecting it.
         .overlay(alignment: .trailing) {
-            if let close, hovering {
+            if let close, hovering, !renaming {
                 CloseButton(action: close).padding(.trailing, 6)
             }
         }
@@ -455,18 +551,59 @@ private struct SidebarRow: View {
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
     }
+
+    // In an incognito window, in its accent.
+    private var wash: Color { incognito ? Palette.incognitoAccent.opacity(0.22) : Palette.wash }
+    private var hover: Color { incognito ? Palette.incognitoAccent.opacity(0.1) : Palette.hover }
+    private var rim: Color { incognito ? Palette.incognitoAccent.opacity(0.35) : Palette.rim }
 }
 
-/// A tab's site icon, or a spinner once a load has taken long enough to
-/// notice: a quick one would just blink.
-private struct TabIcon: View {
+/// A tab's title made editable where it is, all of it selected, so typing
+/// replaces it. Return or a click elsewhere keeps what is typed; Esc keeps
+/// the title as it was.
+struct RenameField: View {
+    let title: String
+    let done: (String?) -> Void
+
+    @State private var text = ""
+    @State private var finished = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("Tab Name", text: $text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 14))
+            .foregroundStyle(Palette.ink)
+            .focused($focused)
+            .onSubmit { finish(text) }
+            .onKeyPress(.escape) {
+                finish(nil)
+                return .handled
+            }
+            .onChange(of: focused) { if !focused { finish(text) } }
+            .onAppear {
+                text = title
+                // A turn later, once the field is in the window (see CommandBar).
+                DispatchQueue.main.async { focused = true }
+            }
+    }
+
+    /// Once: Return also takes the focus away, which would finish it again.
+    private func finish(_ name: String?) {
+        guard !finished else { return }
+        finished = true
+        done(name)
+    }
+}
+
+/// A tab's site icon, bare (see `Favicon`), or a spinner once a load has
+/// taken long enough to notice: a quick one would just blink.
+struct TabIcon: View {
     let site: URL?
     let loading: Bool
     /// In place of the site's icon, for a row without a site.
     var fallback = "globe"
-    var size: CGFloat = 14
-    /// See `Favicon`.
-    var plate = true
+    var size: CGFloat = 16
 
     @State private var spinning = false
 
@@ -477,7 +614,7 @@ private struct TabIcon: View {
                     .controlSize(.small)
                     .transition(.opacity)
             } else if let site {
-                Favicon(site: site, size: size, plate: plate)
+                Favicon(site: site, size: size, plate: false)
             } else {
                 Image(systemName: fallback)
                     .foregroundStyle(Palette.muted)
@@ -500,6 +637,8 @@ private struct PinnedTile: View {
     let loading: Bool
     let title: String
     let selected: Bool
+    /// As a tab row's: on the way down.
+    var press: (() -> Void)?
     let action: () -> Void
 
     @State private var hovering = false
@@ -510,7 +649,11 @@ private struct PinnedTile: View {
         let tint = Favicons.origin(of: site).flatMap { Favicons.shared.tints[$0] }
         let colors = tint?.colors.map { Color(nsColor: $0) } ?? []
         Button(action: action) {
-            TabIcon(site: site, loading: loading, size: 16, plate: false)
+            // Its icon stays while the site loads, once there is one: a
+            // pinned site loads at launch, and a slow one (Gmail) would
+            // otherwise sit as a spinner for seconds.
+            TabIcon(site: site, loading: loading && Favicons.origin(of: site).flatMap { Favicons.shared.images[$0] } == nil,
+                    size: 16)
                 .frame(maxWidth: .infinity)
                 .frame(height: Sidebar.tileHeight)
                 .background {
@@ -548,11 +691,11 @@ private struct PinnedTile: View {
                 .contentShape(shape)
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in press?() })
         .help(title)
         .accessibilityLabel(title)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
-        .animation(.easeOut(duration: 0.14), value: selected)
     }
 }
 
@@ -582,7 +725,7 @@ private struct PinSlot: View {
     }
 }
 
-private struct CloseButton: View {
+struct CloseButton: View {
     let action: () -> Void
 
     @State private var hovering = false
@@ -685,6 +828,6 @@ private struct Tooltip: View {
 }
 
 #Preview {
-    Sidebar(browser: Browser(), pinned: true, downloadsShown: .constant(false), width: .constant(Sidebar.defaultWidth))
+    Sidebar(browser: Browser(), pinned: true, downloadsShown: .constant(false), menuShown: .constant(false), width: .constant(Sidebar.defaultWidth))
         .frame(height: 600)
 }

@@ -76,10 +76,10 @@ The first release build asks once for the login keychain password when it reache
 
 `Sources/Nerda/Updater.swift` reads `https://api.github.com/repos/kamafozilov/nerda.browser/releases/latest`. When its tag is newer than the running version, Nerda shows the release notes. "Install and Relaunch" then:
 
-1. downloads `Nerda.zip` and checks it against the SHA-256 that GitHub lists;
-2. checks that the new app has the same bundle id, a newer version, a valid signature and the same team;
+1. downloads `Nerda.zip` and checks it against the SHA-256 that GitHub lists (a release without one isn't taken);
+2. checks that the new app has the same bundle id, a newer version, and a valid signature, everything inside it included, from a Developer ID Application certificate Apple gave the same team;
 3. moves the old app to `Nerda.app.old`, moves the new one into place, and reopens Nerda, which restores its tabs.
 
 Only the app bundle is replaced; the data folder, settings and keychain stay as they are. If Nerda can't replace itself (for example when it runs from the disk image instead of Applications), it says why and opens the release page.
 
-To try the updater without publishing, serve a JSON file shaped like GitHub's release (`tag_name`, `body`, `html_url`, `assets[].name`, `assets[].browser_download_url`) next to a newer `Nerda.zip`, and open a release build with `open --env NERDA_UPDATES=http://127.0.0.1:8000/release.json build/Nerda.app`.
+To try the updater without publishing, serve a JSON file shaped like GitHub's release (`tag_name`, `body`, `html_url`, `assets[].name`, `assets[].browser_download_url`, and `assets[].digest` as `sha256:` and the zip's `shasum -a 256`) next to a newer `Nerda.zip` signed with the Developer ID, and open a release build with `open --env NERDA_UPDATES=http://127.0.0.1:8000/release.json build/Nerda.app`. Plain http is taken only from this Mac.

@@ -24,6 +24,8 @@ struct SentSignIn: Equatable {
     let host: String
     let user: String
     let password: String
+    /// Sent from a page that came over plain http.
+    let clear: Bool
     let at: Date
 
     /// Long enough for a slow sign-in to land; past that, the page moving on
@@ -36,6 +38,8 @@ struct SentSignIn: Equatable {
 struct PasswordChoices: Equatable {
     let tab: Tab.ID
     let site: String
+    /// Listed for a page that came over plain http.
+    let clear: Bool
     var spot: CGRect
     var accounts: [Account]
 }
@@ -45,6 +49,8 @@ struct PasswordOffer: Equatable {
     let tab: Tab.ID
     let account: Account
     let password: String
+    /// From a page that came over plain http.
+    let clear: Bool
     /// This name has a password kept here already, a different one.
     let replaces: Bool
 }
@@ -67,9 +73,12 @@ actor Vault {
         var user: String
         var password: String
         var saved: Date
+        /// Last used on a page that came over plain http; nil for https, as
+        /// every login kept before this was taken to be.
+        var clear: Bool?
 
         var account: Account { Account(host: host, user: user) }
-        var name: Name { Name(host: host, user: user, saved: saved) }
+        var name: Name { Name(host: host, user: user, saved: saved, clear: clear) }
     }
 
     /// As kept in the file: a login without its password.
@@ -77,8 +86,17 @@ actor Vault {
         var host: String
         var user: String
         var saved: Date
+        var clear: Bool?
 
         var account: Account { Account(host: host, user: user) }
+    }
+
+    /// Those that may be offered on a page: on one that came over plain
+    /// http, which anyone on the network in between (a café's, a hotel's)
+    /// could have written, only those last used on such a page, never a
+    /// password kept from the site over https.
+    nonisolated static func offered(_ names: [Name], clear: Bool) -> [Name] {
+        clear ? names.filter { $0.clear == true } : names
     }
 
     private let service: String
@@ -175,10 +193,11 @@ actor Vault {
         return logins.filter { accounts.contains($0.account) }
     }
 
-    /// The accounts for `host`'s site, its own host's first. From the file,
-    /// without the keychain, unless the file has to be made again.
-    func accounts(for host: String) -> [Account] {
-        Site.matching(knownNames().map(\.account), host)
+    /// The accounts for `host`'s site, its own host's first, for a page that
+    /// came over plain http (`clear`) or not. From the file, without the
+    /// keychain, unless the file has to be made again.
+    func accounts(for host: String, clear: Bool) -> [Account] {
+        Site.matching(Self.offered(knownNames(), clear: clear).map(\.account), host)
     }
 
     func password(for account: Account) -> String? {
@@ -195,17 +214,29 @@ actor Vault {
             .filter { $0.user == sent.user && Site.of($0.host) == Site.of(sent.host) }
         guard !same.isEmpty else { return (false, false) }
         guard let all = loadLogins() else { return nil }
-        let known = all.contains { same.contains($0.account) && $0.password == sent.password }
-        return (known, same.contains { $0.host == sent.host })
+        let known = all.filter { same.contains($0.account) && $0.password == sent.password }.map(\.account)
+        // Where it was used last is where it is offered from now on: one kept
+        // over https and typed into the site's plain http page by hand (a
+        // router's) is offered there too, and once used over https again, no longer.
+        let clear = sent.clear ? true : nil
+        if all.contains(where: { known.contains($0.account) && $0.clear != clear }) {
+            _ = store(kept(all).map { login in
+                var login = login
+                if known.contains(login.account) { login.clear = clear }
+                return login
+            })
+        }
+        return (!known.isEmpty, same.contains { $0.host == sent.host })
     }
 
-    /// Adds them, or replaces those kept already; all or none.
-    func save(_ new: [(Account, String)]) -> Bool {
+    /// Adds them, or replaces those kept already; all or none. `clear`: from a
+    /// page that came over plain http.
+    func save(_ new: [(Account, String)], clear: Bool = false) -> Bool {
         guard let loaded = loadLogins() else { return false }
         var all = kept(loaded)
         for (account, password) in new {
             all.removeAll { $0.account == account }
-            all.append(Login(host: account.host, user: account.user, password: password, saved: .now))
+            all.append(Login(host: account.host, user: account.user, password: password, saved: .now, clear: clear ? true : nil))
         }
         return store(all)
     }
@@ -232,17 +263,24 @@ nonisolated enum Site {
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
-    /// The site a host belongs to: example.com for login.example.com, and
-    /// example.co.uz for mail.example.co.uz.
-    // ponytail: a few rules and a list of shared hosts in place of the public
-    // suffix list; a suffix missing here only offers one site's accounts on
-    // another's page, and still only once one of them is picked.
+    /// The site a host belongs to: example.com for login.example.com,
+    /// example.co.uz for mail.example.co.uz, and alice.github.io for
+    /// www.alice.github.io, as github.io is anyone's to register under.
     static func of(_ host: String) -> String {
         let host = key(host)
         let labels = host.split(separator: ".").map(String.init)
         // An address (127.0.0.1, ::1) is a site of its own.
         if host.contains(":") || labels.allSatisfy({ $0.allSatisfy(\.isNumber) }) { return host }
         guard labels.count > 2 else { return host }
+        // One name more than the longest ending anyone can register under.
+        if let isSuffix = publicSuffix {
+            for count in stride(from: labels.count - 1, through: 1, by: -1)
+            where isSuffix(labels.suffix(count).joined(separator: ".") as CFString) {
+                return labels.suffix(count + 1).joined(separator: ".")
+            }
+            return host
+        }
+        // Without it: a few rules and a list of shared hosts.
         let last2 = labels.suffix(2).joined(separator: ".")
         let isSuffix = sharedHosts.contains(last2)
             || (labels[labels.count - 1].count == 2 && secondLevels.contains(labels[labels.count - 2]))
@@ -255,6 +293,15 @@ nonisolated enum Site {
         let site = of(host)
         return accounts.filter { $0.host == host } + accounts.filter { $0.host != host && of($0.host) == site }
     }
+
+    /// Whether a name is one anyone can register under (com, co.uk, github.io,
+    /// myshopify.com), from the public suffix list macOS keeps, as WebKit asks
+    /// it for cookies. Private to CFNetwork: should it go, the rules below.
+    private static let publicSuffix: (@convention(c) (CFString) -> Bool)? = {
+        guard let symbol = dlsym(dlopen("/System/Library/Frameworks/CFNetwork.framework/CFNetwork", RTLD_NOW),
+                                 "_CFHostIsDomainTopLevel") else { return nil }
+        return unsafeBitCast(symbol, to: (@convention(c) (CFString) -> Bool).self)
+    }()
 
     /// co.uk, com.uz and the like: under a country's two letters, the part
     /// everyone registers under.
@@ -342,7 +389,8 @@ enum Passwords {
             guard message.frameInfo.isMainFrame, ["http", "https"].contains(origin.protocol), !origin.host.isEmpty,
                   let page = message.webView, let body = message.body as? [String: Any],
                   let kind = body["kind"] as? String else { return }
-            (page.uiDelegate as? Browser)?.page(page, passwords: kind, body, host: Site.key(origin.host))
+            (page.uiDelegate as? Browser)?.page(page, passwords: kind, body, host: Site.key(origin.host),
+                                                clear: origin.protocol == "http")
         }
     }
 
@@ -493,9 +541,11 @@ enum Passwords {
                 box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertReplacementText' }));
                 box.dispatchEvent(new Event('change', { bubbles: true }));
             };
-            // Into the boxes the caret was in, and only on the site it was picked for.
-            window.nerdaFill = (user, password, site) => {
+            // Into the boxes the caret was in, and only on the site it was picked
+            // for, over https if it was listed for a page over https.
+            window.nerdaFill = (user, password, site, secure) => {
                 if (location.hostname.toLowerCase().replace(/^www\./, '') !== site) return false;
+                if (secure && location.protocol !== 'https:') return false;
                 const box = field?.isConnected ? field : passwords()[0];
                 if (!box) return false;
                 const passwordBox = box.type === 'password' ? box : passwordFor(box);
@@ -516,7 +566,8 @@ enum Passwords {
 
 extension Browser {
     /// What a page's sign-in boxes say, from `Passwords.Messages`.
-    func page(_ page: WKWebView, passwords kind: String, _ body: [String: Any], host: String) {
+    /// `clear`: the page came over plain http.
+    func page(_ page: WKWebView, passwords kind: String, _ body: [String: Any], host: String, clear: Bool) {
         guard let tab = tab(for: page) else { return }
         switch kind {
         case "focus":
@@ -524,11 +575,11 @@ extension Browser {
             choicesAsked += 1
             let asked = choicesAsked
             Task {
-                let accounts = await vault.accounts(for: host)
+                let accounts = await vault.accounts(for: host, clear: clear)
                 // Gone meanwhile: the caret moved on, or the tab did.
                 guard asked == choicesAsked, tab.id == selectedID else { return }
                 passwordChoices = accounts.isEmpty ? nil
-                    : PasswordChoices(tab: tab.id, site: host, spot: spot, accounts: Array(accounts.prefix(6)))
+                    : PasswordChoices(tab: tab.id, site: host, clear: clear, spot: spot, accounts: Array(accounts.prefix(6)))
             }
         case "move":
             guard passwordChoices?.tab == tab.id, let spot = Self.spot(body, on: page) else { return }
@@ -543,7 +594,7 @@ extension Browser {
             // The password step of a sign-in that asked for the name first.
             if user.isEmpty, let name = tab.nameSent, Site.of(name.host) == Site.of(host),
                Date.now.timeIntervalSince(name.at) < 600 { user = name.user }
-            tab.signIn = SentSignIn(host: host, user: user, password: password, at: .now)
+            tab.signIn = SentSignIn(host: host, user: user, password: password, clear: clear, at: .now)
             hideChoices(on: tab)
         case "gone":
             guard let sent = tab.signIn, sent.isRecent, sent.host == host else { return }
@@ -575,7 +626,7 @@ extension Browser {
                   tabs.contains(where: { $0 === tab }) else { return }
             withAnimation(.easeOut(duration: 0.14)) {
                 passwordOffer = PasswordOffer(tab: tab.id, account: Account(host: sent.host, user: sent.user),
-                                              password: sent.password, replaces: replaces)
+                                              password: sent.password, clear: sent.clear, replaces: replaces)
             }
         }
     }
@@ -584,7 +635,7 @@ extension Browser {
         guard let offer = passwordOffer else { return }
         dropPasswordOffer()
         Task {
-            if await !vault.save([(offer.account, offer.password)]) {
+            if await !vault.save([(offer.account, offer.password)], clear: offer.clear) {
                 Self.tell("Couldn't save the password", "The keychain didn't take it.")
             }
         }
@@ -609,8 +660,8 @@ extension Browser {
             // nil when the Mac was asked whether Nerda may read it, and said no.
             guard let password = await vault.password(for: account) else { return }
             _ = try? await page.callAsyncJavaScript(
-                "return nerdaFill(user, password, site)",
-                arguments: ["user": account.user, "password": password, "site": choices.site],
+                "return nerdaFill(user, password, site, secure)",
+                arguments: ["user": account.user, "password": password, "site": choices.site, "secure": !choices.clear],
                 contentWorld: Passwords.world
             )
             page.window?.makeFirstResponder(page)
