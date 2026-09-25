@@ -69,11 +69,14 @@ nonisolated enum SearchEngine: String, CaseIterable, Identifiable {
 }
 
 /// A video playing with sound floats over everything when its tab is left,
-/// and goes back into its page when the tab is come back to, as in Arc.
+/// and goes back into its page when the tab is come back to, as in Arc; and,
+/// if chosen too, when Nerda is left for another app.
 enum PictureInPicture {
     static let key = "autoPictureInPicture"
+    static let appsKey = "autoPictureInPictureForApps"
 
     static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+    static var isOnForApps: Bool { isOn && UserDefaults.standard.bool(forKey: appsKey) }
 
     // Run by the app, which counts as a click, as WebKit wants for picture in picture.
     // ponytail: the page's own frame only; a video in an iframe (an embed) stays put.

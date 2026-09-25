@@ -9,6 +9,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Added
 
+- Auto Picture-in-Picture can float the video when you switch to another app too: tick Also when switching to another app under it in Settings › General. Back in Nerda, the video goes back into its page.
 - Type the path of a file on your Mac in the address bar (`/Users/you/Movies/clip.mp4` or `~/Movies/clip.mp4`) to open it, as in Chrome.
 
 ### Changed

@@ -158,6 +158,7 @@ private struct GeneralSettings: View {
 
     @AppStorage(SearchEngine.key) private var engine = SearchEngine.google
     @AppStorage(PictureInPicture.key) private var pictureInPicture = false
+    @AppStorage(PictureInPicture.appsKey) private var pictureInPictureForApps = false
     @AppStorage(Screenshot.key) private var screenshot = true
     @AppStorage(SpellCheck.key) private var spellCheck = true
     @AppStorage(QuitConfirmation.key) private var warnsBeforeQuitting = true
@@ -172,9 +173,18 @@ private struct GeneralSettings: View {
             }
         }
         SettingsGroup {
-            SettingsRow(title: "Auto Picture-in-Picture", detail: "Show floating player when switching from a video tab",
-                        icon: "pip") {
-                SettingsToggle(title: "Auto Picture-in-Picture", isOn: $pictureInPicture)
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsRow(title: "Auto Picture-in-Picture", detail: "Show floating player when switching from a video tab",
+                            icon: "pip") {
+                    SettingsToggle(title: "Auto Picture-in-Picture", isOn: $pictureInPicture)
+                }
+                if pictureInPicture {
+                    // Under the title, past the icon (SettingsRow).
+                    Toggle("Also when switching to another app", isOn: $pictureInPictureForApps)
+                        .toggleStyle(SettingsCheckbox())
+                        .padding(.leading, 45)
+                        .padding(.bottom, 14)
+                }
             }
             SettingsRow(title: "Screenshot", detail: "Capture the current page from the right-click menu", icon: "camera.viewfinder") {
                 SettingsToggle(title: "Screenshot", isOn: $screenshot)

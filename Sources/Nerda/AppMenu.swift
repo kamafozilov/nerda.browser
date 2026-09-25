@@ -300,6 +300,8 @@ extension AppMenu: NSMenuDelegate {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let window: NSWindow
     let browser: Browser
+    /// The page whose video went into picture in picture as Nerda was left.
+    private weak var floating: WKWebView?
 
     init(window: NSWindow, browser: Browser) {
         self.window = window
@@ -359,6 +361,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Going to another app is a good moment: nothing is happening here.
     func applicationDidResignActive(_ notification: Notification) { save() }
+
+    /// The video on screen floats while another app is in front (Settings ›
+    /// General). Asked before Nerda's window stops being the main one.
+    func applicationWillResignActive(_ notification: Notification) {
+        guard PictureInPicture.isOnForApps else { return }
+        // The window in front, an incognito one's included.
+        floating = ((NSApp.mainWindow as? BrowserWindow)?.browser ?? browser).selected?.page
+        floating?.evaluateJavaScript(PictureInPicture.enter)
+    }
+
+    /// Back in Nerda, the video goes back into its page.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        floating?.evaluateJavaScript(PictureInPicture.exit)
+        floating = nil
+    }
 
     func save() {
         browser.saveSession()
