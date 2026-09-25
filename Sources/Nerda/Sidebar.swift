@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The column down the left, on glass: pinned sites as tiles at the top, the
 /// bookmarks under them, then the tabs, newest first, under the button that
-/// opens another, and along the bottom, the app's menu and downloads. Pinned
+/// opens another, and along the bottom, the app's menu, AI chats and downloads. Pinned
 /// beside the page, or, while collapsed, brought out over it from the window's
 /// edge. Tabs and tiles are dragged into another order; a tab dragged onto the
 /// tiles is pinned, a tile dragged down among the tabs unpinned. Either
@@ -13,6 +13,7 @@ struct Sidebar: View {
     /// Beside the page (true), or floating over it (false).
     let pinned: Bool
     @Binding var downloadsShown: Bool
+    @Binding var aiChatsShown: Bool
     /// The menu in the bottom corner (see `SidebarMenu`), drawn over the whole window.
     @Binding var menuShown: Bool
     /// Dragged wider or narrower at its right edge; see `SidebarResizer`.
@@ -209,6 +210,7 @@ struct Sidebar: View {
             HStack {
                 SidebarMenuButton(shown: $menuShown, incognito: browser.isPrivate)
                 Spacer()
+                AIChatsButton(browser: browser, shown: $aiChatsShown)
                 DownloadsButton(browser: browser, shown: $downloadsShown)
             }
             .padding(.horizontal, 10)
@@ -1193,6 +1195,6 @@ private struct Tooltip: View {
 }
 
 #Preview {
-    Sidebar(browser: Browser(), pinned: true, downloadsShown: .constant(false), menuShown: .constant(false), width: .constant(Sidebar.defaultWidth))
+    Sidebar(browser: Browser(), pinned: true, downloadsShown: .constant(false), aiChatsShown: .constant(false), menuShown: .constant(false), width: .constant(Sidebar.defaultWidth))
         .frame(height: 600)
 }
