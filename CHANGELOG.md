@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-09-25
+
 ### Added
 
 - Bookmarks, under the pinned sites in the sidebar: drag a tab there, or press ⌘D, to keep it. As in Arc, a bookmark opens in its own place and stays when you close it, ready to open again at the page you kept. A thin line parts them from the tabs, as in Arc and Zen: drag a tab above it to keep it. Put them in folders, and folders in folders (right-click › New Folder), drag them into another order, or down below the line to make one a tab again. They are in the Bookmarks menu too, and File › Import Bookmarks… brings them in from the file Chrome, Safari, Firefox or Arc exports.
@@ -93,6 +95,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/kamafozilov/nerda.browser/releases/tag/v0.0.1
