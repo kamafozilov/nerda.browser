@@ -407,7 +407,15 @@ extension Browser: WKUIDelegate {
 }
 
 extension Browser: WKNavigationDelegate {
-    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
+    /// Each load, a frame's too, runs the page's scripts unless its tab has
+    /// them off (Develop › Disable JavaScript).
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
+                 preferences: WKWebpagePreferences) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
+        preferences.allowsContentJavaScript = tab(for: webView)?.javaScriptOff != true
+        return (await policy(for: action, in: webView), preferences)
+    }
+
+    private func policy(for action: WKNavigationAction, in webView: WKWebView) async -> WKNavigationActionPolicy {
         guard let url = action.request.url else { return .cancel }
         if action.shouldPerformDownload { return .download }
 
@@ -435,7 +443,7 @@ extension Browser: WKNavigationDelegate {
         return .allow
     }
 
-    private static let pageSchemes: Set = ["http", "https", "file", "about", "data", "blob", "javascript"]
+    private static let pageSchemes: Set = ["http", "https", "file", "about", "data", "blob", "javascript", ViewSource.scheme]
 
     /// What a page can't show (a zip), or is told to save (an attachment), is downloaded.
     func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse) async -> WKNavigationResponsePolicy {

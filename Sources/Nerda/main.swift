@@ -287,15 +287,21 @@ private struct PageCard: View {
             // A new tab, and round the settings' card, the window's glass tinted.
             if browser.selected?.isBlank == true { browser.isPrivate ? Palette.ground : Palette.glass }
             else if browser.selected?.settings != nil || browser.selected?.showsHistory == true { Palette.panel }
+            else if browser.selected?.responsive != nil { Palette.stage }
             else { Palette.ground }
-            // Its own width, not the card's: see the top.
-            Overhang(inset: inset, laidOut: laidOut) {
-                PageView(
-                    tabs: browser.tabs,
-                    // Locked, no page shows, nor can be read out from under the lock.
-                    selected: browser.locked ? nil : browser.selected,
-                    takesFocus: !browser.commandBarOpen
-                )
+            VStack(spacing: 0) {
+                if let tab = browser.selected, tab.hasPage, let responsive = tab.responsive, !browser.locked {
+                    ResponsiveBar(tab: tab, responsive: responsive)
+                }
+                // Its own width, not the card's: see the top.
+                Overhang(inset: inset, laidOut: laidOut) {
+                    PageView(
+                        tabs: browser.tabs,
+                        // Locked, no page shows, nor can be read out from under the lock.
+                        selected: browser.locked ? nil : browser.selected,
+                        takesFocus: !browser.commandBarOpen
+                    )
+                }
             }
             if let tab = browser.selected, tab.isBlank, browser.isPrivate {
                 IncognitoPage(browser: browser)
@@ -549,6 +555,18 @@ extension Browser {
         if isPrivate { return Windows.showRegular().clearHistory() }
         openHistory()
         clearingHistory = true
+    }
+
+    /// ⌥⌘U: the page's source, in a tab of its own beside it.
+    func viewSource() {
+        guard let site = selected?.site, site.scheme != ViewSource.scheme, let url = ViewSource.url(for: site) else { return }
+        withAnimation(.slide) { open(url) }
+    }
+
+    /// ⌥⌘R: Responsive Design Mode on, at the page's own size, or off.
+    func toggleResponsive() {
+        guard let tab = selected, tab.hasPage else { return }
+        tab.responsive = tab.responsive == nil ? Responsive(fitting: tab) : nil
     }
 
     /// Somewhere picked from the switcher or the History menu: on the new tab

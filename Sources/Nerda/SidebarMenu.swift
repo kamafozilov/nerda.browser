@@ -136,9 +136,19 @@ struct SidebarMenu: View {
             MenuRow(icon: "wrench.and.screwdriver", title: "Developer Tools", shortcut: "⌥⌘I") { run { tab?.inspect(.tools) } }
             MenuRow(icon: "terminal", title: "JavaScript Console", shortcut: "⌥⌘J") { run { tab?.inspect(.console) } }
             MenuRow(icon: "cursorarrow.rays", title: "Inspect Element", shortcut: "⌥⌘C") { run { tab?.inspect(.element) } }
+            MenuDivider()
+            MenuRow(icon: "iphone", title: "Responsive Design Mode", shortcut: "⌥⌘R",
+                    checked: tab?.responsive != nil) { run(browser.toggleResponsive) }
+            MenuRow(icon: "doc.plaintext", title: "View Page Source", shortcut: "⌥⌘U") { run(browser.viewSource) }
+                .disabled(tab?.site?.scheme == ViewSource.scheme)
+            MenuDivider()
+            MenuRow(icon: "curlybraces", title: "Disable JavaScript", checked: tab?.javaScriptOff == true) {
+                run { tab?.javaScriptOff.toggle() }
+            }
+            MenuRow(icon: "trash", title: "Clear Site Data") { run { Task { await tab?.clearSiteData() } } }
         }
         .disabled(tab?.hasPage != true)
-        .frame(width: 260)
+        .frame(width: 290)
     }
 
     /// The menu goes first, as a system menu's does, and then what was picked.
@@ -171,6 +181,8 @@ private struct MenuRow: View {
     var submenu = false
     /// Its submenu is out.
     var lit = false
+    /// On, as a switch: a tick at its end.
+    var checked = false
     let action: () -> Void
 
     @State private var hovering = false
@@ -202,6 +214,11 @@ private struct MenuRow: View {
                     Text(shortcut)
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
+                }
+                if checked {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
                 }
                 if submenu {
                     Image(systemName: "chevron.right")

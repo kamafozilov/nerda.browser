@@ -38,6 +38,20 @@ final class Tab: Identifiable {
     var settings: SettingsPage?
     /// Every page visited (⌘Y), in place of a web page.
     var showsHistory = false
+    /// Responsive Design Mode (⌥⌘R): the page at a device's size, as that
+    /// device's browser. A new browser takes a reload to be seen by the site.
+    var responsive: Responsive? {
+        didSet {
+            guard responsive?.agent != oldValue?.agent, let page else { return }
+            page.customUserAgent = responsive?.agent ?? ""
+            if page.url != nil { reload() }
+        }
+    }
+    /// Develop › Disable JavaScript: the page's own scripts don't run
+    /// (Browser's policy for each load); Nerda's still do.
+    var javaScriptOff = false {
+        didSet { if javaScriptOff != oldValue, page?.url != nil { reload() } }
+    }
     /// Told what the page does (the Browser), by every page the tab makes.
     @ObservationIgnored weak var delegate: (any WKUIDelegate & WKNavigationDelegate)? {
         didSet {
@@ -132,7 +146,7 @@ final class Tab: Identifiable {
         if showsHistory {
             return Session.Tab(url: nil, title: "", state: nil, zoom: 1, pinned: nil, home: nil, history: true)
         }
-        guard let site, ["http", "https", "file"].contains(site.scheme) else { return nil }
+        guard let site, ["http", "https", "file", ViewSource.scheme].contains(site.scheme) else { return nil }
         let state: Any?
         if let page {
             // A page that never got there (still loading, or failed) would
@@ -167,6 +181,7 @@ final class Tab: Identifiable {
         _ = Self.powerWatch
         Self.pages.add(page)
         page.isInspectable = true
+        page.customUserAgent = responsive?.agent ?? ""
         // A sleeping page wakes at its own zoom (`wake`), set after this.
         page.pageZoom = PageZoom.current
         // See-through until its first page arrives (`pageDidCommit`): a new or
@@ -593,6 +608,8 @@ final class Tab: Identifiable {
         configuration.userContentController.addUserScript(middleClick)
         configuration.userContentController.add(middleClicks, contentWorld: .defaultClient, name: "middleClick")
         configuration.userContentController.addUserScript(keepFocus)
+        configuration.userContentController.addUserScript(JSONViewer.script)
+        configuration.setURLSchemeHandler(ViewSource.handler, forURLScheme: ViewSource.scheme)
         // WebKit samples the page's top edge only when asked, allowing this
         // much difference across it (as Safari does), for `recolor`.
         set(configuration, "_setSampledPageTopColorMaxDifference:", 5.0)
@@ -750,11 +767,11 @@ struct PageView: NSViewRepresentable {
         // new tab has none to show, and none is made for it.
         let shown = selected.flatMap { $0.hasPage ? $0.webView : nil }
         let awake = tabs.compactMap(\.page)
-        // Closed tabs' pages go (sleeping ones take themselves out). Only
-        // pages: in its own full screen (a bare `<video controls>`), WebKit
-        // leaves a stand-in of its own here.
-        for page in view.subviews where page is WKWebView && !awake.contains(where: { $0 === page }) {
-            page.removeFromSuperview()
+        // Closed tabs' pages go (sleeping ones take themselves out), their
+        // inspectors with them.
+        var slots = view.subviews.compactMap { $0 as? PageSlot }
+        for slot in slots where !awake.contains(where: { $0 === slot.page }) {
+            slot.removeFromSuperview()
         }
         // A page in WebKit's full screen, or on its way in or out, is WebKit's
         // to place: put back here, its video would go black, its sound playing on.
@@ -767,13 +784,20 @@ struct PageView: NSViewRepresentable {
             pages.first { responder === $0 || responder.isDescendant(of: $0) }
         }
         for page in pages {
-            let arriving = page.superview !== view || page.isHidden
-            if page.superview !== view {
-                page.frame = view.bounds
-                page.autoresizingMask = [.width, .height]
-                view.addSubview(page)
-            }
+            let slot = slots.first { $0.page === page } ?? {
+                let slot = PageSlot(page, frame: view.bounds)
+                view.addSubview(slot)
+                slots.append(slot)
+                return slot
+            }()
+            // In its own full screen (a bare `<video controls>`), WebKit
+            // leaves a stand-in of its own in the page's place, and puts the
+            // page back there after.
+            let arriving = page.superview !== slot.stage || slot.isHidden
+            if page.superview !== slot.stage { slot.stage.addSubview(page) }
             guard page === shown else { continue }
+            slot.stage.device = selected?.responsive?.size
+            slot.isHidden = false
             page.isHidden = false
             guard arriving, takesFocus else { continue }
             if let window, focused != nil {
@@ -786,7 +810,30 @@ struct PageView: NSViewRepresentable {
         // leaves the one hidden behind: Space would pause its video unseen.
         if shown == nil, focused != nil { window?.makeFirstResponder(nil) }
         for page in pages where page !== shown { page.isHidden = true }
+        for slot in slots where slot.page !== shown { slot.isHidden = true }
     }
+}
+
+/// A page's place in the card: its stage, and WebKit's inspector when docked
+/// under it, which WebKit puts here, beside the stage. They hide together.
+private final class PageSlot: NSView {
+    let page: WKWebView
+    let stage = PageStage()
+
+    init(_ page: WKWebView, frame: CGRect) {
+        self.page = page
+        super.init(frame: frame)
+        autoresizingMask = [.width, .height]
+        stage.frame = bounds
+        stage.autoresizingMask = [.width, .height]
+        addSubview(stage)
+        // WebKit SPI, as Safari's: should it go, the inspector docks beside
+        // the page itself, as wide as a device's screen is.
+        let attach = NSSelectorFromString("_setInspectorAttachmentView:")
+        if page.responds(to: attach) { page.perform(attach, with: stage) }
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
 }
 
 /// In place of a page that could not be opened: what went wrong. ⌘R tries again.

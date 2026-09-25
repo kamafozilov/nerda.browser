@@ -8,6 +8,7 @@ enum Palette {
     static let ink = pair(0.09, 0.93)       // text
     static let muted = pair(0.55, 0.58)     // secondary text and icons
     static let hairline = pair(0.91, 0.20)  // dividers
+    static let stage = pair(0.93, 0.07)     // round a page in Responsive Design Mode
     // Over the window's glass, which shows through them, just enough that
     // the card stands off it: the settings a little less than a new tab.
     static let glass = pair(1.0, 0.11, alpha: 0.3)   // a new tab's card

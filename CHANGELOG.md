@@ -10,6 +10,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Added
 
 - Developer tools: Inspect Element when you right-click a page, and a Developer submenu in the sidebar's menu and in View, with Developer Tools (⌥⌘I), JavaScript Console (⌥⌘J) and Inspect Element (⌥⌘C), as in Chrome.
+- Responsive Design Mode (⌥⌘R, in Developer): the page at a size you type, starting at the size it has, or at a phone's, tablet's or computer's, told it is that device's browser so sites send their mobile pages. Turn it on its side; a screen too large for the window is scaled down to fit.
+- View Page Source (⌥⌘U): the HTML a site sent, in a tab of its own, numbered by line and coloured, with its links going to their own sources. `view-source:` addresses open too.
+- Disable JavaScript, in Developer, for the tab you're in, and Clear Site Data, which removes that site's cookies, storage and cache and nothing else.
+- JSON pages, an API's answers, open as a coloured tree to fold and unfold, with Raw to see them as sent and Copy.
 
 ### Fixed
 
