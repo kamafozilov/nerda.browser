@@ -553,6 +553,11 @@ nonisolated enum Address {
         guard !text.isEmpty else { return nil }
 
         if text.contains("://") { return URL(string: text) }
+        // A file on this Mac, by its path, as Chrome opens one.
+        if text.hasPrefix("/") || text.hasPrefix("~/") {
+            let path = NSString(string: text).expandingTildeInPath
+            if FileManager.default.fileExists(atPath: path) { return URL(fileURLWithPath: path) }
+        }
 
         let host = text.split(separator: "/", maxSplits: 1).first.map(String.init) ?? text
         let looksLikeAddress = !text.contains(" ") && (host.contains(".") || host.hasPrefix("localhost"))

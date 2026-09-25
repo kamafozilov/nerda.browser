@@ -7,6 +7,14 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- Type the path of a file on your Mac in the address bar (`/Users/you/Movies/clip.mp4` or `~/Movies/clip.mp4`) to open it, as in Chrome.
+
+### Fixed
+
+- The arrow keys set the volume and seek again on YouTube after you switch to theater mode. Before, they scrolled the page, because the player lost the keyboard when it moved into its theater frame.
+
 ## [0.0.2] - 2026-09-25
 
 ### Added

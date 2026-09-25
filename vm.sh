@@ -4,6 +4,10 @@
 # this Mac; to watch it, open the vnc:// address `./vm.sh up` prints in
 # Screen Sharing. Each command starts it, or wakes it, first.
 #
+# One VM, one agent at a time: a command waits while another checkout has
+# it, which it keeps until 3 minutes after its last command (or `done`).
+# 5 minutes after anyone's last command it suspends itself, freeing its memory.
+#
 #   ./vm.sh up            start it; made the first time from Cirrus Labs'
 #                         macOS 27 image (a 29 GB download)
 #   ./vm.sh open          build Nerda Dev, put it in the VM and open it there
@@ -18,7 +22,8 @@
 #   ./vm.sh key KEY...    keys and shortcuts: `cmd-t`, `cmd-shift-t`, `opt-a`,
 #                         `esc`, `enter`, `bsp`, `left`
 #   ./vm.sh shot [FILE]   a screenshot, to build/vm.png unless named
-#   ./vm.sh down          suspend it: its memory is freed, it wakes in seconds
+#   ./vm.sh done          let the other agents have it (it suspends on its own)
+#   ./vm.sh down          suspend it now: its memory is freed, it wakes in seconds
 #
 # Needs tart (github.com/openai/tart) and vncdo (`uv tool install vncdotool`).
 set -euo pipefail
@@ -30,6 +35,84 @@ RUN=/tmp/nerda-vm
 KEY="$HOME/.ssh/nerda-vm"
 SSH=(-i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
 mkdir -p "$RUN"
+# Who has the VM: this checkout, as each agent works in its own.
+ME="$PWD"
+# The holder keeps it this long after its last command: time to read a
+# screenshot, change the code and build again, not to hold up the others.
+LEASE=180
+# With no command from anyone for this long, it is suspended.
+IDLE=300
+
+# Seconds since a file last changed; for none, since forever.
+age() { echo $(( $(date +%s) - $(stat -f %m "$1" 2>/dev/null || echo 0) )); }
+# Runs a command as the only vm.sh changing the files below.
+locked() {
+  local status
+  until mkdir "$RUN/lock" 2>/dev/null; do
+    # Left behind by a vm.sh ended inside (a suspend takes seconds, not minutes).
+    if [ "$(age "$RUN/lock")" -gt 120 ]; then rmdir "$RUN/lock" 2>/dev/null || true; fi
+    sleep 0.2
+  done
+  "$@" && status=0 || status=$?
+  rmdir "$RUN/lock"
+  return $status
+}
+holder() { cat "$RUN/lease" 2>/dev/null || true; }
+take() {
+  local held
+  held="$(holder)"
+  [ -z "$held" ] || [ "$held" = "$ME" ] || [ "$(age "$RUN/lease")" -ge "$LEASE" ] || return 1
+  printf '%s\n' "$ME" >"$RUN/lease"
+  touch "$RUN/used"
+}
+keep() { if [ "$(holder)" = "$ME" ]; then touch "$RUN/lease" "$RUN/used"; fi; }
+release() { if [ "$(holder)" = "$ME" ]; then rm -f "$RUN/lease"; fi; }
+# Waits for the VM, then keeps it while this command runs, however long.
+claim() {
+  local waiting=""
+  until locked take; do
+    if [ -z "$waiting" ]; then
+      waiting=1
+      echo "The VM is in use by $(basename "$(holder)"); waiting (up to ${LEASE}s after its last command)..." >&2
+    fi
+    sleep 2
+  done
+  [ -z "$waiting" ] || echo "Got the VM." >&2
+  ( while sleep 30; do locked keep; done ) >/dev/null 2>&1 &
+  keeper=$!
+  # Ended quietly: no "Terminated" when the command is done.
+  disown $keeper
+  trap 'kill $keeper 2>/dev/null; locked keep' EXIT
+}
+# What another checkout put in (./vm.sh open) isn't this one's build.
+whose_app() {
+  local owner
+  owner="$(cat "$RUN/app" 2>/dev/null || true)"
+  if [ -n "$owner" ] && [ "$owner" != "$ME" ]; then
+    echo "Note: Nerda Dev in the VM is $(basename "$owner")'s build; ./vm.sh open puts in this one's." >&2
+  fi
+}
+# Out of this command's process group: tart and the idle watch outlive it.
+# Run only in the background (&): exec makes that job the process itself.
+detach() { exec perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "$!\n"' "$@" </dev/null; }
+# Suspends the VM once no one has used it for IDLE seconds.
+watch_idle() {
+  while running; do
+    sleep 15
+    if locked idle_suspend; then break; fi
+  done
+}
+idle_suspend() {
+  [ "$(age "$RUN/used")" -ge "$IDLE" ] || return 1
+  tart suspend "$VM" >/dev/null 2>&1 || true
+  while running; do sleep 1; done
+  rm -f "$RUN/lease"
+}
+suspend() {
+  tart suspend "$VM"
+  while running; do sleep 1; done
+  rm -f "$RUN/lease"
+}
 
 # Not `tart list`: it can't read a running VM's disk, and fails.
 made() { [ -d "$HOME/.tart/vms/$VM" ]; }
@@ -68,7 +151,7 @@ up() {
   if ! running; then
     # No window here; the VNC server is the hypervisor's, so its mouse, keys
     # and screenshots need no permission inside the VM. Suspendable, for down.
-    nohup tart run "$VM" --no-graphics --vnc-experimental --suspendable >"$RUN/tart.log" 2>&1 &
+    detach tart run "$VM" --no-graphics --vnc-experimental --suspendable >"$RUN/tart.log" 2>&1 &
     until grep -q 'vnc://' "$RUN/tart.log"; do
       kill -0 $! 2>/dev/null || { cat "$RUN/tart.log"; exit 1; }
       sleep 1
@@ -91,24 +174,32 @@ up() {
     up
     return
   fi
+  # Not `kill -0 0`, which is true: 0 is this process's own group.
+  if ! { [ -s "$RUN/watch.pid" ] && kill -0 "$(cat "$RUN/watch.pid")" 2>/dev/null; }; then
+    detach "$PWD/vm.sh" watch >/dev/null 2>&1 &
+  fi
   grep -o 'vnc://[^ ]*' "$RUN/tart.log" | tail -1
 }
 
 case "${1:-}" in
-  up) up ;;
+  up) claim; up ;;
   open)
     ./build.sh debug >"$RUN/build.log" 2>&1 || { grep -E "error" "$RUN/build.log" || tail -20 "$RUN/build.log"; exit 1; }
+    claim
     up >/dev/null
     vm 'pkill -x "Nerda Dev"; while pgrep -x "Nerda Dev" >/dev/null; do sleep 0.1; done; rm -rf "Applications/Nerda Dev.app"; mkdir -p Applications'
     tar -C build -cf - "Nerda Dev.app" | vm 'tar -C Applications -xf - && open "Applications/Nerda Dev.app"'
+    printf '%s\n' "$ME" >"$RUN/app"
     ;;
-  put) shift; up >/dev/null; scp "${SSH[@]}" -o BatchMode=yes "$@" "admin@$(address):" ;;
-  ssh) shift; up >/dev/null; vm "$@" ;;
-  do) shift; up >/dev/null; vnc "$@" ;;
-  key) shift; up >/dev/null; keys "$@" ;;
+  put) shift; claim; up >/dev/null; scp "${SSH[@]}" -o BatchMode=yes "$@" "admin@$(address):" ;;
+  ssh) shift; claim; up >/dev/null; vm "$@" ;;
+  do) shift; claim; whose_app; up >/dev/null; vnc "$@" ;;
+  key) shift; claim; whose_app; up >/dev/null; keys "$@" ;;
   # vncdo's own typing loses Shift (":" comes out ";"): pasted instead.
-  type) shift; up >/dev/null; printf %s "$*" | vm pbcopy; keys cmd-v ;;
-  shot) up >/dev/null; vnc capture "${2:-build/vm.png}" ;;
-  down) tart suspend "$VM"; while running; do sleep 1; done ;;
+  type) shift; claim; whose_app; up >/dev/null; printf %s "$*" | vm pbcopy; keys cmd-v ;;
+  shot) claim; whose_app; up >/dev/null; vnc capture "${2:-build/vm.png}" ;;
+  done) locked release ;;
+  down) claim; if running; then locked suspend; fi ;;
+  watch) echo $$ >"$RUN/watch.pid"; watch_idle ;;
   *) sed -n '2,/^set/p' "$0" | grep '^#' | cut -c3-; exit 1 ;;
 esac
