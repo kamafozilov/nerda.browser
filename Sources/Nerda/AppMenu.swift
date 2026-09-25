@@ -108,6 +108,19 @@ final class AppMenu: NSObject {
                 .separator(),
                 item("Choose New Tab Picture…", #selector(choosePicture), target: self),
                 item("Use Nerda's Pictures", #selector(useOwnPictures), target: self),
+                .separator(),
+                // Chrome's keys for them.
+                submenu("Developer", [
+                    inspect("Developer Tools", .tools, "i"),
+                    inspect("JavaScript Console", .console, "j"),
+                    inspect("Inspect Element", .element, "c"),
+                    .separator(),
+                    item("Responsive Design Mode", #selector(toggleResponsive), "r", [.command, .option], target: self),
+                    item("View Page Source", #selector(viewSource), "u", [.command, .option], target: self),
+                    .separator(),
+                    item("Disable JavaScript", #selector(toggleJavaScript), target: self),
+                    item("Clear Site Data", #selector(clearSiteData), target: self),
+                ]),
             ]),
             historyMenu,
             bookmarksMenu,
@@ -144,9 +157,10 @@ final class AppMenu: NSObject {
     private static let digitKeys: [UInt16] = [18, 19, 20, 21, 23, 22, 26, 28, 25]
     /// ⌘T and the rest by their place, as on a US keyboard, for a layout that
     /// types no Latin letters (Russian, Uzbek Cyrillic): there ⌘T types "е".
-    private static let latinKeys: [UInt16: String] = [17: "t", 13: "w", 37: "l", 12: "q", 43: ",", 0: "a", 45: "n", 2: "d"]
+    private static let latinKeys: [UInt16: String] = [17: "t", 13: "w", 37: "l", 12: "q", 43: ",", 0: "a", 45: "n", 2: "d",
+                                                      34: "i", 38: "j", 8: "c", 15: "r", 32: "u"]
 
-    /// ⌘T, ⌘W, ⌘L, ⌘Q, ⌘D and ⌘, and ⌘⇧W, ⌘⇧A and ⌘⇧N, straight to the menu while
+    /// ⌘T, ⌘W, ⌘L, ⌘Q, ⌘D and ⌘, ⌘⇧W, ⌘⇧A and ⌘⇧N, and Developer's ⌥⌘ keys, straight to the menu while
     /// a page has the keyboard (and no sheet or dialog is up).
     private static func browserKey(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
@@ -155,6 +169,7 @@ final class AppMenu: NSObject {
         let key = typed.allSatisfy(\.isASCII) ? typed : latinKeys[event.keyCode] ?? typed
         let reserved = modifiers == .command && ["t", "w", "l", "q", "d", ","].contains(key)
             || modifiers == [.command, .shift] && ["w", "a", "n"].contains(key)
+            || modifiers == [.command, .option] && ["i", "j", "c", "r", "u"].contains(key)
         return reserved && NSApp.mainMenu?.performKeyEquivalent(with: event) == true
     }
 
@@ -188,6 +203,17 @@ final class AppMenu: NSObject {
     @objc private func importPasswords() { browser.importPasswords() }
     @objc private func importBookmarks() { regular.importBookmarks() }
     @objc private func toggleBookmark() { browser.toggleBookmark() }
+    @objc private func toggleResponsive() { browser.toggleResponsive() }
+    @objc private func viewSource() { browser.viewSource() }
+    @objc private func toggleJavaScript() { browser.selected.map { $0.javaScriptOff.toggle() } }
+    @objc private func clearSiteData() {
+        guard let tab = browser.selected else { return }
+        Task { await tab.clearSiteData() }
+    }
+    @objc private func inspect(_ sender: NSMenuItem) {
+        guard let what = sender.representedObject as? Tab.Inspect else { return }
+        browser.selected?.inspect(what)
+    }
 
     /// A bookmark from the menu, in the regular window: incognito keeps none.
     @objc private func openBookmark(_ sender: NSMenuItem) {
@@ -202,6 +228,12 @@ final class AppMenu: NSObject {
     private func zoom(_ title: String, _ step: Int, _ key: String) -> NSMenuItem {
         let item = item(title, #selector(zoom(_:)), key, target: self)
         item.tag = step
+        return item
+    }
+
+    private func inspect(_ title: String, _ what: Tab.Inspect, _ key: String) -> NSMenuItem {
+        let item = item(title, #selector(inspect(_:)), key, [.command, .option], target: self)
+        item.representedObject = what
         return item
     }
 
@@ -272,8 +304,16 @@ extension AppMenu: NSMenuItemValidation {
         case #selector(toggleBookmark):
             item.title = browser.selected?.bookmark == nil ? "Bookmark This Tab" : "Remove Bookmark"
             return !browser.isPrivate && browser.selected?.hasPage == true
-        case #selector(showFind):
+        case #selector(showFind), #selector(inspect(_:)), #selector(clearSiteData):
             return browser.selected?.hasPage == true
+        case #selector(toggleResponsive):
+            item.state = browser.selected?.responsive != nil ? .on : .off
+            return browser.selected?.hasPage == true
+        case #selector(toggleJavaScript):
+            item.state = browser.selected?.javaScriptOff == true ? .on : .off
+            return browser.selected?.hasPage == true
+        case #selector(viewSource):
+            return browser.selected?.hasPage == true && browser.selected?.site?.scheme != ViewSource.scheme
         case #selector(findNext), #selector(findPrevious):
             return browser.selected?.hasPage == true && !browser.findQuery.isEmpty
         case #selector(nextTab), #selector(previousTab):

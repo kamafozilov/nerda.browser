@@ -1691,3 +1691,15 @@ private final class BlockerNavigation: NSObject, WKNavigationDelegate {
     #expect(items[0].children?[1].children == [])
     #expect(Bookmarks.pages(in: items) == 2)
 }
+
+/// Responsive Design Mode: a device turned on its side is still that device;
+/// a size typed in is a custom one, still with the device's browser.
+@MainActor @Test func responsiveSizeKeepsItsDevice() {
+    let tab = Tab(), phone = Device.groups[0].devices[1]
+    tab.responsive = Responsive(phone)
+    tab.resize(width: phone.height, height: phone.width)
+    #expect(tab.responsive?.device == phone.name)
+    tab.resize(width: 500)
+    #expect(tab.responsive?.device == nil)
+    #expect(tab.responsive?.agent == Device.iPhoneAgent)
+}
