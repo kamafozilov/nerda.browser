@@ -10,6 +10,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Added
 
 - Rest the pointer on a tab, in the sidebar or across the top, for a card with its title, its site and how much memory its page takes. Tabs other than the one on screen show a picture of their page; a sleeping tab shows the page as it went to sleep, and says it is sleeping.
+- A Keyboard Shortcuts page in Settings lists every key Nerda answers to, by tabs, page and window, each with a line on what it does.
 
 ### Changed
 

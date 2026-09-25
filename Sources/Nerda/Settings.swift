@@ -3,7 +3,7 @@ import SwiftUI
 /// The pages of Nerda's settings, listed down the settings tab's left. Only
 /// what works is listed: a page comes once it has something in it.
 enum SettingsPage: String, CaseIterable, Identifiable, Codable {
-    case general, appearance
+    case general, appearance, shortcuts
 
     var id: Self { self }
 
@@ -11,6 +11,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .general: "General"
         case .appearance: "Appearance"
+        case .shortcuts: "Keyboard Shortcuts"
         }
     }
 
@@ -18,13 +19,14 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .general: "gearshape"
         case .appearance: "circle.lefthalf.filled"
+        case .shortcuts: "keyboard"
         }
     }
 
     /// The heading it is listed under.
     var section: String {
         switch self {
-        case .general, .appearance: "Personal"
+        case .general, .appearance, .shortcuts: "Personal"
         }
     }
 
@@ -33,6 +35,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .general: ["default browser", "search engine", "google", "picture in picture", "video", "screenshot", "language", "spell", "ads", "trackers", "blocking", "privacy", "about", "version", "updates"]
         case .appearance: ["theme", "dark", "light", "zoom", "tab style", "vertical", "horizontal", "sidebar", "transparency", "tinted", "transparent", "glass"]
+        case .shortcuts: ["keyboard", "keys", "hotkeys"] + ShortcutsSettings.groups.flatMap { $0.shortcuts.map(\.title) }
         }
     }
 
@@ -104,6 +107,8 @@ struct SettingsView: View {
                         GeneralSettings(browser: browser, languages: languages) { editingLanguages = true }
                     case .appearance:
                         AppearanceSettings()
+                    case .shortcuts:
+                        ShortcutsSettings()
                     }
                 }
                 .frame(maxWidth: 640, alignment: .leading)
@@ -229,6 +234,64 @@ private struct AppearanceSettings: View {
         .onChange(of: zoom) { old, new in
             for window in NSApp.windows {
                 (window as? BrowserWindow)?.browser.tabs.forEach { $0.defaultZoomChanged(from: old, to: new) }
+            }
+        }
+    }
+}
+
+/// Every key the browser answers to, by what it works on. Written out here,
+/// as the menu bar has no room for what each does.
+private struct ShortcutsSettings: View {
+    typealias Shortcut = (title: String, detail: String, keys: String)
+
+    static let groups: [(title: String, shortcuts: [Shortcut])] = [
+        ("Tabs", [
+            ("New Tab", "Open a new tab", "⌘T"),
+            ("Close Tab", "Close the tab on screen. A pinned site keeps its tile", "⌘W"),
+            ("Search Tabs", "Find an open tab, or a site from your history", "⇧⌘A"),
+            ("Next Tab", "Go to the next tab, round from the last to the first", "⌃Tab"),
+            ("Previous Tab", "Go to the tab before", "⌃⇧Tab"),
+            ("Go to a Tab", "The first eight tabs, in order", "⌘1 – ⌘8"),
+            ("Last Tab", "Go to the last tab", "⌘9"),
+            ("Collapse Tabs", "Show or hide the sidebar", "⌘S"),
+        ]),
+        ("Page", [
+            ("Open Location", "Type an address or a search", "⌘L"),
+            ("Back", "Go to the previous page", "⌘["),
+            ("Forward", "Go to the next page", "⌘]"),
+            ("Reload Page", "Load the page again", "⌘R"),
+            ("Hard Reload Page", "Load the page again, fresh from the site", "⇧⌘R"),
+            ("Find", "Search for text on the page", "⌘F"),
+            ("Find Next", "Go to the next match", "⌘G"),
+            ("Find Previous", "Go to the match before", "⇧⌘G"),
+            ("Zoom In", "Make the page bigger", "⌘+"),
+            ("Zoom Out", "Make the page smaller", "⌘−"),
+            ("Actual Size", "Back to the zoom pages open at", "⌘0"),
+        ]),
+        ("Nerda", [
+            ("New Incognito Window", "Browse without saving history", "⇧⌘N"),
+            ("Close Window", "Close the window and its tabs", "⇧⌘W"),
+            ("Show All History", "Every page you have visited", "⌘Y"),
+            ("Settings", "Open Nerda's settings", "⌘,"),
+            ("Minimize", "Put the window in the Dock", "⌘M"),
+            ("Hide Nerda", "Hide Nerda's windows", "⌘H"),
+            ("Quit Nerda", "Close Nerda. Your tabs come back next time", "⌘Q"),
+        ]),
+    ]
+
+    var body: some View {
+        ForEach(Self.groups, id: \.title) { group in
+            SettingsGroup(title: group.title) {
+                ForEach(group.shortcuts, id: \.title) { shortcut in
+                    SettingsRow(title: shortcut.title, detail: shortcut.detail) {
+                        Text(shortcut.keys)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Palette.ink)
+                            .padding(.horizontal, 9)
+                            .frame(height: 26)
+                            .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                }
             }
         }
     }
