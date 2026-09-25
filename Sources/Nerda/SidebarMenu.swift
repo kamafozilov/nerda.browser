@@ -190,40 +190,44 @@ private struct MenuRow: View {
     @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
-        Button(action: action) {
+        // Disabled, as a system menu's: the title in the icons' grey and the
+        // icons fainter, rather than the whole row faded into the glass.
+        let ink = isEnabled ? Palette.ink : Palette.muted
+        let muted = isEnabled ? Palette.muted : Palette.muted.opacity(0.5)
+        return Button(action: action) {
             HStack(spacing: 10) {
                 Group {
                     if let site {
                         Favicon(site: site, size: 14, plate: false)
                     } else if mark {
                         IncognitoMark(size: 15)
-                            .foregroundStyle(Palette.muted)
+                            .foregroundStyle(muted)
                     } else if let icon {
                         Image(systemName: icon)
                             .font(.system(size: 14))
-                            .foregroundStyle(Palette.muted)
+                            .foregroundStyle(muted)
                     }
                 }
                 .frame(width: 18)
                 Text(title)
                     .font(.system(size: 13.5))
-                    .foregroundStyle(Palette.ink)
+                    .foregroundStyle(ink)
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 if let shortcut {
                     Text(shortcut)
                         .font(.system(size: 12))
-                        .foregroundStyle(Palette.muted)
+                        .foregroundStyle(muted)
                 }
                 if checked {
                     Image(systemName: "checkmark")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Palette.ink)
+                        .foregroundStyle(ink)
                 }
                 if submenu {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Palette.muted)
+                        .foregroundStyle(muted)
                 }
             }
             .padding(.horizontal, 9)
@@ -234,11 +238,16 @@ private struct MenuRow: View {
             )
             .padding(.horizontal, 5)
             .contentShape(Rectangle())
-            .opacity(isEnabled ? 1 : 0.4)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(MenuRowStyle())
         .onHover { hovering = $0 }
     }
+}
+
+/// The row as drawn above, and nothing more: `.plain` would fade a disabled
+/// one again on top of its greys.
+private struct MenuRowStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { configuration.label }
 }
 
 private struct MenuDivider: View {

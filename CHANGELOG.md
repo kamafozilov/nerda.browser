@@ -13,6 +13,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Fixed
 
+- Greyed-out items in the sidebar's menu, such as Developer on a new tab, are readable again: dimmed as in a system menu rather than faded almost out of sight.
 - Renaming a tab or bookmark ends with a click anywhere: another tab, the sidebar's empty space or a button, where before only a click on the page did. The new name is kept, and a click on the address bar leaves the keyboard there instead of taking it back to the page.
 
 ## [0.0.5] - 2026-09-25
