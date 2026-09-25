@@ -261,7 +261,6 @@ struct TabStrip: View {
             // A new tab, or the settings, keeps the name it has.
             rename: tab.hasPage ? { name in
                 if let name { browser.rename(id, to: name) }
-                browser.focusPage()
             } : nil,
             press: { browser.select(id) }
         ) {

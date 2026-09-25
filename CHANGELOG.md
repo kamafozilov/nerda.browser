@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Renaming a tab or bookmark ends with a click anywhere: another tab, the sidebar's empty space or a button, where before only a click on the page did. The new name is kept, and a click on the address bar leaves the keyboard there instead of taking it back to the page.
+
 ## [0.0.5] - 2026-09-25
 
 ### Added
