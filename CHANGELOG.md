@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- Developer tools: Inspect Element when you right-click a page, and a Developer submenu in the sidebar's menu and in View, with Developer Tools (⌥⌘I), JavaScript Console (⌥⌘J) and Inspect Element (⌥⌘C), as in Chrome.
+
 ### Fixed
 
 - Selecting text lights only the text you picked, as in Chrome: a word, a line or a drag over several paragraphs. Before, a band of selection colour ran out to the window's edges and filled the space between paragraphs.

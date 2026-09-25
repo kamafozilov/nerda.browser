@@ -38,7 +38,8 @@ struct SidebarMenuButton: View {
 }
 
 /// What the app has besides the tabs, on a panel over the sidebar's bottom
-/// corner: History opens to its side, as a submenu does; Settings and New Tab
+/// corner: History opens to its side, as a submenu does, and so does Developer,
+/// the page's developer tools; Settings and New Tab
 /// with their keys, and an incognito window. Downloads have their own button beside it. Profiles go at its top once there are any.
 /// In an incognito window, no History: it isn't kept there.
 /// Drawn by SwiftUI rather than as a system menu, so it can look like the rest.
@@ -52,7 +53,7 @@ struct SidebarMenu: View {
     static let width: CGFloat = 240
     static let animation = Animation.snappy(duration: 0.18)
 
-    private enum Submenu { case history }
+    private enum Submenu { case history, developer }
 
     /// The submenu out beside its row: the one the pointer last went over.
     @State private var open: Submenu?
@@ -70,6 +71,11 @@ struct SidebarMenu: View {
 
                 MenuRow(icon: "gearshape", title: "Settings", shortcut: "⌘,") { run(browser.openSettings) }
                     .onHover { if $0 { open = nil } }
+                MenuRow(icon: "chevron.left.forwardslash.chevron.right", title: "Developer", submenu: true, lit: open == .developer) {
+                    open = .developer
+                }
+                .overlay(alignment: fromTop ? .topTrailing : .bottomLeading) { if open == .developer { beside(developer) } }
+                .onHover { if $0 { open = .developer } }
             }
             MenuDivider()
             MenuRow(icon: "plus", title: "New Tab", shortcut: "⌘T") { run(browser.newTab) }
@@ -123,6 +129,18 @@ struct SidebarMenu: View {
         .frame(width: 300)
     }
 
+    /// For the page on screen; none without one (a new tab, Settings).
+    private var developer: some View {
+        let tab = browser.selected
+        return VStack(spacing: 0) {
+            MenuRow(icon: "wrench.and.screwdriver", title: "Developer Tools", shortcut: "⌥⌘I") { run { tab?.inspect(.tools) } }
+            MenuRow(icon: "terminal", title: "JavaScript Console", shortcut: "⌥⌘J") { run { tab?.inspect(.console) } }
+            MenuRow(icon: "cursorarrow.rays", title: "Inspect Element", shortcut: "⌥⌘C") { run { tab?.inspect(.element) } }
+        }
+        .disabled(tab?.hasPage != true)
+        .frame(width: 260)
+    }
+
     /// The menu goes first, as a system menu's does, and then what was picked.
     private func run(_ action: @escaping () -> Void) {
         close()
@@ -157,6 +175,7 @@ private struct MenuRow: View {
 
     @State private var hovering = false
     @Environment(\.incognito) private var incognito
+    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         Button(action: action) {
@@ -194,10 +213,11 @@ private struct MenuRow: View {
             .frame(height: 32)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(hovering || lit ? incognito ? Palette.incognitoAccent.opacity(0.18) : Palette.wash : .clear)
+                    .fill(hovering && isEnabled || lit ? incognito ? Palette.incognitoAccent.opacity(0.18) : Palette.wash : .clear)
             )
             .padding(.horizontal, 5)
             .contentShape(Rectangle())
+            .opacity(isEnabled ? 1 : 0.4)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }

@@ -451,6 +451,28 @@ final class Tab: Identifiable {
         }
     }
 
+    enum Inspect { case tools, console, element }
+
+    /// WebKit's Web Inspector, docked in the page as Safari has it: opened or
+    /// closed (Developer Tools), at its console, or picking an element on the
+    /// page to inspect, as Chrome's ⌥⌘C.
+    // WebKit SPI (`_WKInspector`): should it go, these do nothing; Safari's
+    // Develop menu still reaches the page (`isInspectable`).
+    func inspect(_ what: Inspect) {
+        let get = NSSelectorFromString("_inspector")
+        guard webView.responds(to: get),
+              let inspector = webView.perform(get)?.takeUnretainedValue() as? NSObject else { return }
+        func call(_ name: String) {
+            let selector = NSSelectorFromString(name)
+            if inspector.responds(to: selector) { inspector.perform(selector) }
+        }
+        switch what {
+        case .tools: call(inspector.value(forKey: "visible") as? Bool == true ? "close" : "show")
+        case .console: call("showConsole")
+        case .element: call("show"); call("toggleElementSelection")
+        }
+    }
+
     /// A pinned tab back where it was pinned.
     func goHome() {
         guard let home else { return }
@@ -582,6 +604,9 @@ final class Tab: Identifiable {
         // Picture in picture, for Auto Picture-in-Picture and a player's own
         // button: without it WebKit says no video supports it.
         set(configuration.preferences, "_setAllowsPictureInPictureMediaPlayback:", true)
+        // Inspect Element in a page's right-click menu, and the inspector
+        // docked in the page (`inspect`), as Safari's Develop menu turns on.
+        set(configuration.preferences, "_setDeveloperExtrasEnabled:", true)
         // A page out of sight that keeps over half a core busy for WebKit's
         // 8 minutes (an ad gone wrong) has its process ended; the tab sleeps
         // (Browser.webViewWebContentProcessDidTerminate) and loads again when
