@@ -559,6 +559,7 @@ final class Tab: Identifiable {
         configuration.userContentController.addUserScript(Fullscreen.bridge)
         configuration.userContentController.add(Fullscreen.messages, contentWorld: .defaultClient, name: "fullscreen")
         Passwords.install(in: configuration.userContentController)
+        Selection.install(in: configuration.userContentController)
         // The first page made starts the blocker: WebKit is being started for
         // it anyway. Cached rules arrive asynchronously; navigation never waits.
         Blocker.shared.start()
