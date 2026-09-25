@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-09-25
+
 ### Added
 
 - Rest the pointer on a tab, in the sidebar or across the top, for a card with its title, its site and how much memory its page takes. Tabs other than the one on screen show a picture of their page; a sleeping tab shows the page as it went to sleep, and says it is sleeping.
@@ -72,5 +74,6 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/kamafozilov/nerda.browser/releases/tag/v0.0.1
