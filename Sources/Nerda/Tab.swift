@@ -275,6 +275,23 @@ final class Tab: Identifiable {
         });
         """, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient)
 
+    /// An element moved elsewhere in the page keeps the keyboard, as in
+    /// Chrome. WebKit lets it go to the page itself: YouTube's player, moved
+    /// into theater mode, lost it, and the arrow keys scrolled the page
+    /// instead of setting the volume. So what had it, taken out and put back
+    /// with nothing else given the keyboard meanwhile, is given it again.
+    private static let keepFocus = WKUserScript(source: """
+        (() => {
+            let focused = null;
+            addEventListener('focusin', event => { focused = event.composedPath()[0]; }, true);
+            // Let go of, not taken out: a click elsewhere, or the keyboard moved on.
+            addEventListener('focusout', event => { if (event.composedPath()[0].isConnected) focused = null; }, true);
+            new MutationObserver(() => {
+                if (focused?.isConnected && document.activeElement === document.body) focused.focus({ preventScroll: true });
+            }).observe(document, { childList: true, subtree: true });
+        })();
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient)
+
     private static let middleClicks = MiddleClicks()
 
     final class MiddleClicks: NSObject, WKScriptMessageHandler {
@@ -548,6 +565,7 @@ final class Tab: Identifiable {
         configuration.userContentController.add(preconnects, contentWorld: .defaultClient, name: "preconnect")
         configuration.userContentController.addUserScript(middleClick)
         configuration.userContentController.add(middleClicks, contentWorld: .defaultClient, name: "middleClick")
+        configuration.userContentController.addUserScript(keepFocus)
         // WebKit samples the page's top edge only when asked, allowing this
         // much difference across it (as Safari does), for `recolor`.
         set(configuration, "_setSampledPageTopColorMaxDifference:", 5.0)

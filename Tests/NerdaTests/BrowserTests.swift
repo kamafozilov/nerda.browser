@@ -436,6 +436,12 @@ func typedTextBecomesAnAddress(input: String, expected: String) {
     #expect(Address.url(from: input)?.absoluteString == expected)
 }
 
+/// A path to a file that is there opens the file; one to nothing is searched for.
+@Test func typedPathOpensTheFile() {
+    #expect(Address.url(from: "/etc/hosts") == URL(fileURLWithPath: "/etc/hosts"))
+    #expect(Address.url(from: "/no/such/file.mp4")?.isFileURL == false)
+}
+
 @Test func nothingTypedGoesNowhere() {
     #expect(Address.url(from: "   ") == nil)
 }
