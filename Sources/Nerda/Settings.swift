@@ -125,6 +125,7 @@ struct SettingsView: View {
                 .dialogBlur(editingLanguages || deletingData)
             }
             .scrollIndicators(.never)
+            .scrollBounceBehavior(.basedOnSize)
             // An open list stays where its button was: it goes when that moves.
             .onScrollGeometryChange(for: CGFloat.self, of: \.contentOffset.y) { _, _ in dropdown = nil }
             .background(Palette.card, in: RoundedRectangle(cornerRadius: BrowserView.cornerRadius, style: .continuous))
@@ -509,6 +510,7 @@ private struct FiltersPanel: View {
                 .padding(.bottom, 5)
             }
             .scrollIndicators(.never)
+            .scrollBounceBehavior(.basedOnSize)
             Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1)
             footer
                 .font(.system(size: 13.5))
@@ -1271,6 +1273,7 @@ private struct DropdownPanel: View {
                 .padding(5)
             }
             .scrollIndicators(.never)
+            .scrollBounceBehavior(.basedOnSize)
             .onAppear { if let selected = dropdown.selected { proxy.scrollTo(selected, anchor: .center) } }
         }
     }

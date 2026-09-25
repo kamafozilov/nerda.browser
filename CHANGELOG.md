@@ -13,6 +13,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Fixed
 
+- A Settings page short enough to fit no longer slides about under a trackpad swipe; the filter lists and dropdowns in Settings stay still the same way.
+- The Downloads button at the foot of the sidebar is now the same size as the menu button beside it.
 - The arrow keys set the volume and seek again on YouTube after you switch to theater mode. Before, they scrolled the page, because the player lost the keyboard when it moved into its theater frame.
 
 ## [0.0.2] - 2026-09-25
