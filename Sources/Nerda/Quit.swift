@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 
 /// ⌘Q asks first, as Dia does: a slip of the finger shouldn't close every
-/// tab. Return quits, Esc stays. "Always quit" stops the asking; the Nerda
-/// menu's Warn Before Quitting brings it back.
+/// tab. Return quits, Esc stays. "Always quit" stops the asking; Settings ›
+/// General › Warn before quitting brings it back.
 enum QuitConfirmation {
     enum Answer { case quit, alwaysQuit, cancel }
 

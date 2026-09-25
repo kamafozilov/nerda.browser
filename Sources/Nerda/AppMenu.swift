@@ -58,7 +58,6 @@ final class AppMenu: NSObject {
                 item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]),
                 item("Show All", #selector(NSApplication.unhideAllApplications(_:))),
                 .separator(),
-                item("Warn Before Quitting", #selector(toggleQuitWarning), target: self),
                 item("Quit Nerda", #selector(NSApplication.terminate(_:)), "q"),
             ]),
             submenu("File", [
@@ -190,7 +189,6 @@ final class AppMenu: NSObject {
         return item
     }
 
-    @objc private func toggleQuitWarning() { QuitConfirmation.isWanted.toggle() }
     @objc private func checkForUpdates() { Updater.shared.check(asked: true) }
 
     @objc private func openVisit(_ sender: NSMenuItem) {
@@ -241,7 +239,7 @@ extension AppMenu: NSMenuItemValidation {
         // regular window, or unlocks first (a new incognito window), is not.
         if browser.locked {
             return [#selector(openSettings), #selector(openHistory), #selector(newIncognitoWindow),
-                    #selector(checkForUpdates), #selector(toggleQuitWarning), #selector(importPasswords),
+                    #selector(checkForUpdates), #selector(importPasswords),
                     #selector(choosePicture), #selector(useOwnPictures)].contains(item.action)
         }
         switch item.action {
@@ -267,9 +265,6 @@ extension AppMenu: NSMenuItemValidation {
             return browser.selected?.canGoForward == true
         case #selector(checkForUpdates):
             return Updater.shared.canCheck
-        case #selector(toggleQuitWarning):
-            item.state = QuitConfirmation.isWanted ? .on : .off
-            return true
         case #selector(useOwnPictures):
             return Backdrop.shared.wallpaper != .daily
         case #selector(clearHistory):

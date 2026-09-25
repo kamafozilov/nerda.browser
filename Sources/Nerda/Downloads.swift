@@ -104,7 +104,7 @@ struct DownloadsButton: View {
 
         Button { shown.toggle() } label: {
             Image(systemName: running.isEmpty ? "arrow.down.circle" : "arrow.down")
-                .font(.system(size: running.isEmpty ? 14 : 10, weight: .semibold))
+                .font(.system(size: running.isEmpty ? 16 : 10, weight: running.isEmpty ? .medium : .semibold))
                 .foregroundStyle(hovering || shown ? Palette.ink : Palette.muted)
                 .symbolEffect(.bounce, value: finished)
                 .frame(width: 28, height: 28)

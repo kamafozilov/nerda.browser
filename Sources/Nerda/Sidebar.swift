@@ -40,7 +40,7 @@ struct Sidebar: View {
     @State private var layout = Layout()
     /// The tab the pointer is on, and the one whose card shows (`TabPeek`).
     @State private var hovered: Tab.ID?
-    @State private var peeked: Tab.ID?
+    @State private var peeked: Peek?
 
     /// A tab or tile being dragged.
     private struct Drag {
@@ -207,17 +207,18 @@ struct Sidebar: View {
         }
         // The card of the tab the pointer rests on, over the page beside it.
         .overlay(alignment: .topLeading) {
-            if dragged == nil, let peeked, let index = rest.firstIndex(where: { $0.id == peeked }) {
+            if dragged == nil, let peeked, let index = rest.firstIndex(where: { $0.id == peeked.id }) {
                 // Its middle level with the tab's, however tall it is.
                 PeekPlacement(at: CGPoint(x: width + 4, y: rowFrame(index).midY), anchor: .leading, clamping: .vertical) {
-                    TabPeek(tab: rest[index], selected: peeked == browser.selectedID)
+                    TabPeek(tab: rest[index], look: peeked.id == browser.selectedID ? nil : peeked.look)
                 }
                 .allowsHitTesting(false)
                 .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.12), value: peeked)
-        .peeking(hovered, $peeked)
+        // In and out, faded; from one tab's card to the next, at once.
+        .animation(.easeOut(duration: 0.12), value: peeked == nil)
+        .peeking(browser.tabs.first { $0.id == hovered }, $peeked, selected: browser.selectedID)
     }
 
     private var pins: [Tab] { Array(browser.tabs.prefix { $0.isPinned }) }
