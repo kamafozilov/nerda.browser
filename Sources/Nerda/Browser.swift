@@ -138,7 +138,9 @@ final class Browser: NSObject {
         for tab in tabs where tab.id != selectedID && !tab.isPinned && !tab.isAsleep && tab.lastSeen <= cutoff {
             Task {
                 // Asked of the page, so it may have come on screen in the meantime.
-                if await !tab.isBusy(), tab.id != selectedID { tab.sleep() }
+                guard await !tab.isBusy(), tab.id != selectedID else { return }
+                let look = await tab.snapshot()
+                if tab.id != selectedID { tab.sleep(keeping: look) }
             }
         }
     }

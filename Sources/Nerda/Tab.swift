@@ -51,6 +51,8 @@ final class Tab: Identifiable {
     /// What a sleeping page needs to wake as it was: its history, where it
     /// was scrolled to, and its zoom.
     @ObservationIgnored private var slept: (state: Any?, zoom: CGFloat)?
+    /// The top of the page as it went to sleep, for its hover card (`TabPeek`).
+    @ObservationIgnored private(set) var look: NSImage?
     @ObservationIgnored private var observations: [NSObject] = []
     /// The page's top edge, as last sampled (`recolor`): by WebKit, or here.
     @ObservationIgnored private var topColor: NSColor?
@@ -341,8 +343,11 @@ final class Tab: Identifiable {
 
     /// Lets the page go, keeping what it takes to bring it back. Its process
     /// ends with it, and with that the memory, which is most of a tab's cost.
-    func sleep() {
+    /// `look`, the page's top (`snapshot`), stays for its hover card: a few
+    /// hundred KB, of the hundreds of MB let go.
+    func sleep(keeping look: NSImage? = nil) {
         guard let page else { return }
+        self.look = look
         slept = (page.interactionState, page.pageZoom)
         observations = []
         topColor = nil
@@ -352,8 +357,33 @@ final class Tab: Identifiable {
         Self.endServiceWorkers()
     }
 
+    /// The top of the page, as wide as a hover card shows it: a hidden page
+    /// gives one too.
+    func snapshot() async -> NSImage? {
+        guard let page, page.bounds.width > 0 else { return nil }
+        let top = WKSnapshotConfiguration()
+        top.rect = CGRect(x: 0, y: 0, width: page.bounds.width,
+                          height: min(page.bounds.height, page.bounds.width / TabPeek.aspect))
+        top.snapshotWidth = NSNumber(value: Double(TabPeek.width))
+        return try? await page.takeSnapshot(configuration: top)
+    }
+
+    /// What the page's process takes, as Activity Monitor's Memory column
+    /// counts it; nil while asleep, or before the page has a process.
+    // WebKit SPI, as Bench uses: should it go, the card shows no memory.
+    var memory: UInt64? {
+        guard let page, page.responds(to: NSSelectorFromString("_webProcessIdentifier")),
+              let pid = (page.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value, pid > 0 else { return nil }
+        var usage = rusage_info_v4()
+        let read = withUnsafeMutablePointer(to: &usage) {
+            $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
+        }
+        return read == 0 ? usage.ri_phys_footprint : nil
+    }
+
     @discardableResult
     private func wake() -> WKWebView {
+        look = nil
         let page = makePage(Self.configuration(dataStore))
         self.page = page
         if let slept { page.pageZoom = slept.zoom }

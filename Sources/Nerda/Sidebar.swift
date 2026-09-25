@@ -38,6 +38,9 @@ struct Sidebar: View {
     /// over them: set only when that changes.
     @State private var gap: Int?
     @State private var layout = Layout()
+    /// The tab the pointer is on, and the one whose card shows (`TabPeek`).
+    @State private var hovered: Tab.ID?
+    @State private var peeked: Tab.ID?
 
     /// A tab or tile being dragged.
     private struct Drag {
@@ -119,6 +122,7 @@ struct Sidebar: View {
                             // A sleeping tab's site is connected to on the way to a click
                             // on it. By its id, as the buttons hold it.
                             .onHover { over in
+                                if over { hovered = id } else if hovered == id { hovered = nil }
                                 guard over, let tab = browser.tabs.first(where: { $0.id == id }), tab.isAsleep,
                                       let site = tab.site else { return }
                                 Tab.preconnect(to: site)
@@ -201,6 +205,18 @@ struct Sidebar: View {
                 .allowsHitTesting(false)
             }
         }
+        // The card of the tab the pointer rests on, over the page beside it.
+        .overlay(alignment: .topLeading) {
+            if dragged == nil, let peeked, let index = rest.firstIndex(where: { $0.id == peeked }) {
+                PeekPlacement(at: CGPoint(x: width + 4, y: rowFrame(index).minY - 4), clamping: .vertical) {
+                    TabPeek(tab: rest[index], selected: peeked == browser.selectedID)
+                }
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: peeked)
+        .peeking(hovered, $peeked)
     }
 
     private var pins: [Tab] { Array(browser.tabs.prefix { $0.isPinned }) }
