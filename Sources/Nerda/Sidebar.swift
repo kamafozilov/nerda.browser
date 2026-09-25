@@ -1,11 +1,13 @@
 import SwiftUI
 
-/// The column down the left, on glass: pinned sites as tiles at the top, then
-/// the tabs, newest first, under the button that opens another, and along the
-/// bottom, the app's menu and downloads. Pinned beside the page, or, while
-/// collapsed, brought out over it from the window's edge. Tabs and tiles are dragged into another
-/// order; a tab dragged onto the tiles is pinned, a tile dragged down among
-/// the tabs unpinned.
+/// The column down the left, on glass: pinned sites as tiles at the top, the
+/// bookmarks under them, then the tabs, newest first, under the button that
+/// opens another, and along the bottom, the app's menu and downloads. Pinned
+/// beside the page, or, while collapsed, brought out over it from the window's
+/// edge. Tabs and tiles are dragged into another order; a tab dragged onto the
+/// tiles is pinned, a tile dragged down among the tabs unpinned. Either
+/// dragged onto the bookmarks is kept there; a bookmark dragged down among
+/// the tabs is one of them again.
 struct Sidebar: View {
     let browser: Browser
     /// Beside the page (true), or floating over it (false).
@@ -25,6 +27,8 @@ struct Sidebar: View {
     private static let rowGap: CGFloat = 2
     nonisolated static let tileHeight: CGFloat = 40
     nonisolated static let tileGap: CGFloat = 6
+    /// How far in each folder's bookmarks sit.
+    private static let indent: CGFloat = 16
     /// The room above and below the tabs, over which they fade as they scroll out.
     private static let edge: CGFloat = 6
     private static let listTop = "list-top"
@@ -37,14 +41,20 @@ struct Sidebar: View {
     /// Where a tab from the list would go among the tiles, while it is dragged
     /// over them: set only when that changes.
     @State private var gap: Int?
+    /// Where what is dragged over the bookmarks would go, while it is.
+    @State private var landing: Landing?
+    /// A bookmark or folder whose name is being typed: one just made, or Rename.
+    @State private var renaming: Bookmarks.Item.ID?
+    /// How tall the bookmarks are, for them to take no more room than that.
+    @State private var bookmarksHeight: CGFloat = 0
     @State private var layout = Layout()
     /// The tab the pointer is on, and the one whose card shows (`TabPeek`).
     @State private var hovered: Tab.ID?
     @State private var peeked: Peek?
 
-    /// A tab or tile being dragged.
+    /// A tab, tile or bookmark being dragged.
     private struct Drag {
-        let id: Tab.ID
+        let id: UUID
         /// From the middle of what was taken hold of to the pointer, so the
         /// same spot stays under it.
         let grab: CGSize
@@ -57,6 +67,25 @@ struct Sidebar: View {
     private final class Layout {
         var tiles = CGRect.zero
         var rows = CGRect.zero
+        /// The tabs' list as it shows, whatever it is scrolled to.
+        var list = CGRect.zero
+        /// The bookmarks: line and all, the line under them, and their rows.
+        var bookmarks = CGRect.zero
+        var line = CGRect.zero
+        var marks = CGRect.zero
+    }
+
+    /// Where something dragged over the bookmarks goes: into a folder (at its
+    /// end), lit, or between two of them (at `index` in `folder`), where a gap
+    /// opens for it. `row` counts the rows showing, what is dragged left out:
+    /// the folder's, or where the gap is. None while there are no bookmarks:
+    /// where to drop one shows then.
+    private struct Landing: Equatable {
+        let folder: Bookmarks.Item.ID?
+        let index: Int
+        var row: Int?
+        var depth = 0
+        var into = false
     }
 
     var body: some View {
@@ -84,6 +113,14 @@ struct Sidebar: View {
             if !browser.isPrivate {
                 tiles
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.tiles = $0 }
+                    .padding(.horizontal, 8)
+                    .padding(.top, 8)
+            }
+
+            // Incognito keeps no bookmarks either.
+            if !browser.isPrivate {
+                bookmarkList
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.bookmarks = $0 }
                     .padding(.horizontal, 8)
                     .padding(.top, 8)
             }
@@ -140,6 +177,7 @@ struct Sidebar: View {
                     .padding(.vertical, Self.edge)
                     .background(alignment: .top) { Color.clear.frame(height: 0).id(Self.listTop) }
                 }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.list = $0 }
                 .scrollIndicators(.never)
                 // Only scrolls once the tabs outgrow the sidebar.
                 .scrollBounceBehavior(.basedOnSize)
@@ -186,12 +224,23 @@ struct Sidebar: View {
         // What is dragged follows the pointer, over everything in the sidebar.
         // A tab over the tiles turns into one, the size of the gap opened for it.
         .overlay(alignment: .topLeading) {
-            if let dragged, let tab = browser.tabs.first(where: { $0.id == dragged.id }) {
+            if let dragged, let item = browser.bookmarks.item(dragged.id) {
+                UnderPointer(pointer: pointer, grab: dragged.grab, size: dragged.size, width: width) {
+                    SidebarRow(icon: item.isFolder ? "folder" : "globe", site: item.url, title: item.title, selected: true) {}
+                        .frame(width: dragged.size.width, height: dragged.size.height)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
+                }
+                .allowsHitTesting(false)
+            } else if let dragged, let tab = browser.tabs.first(where: { $0.id == dragged.id }) {
+                // A tab over the tiles turns into one; a tile over the bookmarks, into a row.
                 let becomingTile = gap != nil
-                let size = gap.map { TileGrid.frame($0, of: pins.count + 1, in: layout.tiles).size } ?? dragged.size
-                UnderPointer(pointer: pointer, grab: becomingTile ? .zero : dragged.grab, size: size, width: width) {
+                let becomingRow = tab.isPinned && landing != nil
+                let size = gap.map { TileGrid.frame($0, of: pins.count + 1, in: layout.tiles).size }
+                    ?? (becomingRow ? CGSize(width: layout.bookmarks.width, height: Self.rowHeight) : dragged.size)
+                UnderPointer(pointer: pointer, grab: becomingTile || becomingRow ? .zero : dragged.grab, size: size, width: width) {
                     Group {
-                        if tab.isPinned || becomingTile {
+                        if tab.isPinned && !becomingRow || becomingTile {
                             PinnedTile(site: tab.site, loading: false, title: tab.title, selected: true) {}
                         } else {
                             SidebarRow(icon: "globe", site: tab.site, title: tab.title, selected: true) {}
@@ -202,6 +251,7 @@ struct Sidebar: View {
                     .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
                 }
                 .animation(.snappy(duration: 0.2), value: becomingTile)
+                .animation(.snappy(duration: 0.2), value: becomingRow)
                 .allowsHitTesting(false)
             }
         }
@@ -222,7 +272,7 @@ struct Sidebar: View {
     }
 
     private var pins: [Tab] { Array(browser.tabs.prefix { $0.isPinned }) }
-    private var rest: [Tab] { Array(browser.tabs.drop { $0.isPinned }) }
+    private var rest: [Tab] { browser.tabs.filter(Browser.listed) }
 
     /// Where a tab from the list would go among the tiles, dragged to `point` over them.
     private func gap(for id: Tab.ID, at point: CGPoint) -> Int? {
@@ -272,6 +322,8 @@ struct Sidebar: View {
                 pointer.at = value.location
                 let over = gap(for: id, at: value.location)
                 if over != gap { gap = over }
+                let into = landing(for: id, at: value.location)
+                if into != landing { landing = into }
                 reorder(id, at: value.location)
             }
             .onEnded { drop(id, at: $0.location) }
@@ -301,28 +353,285 @@ struct Sidebar: View {
                 guard !belowTiles(point) else { return }
                 browser.move(id, pinned: true, to: TileGrid.index(at: point, of: pins.count, in: layout.tiles))
             } else if !overTiles(point) {
-                browser.move(id, pinned: false, to: rowIndex(at: point.y, of: rest.count))
+                guard !overBookmarks(point) else { return }
+                browser.move(id, pinned: false, to: rowIndex(at: point.y, of: rest.count), among: Browser.listed)
             }
         }
     }
 
-    /// Onto the tiles, a tab is pinned where it is let go; a tile let go below
-    /// them is unpinned there. Anywhere else, it stays where the drag put it.
+    /// Onto the tiles, a tab is pinned where it is let go; onto the bookmarks,
+    /// either is kept there; a tile let go below them is unpinned there.
+    /// Anywhere else, it stays where the drag put it.
     private func drop(_ id: Tab.ID, at point: CGPoint) {
-        let landing = gap
+        let gap = gap, landing = landing
         withAnimation(.slide) {
             dragged = nil
-            gap = nil
+            self.gap = nil
+            self.landing = nil
             guard let tab = browser.tabs.first(where: { $0.id == id }) else { return }
-            if tab.isPinned, belowTiles(point), (0...width).contains(point.x) {
-                browser.move(id, pinned: false, to: rowIndex(at: point.y, of: rest.count + 1))
-            } else if let landing {
-                browser.move(id, pinned: true, to: landing)
+            if let landing {
+                browser.bookmark(id, in: landing.folder, at: landing.index)
+            } else if tab.isPinned, overList(point) {
+                browser.move(id, pinned: false, to: rowIndex(at: point.y, of: rest.count + 1), among: Browser.listed)
+            } else if let gap {
+                browser.move(id, pinned: true, to: gap)
             }
         }
     }
 
-    private func overTiles(_ point: CGPoint) -> Bool { layout.tiles.insetBy(dx: 0, dy: -8).contains(point) }
+    /// The bookmarks, over a line that parts them from the tabs, as Arc's
+    /// and Zen's pinned tabs are: a tab dragged above it is kept there, in a
+    /// gap that opens where it goes. With none yet, a tab being dragged finds
+    /// where to drop it, dashed, as the tiles show theirs. They take the room
+    /// they need, and scroll once that is more than the tabs leave them.
+    private var bookmarkList: some View {
+        let rows = browser.bookmarks.rows
+        let dragged = dragged.flatMap { browser.bookmarks.item($0.id) }
+        // What is inside a folder dragged goes with it; the folder itself stays,
+        // folded to nothing, as its drag is its row's.
+        let inside = Set(dragged.map(Bookmarks.ids(in:))?.dropFirst() ?? [])
+        let gap = landing.flatMap { $0.into ? nil : $0.row }
+        var items: [Bookmarks.Item.ID?] = []
+        var shown = 0
+        for row in rows where !inside.contains(row.id) {
+            if row.id != dragged?.id {
+                if shown == gap { items.append(nil) }
+                shown += 1
+            }
+            items.append(row.id)
+        }
+        if gap == shown { items.append(nil) }
+        let byID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+        return VStack(spacing: 0) {
+            if !items.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(items, id: \.self) { id in
+                            if let id, let row = byID[id] {
+                                bookmarkRow(row)
+                            } else {
+                                Color.clear.frame(height: Self.rowHeight + Self.rowGap)
+                            }
+                        }
+                    }
+                    .overlay(alignment: .topLeading) { landingMark.allowsHitTesting(false) }
+                    .animation(.snappy(duration: 0.2), value: landing)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.marks = $0 }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bookmarksHeight = $0 }
+                }
+                .frame(maxHeight: bookmarksHeight)
+                .scrollIndicators(.never)
+                .scrollBounceBehavior(.basedOnSize)
+                .transition(.opacity)
+            }
+            Group {
+                if rows.isEmpty, bookmarking {
+                    PinSlot(targeted: landing != nil, icon: "bookmark", height: Self.rowHeight,
+                            tip: "Drag a tab here to bookmark it")
+                        .padding(.bottom, 4)
+                        .transition(.opacity)
+                } else {
+                    BookmarksLine()
+                }
+            }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.line = $0 }
+            .contextMenu { Button("New Folder") { newFolder(in: nil) } }
+            .animation(.snappy(duration: 0.2), value: bookmarking)
+        }
+    }
+
+    /// A tab that could be kept as a bookmark is being dragged.
+    private var bookmarking: Bool {
+        guard let dragged, let tab = browser.tabs.first(where: { $0.id == dragged.id }) else { return false }
+        return tab.hasPage && tab.bookmark == nil
+    }
+
+    /// The bookmarks' rows, less what is being dragged of them.
+    private var shownRows: [Bookmarks.Row] {
+        let rows = browser.bookmarks.rows
+        guard let id = dragged?.id, let item = browser.bookmarks.item(id) else { return rows }
+        let gone = Set(Bookmarks.ids(in: item))
+        return rows.filter { !gone.contains($0.id) }
+    }
+
+    /// A bookmark, its site's icon and its own name, open or not: on screen
+    /// once clicked, closed by its button, and then only kept. A folder,
+    /// opened by a click, and named by Rename, not by a double-click, which
+    /// opens and closes it.
+    private func bookmarkRow(_ row: Bookmarks.Row) -> some View {
+        // By their ids alone, as the tabs' rows.
+        let id = row.id, item = row.item
+        let tab = browser.tab(of: id)
+        let tabID = tab?.id
+        return SidebarRow(
+            icon: item.isFolder ? "folder" : "globe",
+            site: item.isFolder ? nil : tab?.site ?? item.url,
+            loading: tab?.isLoading ?? false,
+            title: item.title,
+            selected: tabID != nil && tabID == browser.selectedID,
+            close: tabID.map { tabID in { withAnimation(.slide) { browser.close(tabID) } } },
+            rename: { name in
+                renaming = nil
+                if let name { browser.bookmarks.rename(id, to: name) }
+                browser.focusPage()
+            },
+            renameNow: renaming == id,
+            doubleClickRenames: !item.isFolder,
+            press: tabID.map { tabID in { browser.select(tabID) } }
+        ) {
+            if item.isFolder {
+                withAnimation(.snappy(duration: 0.2)) { browser.bookmarks.toggle(id) }
+            } else {
+                browser.open(bookmark: id)
+            }
+        }
+        .padding(.leading, CGFloat(row.depth) * Self.indent)
+        .padding(.bottom, Self.rowGap)
+        // Folded away while dragged, the gap where it goes open instead.
+        .frame(height: dragged?.id == id ? 0 : nil, alignment: .top)
+        .opacity(dragged?.id == id ? 0 : 1)
+        .simultaneousGesture(bookmarkDrag(id))
+        .contextMenu { bookmarkMenu(row) }
+    }
+
+    @ViewBuilder
+    private func bookmarkMenu(_ row: Bookmarks.Row) -> some View {
+        let id = row.id
+        if row.item.isFolder {
+            Button("New Folder") { newFolder(in: id) }
+            Button("Rename") { renaming = id }
+            Divider()
+            Button("Delete Folder") { withAnimation(.slide) { browser.removeBookmark(id) } }
+        } else if let url = row.item.url {
+            // Its tab gone elsewhere since it was opened: back to the page kept.
+            if let tab = browser.tab(of: id), tab.site != url {
+                let tabID = tab.id
+                Button("Back to Bookmarked Page") { browser.tabs.first { $0.id == tabID }?.go(to: url) }
+            }
+            Button("Copy Link") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url.absoluteString, forType: .string)
+            }
+            Button("Rename") { renaming = id }
+            Button("New Folder") { newFolder(in: row.folder, at: row.index + 1) }
+            Divider()
+            Button("Remove Bookmark") { withAnimation(.slide) { browser.removeBookmark(id) } }
+        }
+    }
+
+    /// A folder in `folder` (nil: at the top), open, with its name to type.
+    private func newFolder(in folder: Bookmarks.Item.ID?, at index: Int = .max) {
+        let item = Bookmarks.Item(title: "New Folder", children: [])
+        withAnimation(.snappy(duration: 0.2)) {
+            if let folder { browser.bookmarks.open(folder) }
+            browser.bookmarks.add(item, to: folder, at: index)
+        }
+        renaming = item.id
+    }
+
+    /// The folder it would go into, lit.
+    @ViewBuilder
+    private var landingMark: some View {
+        if let landing, landing.into, let row = landing.row {
+            let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+            shape.fill(Palette.hover)
+                .overlay(shape.strokeBorder(Palette.muted.opacity(0.6), lineWidth: 1.5))
+                .frame(height: Self.rowHeight)
+                .padding(.leading, CGFloat(landing.depth) * Self.indent)
+                .offset(y: CGFloat(row) * (Self.rowHeight + Self.rowGap))
+        }
+    }
+
+    /// Dragging a bookmark or folder, by its id alone.
+    private func bookmarkDrag(_ id: Bookmarks.Item.ID) -> some Gesture {
+        DragGesture(minimumDistance: 6, coordinateSpace: .named(Self.space))
+            .onChanged { value in
+                if dragged == nil, let index = browser.bookmarks.rows.firstIndex(where: { $0.id == id }) {
+                    let frame = markFrame(index)
+                    dragged = Drag(id: id, grab: CGSize(width: value.startLocation.x - frame.midX,
+                                                        height: value.startLocation.y - frame.midY),
+                                   size: frame.size)
+                }
+                pointer.at = value.location
+                let into = landing(for: id, at: value.location)
+                if into != landing { landing = into }
+            }
+            .onEnded { value in
+                let landing = landing
+                withAnimation(.slide) {
+                    dragged = nil
+                    self.landing = nil
+                    if let landing {
+                        browser.bookmarks.move(id, to: landing.folder, at: landing.index)
+                    } else if overList(value.location) {
+                        browser.moveToTabs(bookmark: id, at: rowIndex(at: value.location.y, of: rest.count + 1))
+                    }
+                }
+            }
+    }
+
+    /// Where a tab, tile or bookmark dragged to `point` would go among the
+    /// bookmarks: onto the line under them, at the end; onto a folder's middle, into
+    /// it; nearer a row's top or bottom, above or below it. A folder not into
+    /// itself; a new tab, or the settings, nowhere: they have no site to keep.
+    private func landing(for id: UUID, at point: CGPoint) -> Landing? {
+        guard overBookmarks(point) else { return nil }
+        if let tab = browser.tabs.first(where: { $0.id == id }), !tab.hasPage || tab.bookmark != nil { return nil }
+        let rows = shownRows
+        guard !rows.isEmpty, point.y < layout.line.minY else {
+            return Landing(folder: nil, index: .max, row: rows.isEmpty ? nil : rows.count)
+        }
+        let pitch = Self.rowHeight + Self.rowGap
+        let y = point.y - layout.marks.minY
+        var index = Int((y / pitch).rounded(.down))
+        let within = index < 0 ? 0 : (y - CGFloat(index) * pitch) / Self.rowHeight
+        // Over the gap open, it stays; past it, the rows sit one further down.
+        if let current = self.landing, !current.into, let gap = current.row {
+            if index == gap { return current }
+            if index > gap { index -= 1 }
+        }
+        let landing: Landing
+        if index >= rows.count {
+            landing = Landing(folder: nil, index: .max, row: rows.count)
+        } else {
+            let row = rows[max(index, 0)]
+            if row.item.isFolder, (0.25...0.75).contains(within) {
+                landing = Landing(folder: row.id, index: .max, row: index, depth: row.depth, into: true)
+            } else if within < 0.5 {
+                landing = Landing(folder: row.folder, index: row.index, row: max(index, 0), depth: row.depth)
+            } else if row.item.open == true, row.item.children?.isEmpty == false {
+                landing = Landing(folder: row.id, index: 0, row: index + 1, depth: row.depth + 1)
+            } else {
+                landing = Landing(folder: row.folder, index: row.index + 1, row: index + 1, depth: row.depth)
+            }
+        }
+        return browser.bookmarks.canMove(id, into: landing.folder) ? landing : nil
+    }
+
+    /// Below `zoneEdge`, down to just under the line.
+    private func overBookmarks(_ point: CGPoint) -> Bool {
+        !browser.isPrivate && (zoneEdge...layout.bookmarks.maxY + 4).contains(point.y) && (0...width).contains(point.x)
+    }
+
+    /// Halfway between the tiles and the bookmarks: a drag above it is over
+    /// the tiles, below it over the bookmarks, never both.
+    private var zoneEdge: CGFloat {
+        browser.isPrivate ? .infinity : (layout.tiles.maxY + layout.bookmarks.minY) / 2
+    }
+
+    private func overList(_ point: CGPoint) -> Bool {
+        point.y > layout.list.minY && (0...width).contains(point.x)
+    }
+
+    private func markFrame(_ index: Int) -> CGRect {
+        let marks = layout.marks
+        return CGRect(x: marks.minX, y: marks.minY + CGFloat(index) * (Self.rowHeight + Self.rowGap),
+                      width: marks.width, height: Self.rowHeight)
+    }
+
+    private func overTiles(_ point: CGPoint) -> Bool {
+        layout.tiles.insetBy(dx: 0, dy: -8).contains(point) && point.y < zoneEdge
+    }
     private func belowTiles(_ point: CGPoint) -> Bool { point.y > layout.tiles.maxY + 8 }
 
     private func rowFrame(_ index: Int) -> CGRect {
@@ -495,6 +804,19 @@ extension Animation {
     static let slide = Animation.smooth(duration: 0.25)
 }
 
+/// Under the bookmarks, the line between them and the tabs, a hairline as
+/// Zen's, in a strip tall enough to right-click and drop onto.
+private struct BookmarksLine: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.1))
+            .frame(height: 1)
+            .padding(.horizontal, 6)
+            .frame(height: 14)
+            .contentShape(Rectangle())
+    }
+}
+
 /// One line of the sidebar: a tab, or the button that opens one.
 private struct SidebarRow: View {
     let icon: String
@@ -511,6 +833,9 @@ private struct SidebarRow: View {
     /// Given, a double-click makes the title editable in place: Return or a
     /// click away keeps the new name (nil for Esc, which keeps the old).
     var rename: ((String?) -> Void)?
+    /// The title made editable now, as a double-click would.
+    var renameNow = false
+    var doubleClickRenames = true
     /// Done as the button goes down, not up, as browsers select a tab: a
     /// click's whole press sooner. `action` still does it from the keyboard.
     var press: (() -> Void)?
@@ -556,7 +881,8 @@ private struct SidebarRow: View {
         .buttonStyle(.plain)
         .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in press?() })
         // The first click has selected the tab, as a single one does.
-        .simultaneousGesture(TapGesture(count: 2).onEnded { if rename != nil { renaming = true } })
+        .simultaneousGesture(TapGesture(count: 2).onEnded { if rename != nil, doubleClickRenames { renaming = true } })
+        .onChange(of: renameNow, initial: true) { if renameNow, rename != nil { renaming = true } }
         // Over the row rather than inside it, so a click on it closes the tab
         // without also selecting it.
         .overlay(alignment: .trailing) {
@@ -718,14 +1044,17 @@ private struct PinnedTile: View {
 }
 
 /// While nothing is pinned, where a tab is dragged to pin it: dashed, and lit
-/// once the tab is over it.
+/// once the tab is over it. The same, a row high, for the first bookmark.
 private struct PinSlot: View {
     let targeted: Bool
+    var icon = "pin"
+    var height = Sidebar.tileHeight
+    var tip = "Drag a tab here to pin it"
 
     private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
 
     var body: some View {
-        Image(systemName: "pin")
+        Image(systemName: icon)
             .font(.system(size: 14))
             .overlay(alignment: .topTrailing) {
                 Image(systemName: "plus")
@@ -734,8 +1063,8 @@ private struct PinSlot: View {
             }
             .foregroundStyle(targeted ? Palette.ink : Palette.muted)
             .frame(maxWidth: .infinity)
-            .frame(height: Sidebar.tileHeight)
-            .help("Drag a tab here to pin it")
+            .frame(height: height)
+            .help(tip)
             .background(shape.fill(targeted ? Palette.wash : .clear))
             .overlay(shape.strokeBorder(Palette.muted.opacity(targeted ? 0.9 : 0.5),
                                         style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])))

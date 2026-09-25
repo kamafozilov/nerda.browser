@@ -35,6 +35,9 @@ final class AppMenu: NSObject {
             return item
         })
         let servicesMenu = submenu("Services", [])
+        let bookmarksMenu = submenu("Bookmarks", [
+            item("Bookmark This Tab", #selector(toggleBookmark), "d", target: self),
+        ])
         let historyMenu = submenu("History", [
             item("Back", #selector(goBack), "[", target: self),
             item("Forward", #selector(goForward), "]", target: self),
@@ -71,6 +74,7 @@ final class AppMenu: NSObject {
                 item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]),
                 .separator(),
                 item("Import Passwords…", #selector(importPasswords), target: self),
+                item("Import Bookmarks…", #selector(importBookmarks), target: self),
             ]),
             submenu("Edit", [
                 item("Undo", Selector(("undo:")), "z"),
@@ -106,9 +110,11 @@ final class AppMenu: NSObject {
                 item("Use Nerda's Pictures", #selector(useOwnPictures), target: self),
             ]),
             historyMenu,
+            bookmarksMenu,
             windowMenu,
         ]
         historyMenu.submenu?.delegate = self
+        bookmarksMenu.submenu?.delegate = self
         NSApp.mainMenu = bar
         NSApp.windowsMenu = windowMenu.submenu
         NSApp.servicesMenu = servicesMenu.submenu
@@ -138,16 +144,16 @@ final class AppMenu: NSObject {
     private static let digitKeys: [UInt16] = [18, 19, 20, 21, 23, 22, 26, 28, 25]
     /// ⌘T and the rest by their place, as on a US keyboard, for a layout that
     /// types no Latin letters (Russian, Uzbek Cyrillic): there ⌘T types "е".
-    private static let latinKeys: [UInt16: String] = [17: "t", 13: "w", 37: "l", 12: "q", 43: ",", 0: "a", 45: "n"]
+    private static let latinKeys: [UInt16: String] = [17: "t", 13: "w", 37: "l", 12: "q", 43: ",", 0: "a", 45: "n", 2: "d"]
 
-    /// ⌘T, ⌘W, ⌘L, ⌘Q and ⌘, and ⌘⇧W, ⌘⇧A and ⌘⇧N, straight to the menu while
+    /// ⌘T, ⌘W, ⌘L, ⌘Q, ⌘D and ⌘, and ⌘⇧W, ⌘⇧A and ⌘⇧N, straight to the menu while
     /// a page has the keyboard (and no sheet or dialog is up).
     private static func browserKey(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
         guard let window = event.window, window.firstResponder is WKWebView, window.attachedSheet == nil,
               NSApp.modalWindow == nil, let typed = event.charactersIgnoringModifiers?.lowercased() else { return false }
         let key = typed.allSatisfy(\.isASCII) ? typed : latinKeys[event.keyCode] ?? typed
-        let reserved = modifiers == .command && ["t", "w", "l", "q", ","].contains(key)
+        let reserved = modifiers == .command && ["t", "w", "l", "q", "d", ","].contains(key)
             || modifiers == [.command, .shift] && ["w", "a", "n"].contains(key)
         return reserved && NSApp.mainMenu?.performKeyEquivalent(with: event) == true
     }
@@ -180,6 +186,16 @@ final class AppMenu: NSObject {
     @objc private func nextTab() { browser.selectTab(after: 1) }
     @objc private func previousTab() { browser.selectTab(after: -1) }
     @objc private func importPasswords() { browser.importPasswords() }
+    @objc private func importBookmarks() { regular.importBookmarks() }
+    @objc private func toggleBookmark() { browser.toggleBookmark() }
+
+    /// A bookmark from the menu, in the regular window: incognito keeps none.
+    @objc private func openBookmark(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? Bookmarks.Item.ID else { return }
+        let browser = Windows.showRegular()
+        if browser.commandBarOpen { browser.hideCommandBar() }
+        browser.open(bookmark: id)
+    }
     @objc private func useOwnPictures() { Backdrop.shared.wallpaper = .daily }
     @objc private func choosePicture() { Backdrop.shared.askForPicture() }
 
@@ -239,7 +255,7 @@ extension AppMenu: NSMenuItemValidation {
         // regular window, or unlocks first (a new incognito window), is not.
         if browser.locked {
             return [#selector(openSettings), #selector(openHistory), #selector(newIncognitoWindow),
-                    #selector(checkForUpdates), #selector(importPasswords),
+                    #selector(checkForUpdates), #selector(importPasswords), #selector(importBookmarks), #selector(openBookmark(_:)),
                     #selector(choosePicture), #selector(useOwnPictures)].contains(item.action)
         }
         switch item.action {
@@ -253,6 +269,9 @@ extension AppMenu: NSMenuItemValidation {
             // Actual Size only once there is a zoom to undo.
             guard let tab = browser.selected, tab.hasPage else { return false }
             return item.action != #selector(zoom(_:)) || item.tag != 0 || tab.webView.pageZoom != PageZoom.current
+        case #selector(toggleBookmark):
+            item.title = browser.selected?.bookmark == nil ? "Bookmark This Tab" : "Remove Bookmark"
+            return !browser.isPrivate && browser.selected?.hasPage == true
         case #selector(showFind):
             return browser.selected?.hasPage == true
         case #selector(findNext), #selector(findPrevious):
@@ -279,19 +298,49 @@ extension AppMenu: NSMenuDelegate {
     /// Under Back, Forward and Show All History, the pages visited last, as Safari lists them;
     /// each opens in a tab of its own.
     func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu.title != "Bookmarks" else { return fillBookmarks(menu) }
         while menu.items.count > 3 { menu.removeItem(at: 3) }
         menu.addItem(.separator())
         for visit in History.shared.recent(15) {
             let title = visit.title.isEmpty ? visit.url.absoluteString : visit.title
             let item = item(title.count > 60 ? title.prefix(59) + "…" : title, #selector(openVisit(_:)), target: self)
             item.representedObject = visit.url
-            if let icon = Favicons.origin(of: visit.url).flatMap({ Favicons.shared.images[$0] }) {
-                item.image = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { icon.draw(in: $0); return true }
-            }
+            item.image = Self.icon(of: visit.url)
             menu.addItem(item)
         }
         if menu.items.count > 4 { menu.addItem(.separator()) }
         menu.addItem(item("Clear History…", #selector(clearHistory), target: self))
+    }
+
+    /// Under Bookmark This Tab, the bookmarks, each folder a submenu of what is in it.
+    private func fillBookmarks(_ menu: NSMenu) {
+        while menu.items.count > 1 { menu.removeItem(at: 1) }
+        let bookmarks = Bookmarks.shared.items
+        if !bookmarks.isEmpty { menu.addItem(.separator()) }
+        add(bookmarks, to: menu)
+    }
+
+    private func add(_ bookmarks: [Bookmarks.Item], to menu: NSMenu) {
+        for bookmark in bookmarks {
+            let title = bookmark.title.count > 60 ? bookmark.title.prefix(59) + "…" : bookmark.title
+            if let children = bookmark.children {
+                let item = submenu(title, [])
+                item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+                add(children, to: item.submenu!)
+                menu.addItem(item)
+            } else if let url = bookmark.url {
+                let item = item(title, #selector(openBookmark(_:)), target: self)
+                item.representedObject = bookmark.id
+                item.image = Self.icon(of: url)
+                menu.addItem(item)
+            }
+        }
+    }
+
+    /// A site's icon at a menu's size, once it has one.
+    private static func icon(of url: URL) -> NSImage? {
+        guard let icon = Favicons.origin(of: url).flatMap({ Favicons.shared.images[$0] }) else { return nil }
+        return NSImage(size: NSSize(width: 16, height: 16), flipped: false) { icon.draw(in: $0); return true }
     }
 }
 

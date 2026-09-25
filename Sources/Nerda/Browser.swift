@@ -76,6 +76,8 @@ final class Browser: NSObject {
     @ObservationIgnored var choicesAsked = 0
     /// Where passwords are kept; tests give theirs a store of its own.
     @ObservationIgnored var vault = Vault.shared
+    /// The same for bookmarks.
+    @ObservationIgnored var bookmarks = Bookmarks.shared
 
     /// How long a tab can go unseen before it sleeps.
     // ponytail: fixed; a setting once there are settings. Edge's default is 2 hours,
@@ -191,17 +193,21 @@ final class Browser: NSObject {
         if let page = selected?.page { page.window?.makeFirstResponder(page) }
     }
 
-    /// Puts a tab at `position` among the pinned tabs, or among the rest,
+    /// Puts a tab at `position` among the pinned tabs, or among the rest
+    /// that are `among` them (the sidebar's list has no bookmarks' tabs),
     /// pinning or unpinning it on the way; past the end is the end.
-    func move(_ id: Tab.ID, pinned: Bool, to position: Int) {
+    func move(_ id: Tab.ID, pinned: Bool, to position: Int, among: (Tab) -> Bool = { _ in true }) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
-        // A new tab, or the settings, has no site to pin.
-        guard !pinned || tabs[index].hasPage else { return }
+        // A new tab, or the settings, has no site to pin; a bookmark's tab has its place.
+        guard !pinned || tabs[index].hasPage && tabs[index].bookmark == nil else { return }
         // Moved in one change: `tabs` taking it out on its own would silence its page.
         var moved = tabs
         let tab = moved.remove(at: index)
         let pins = moved.prefix { $0.isPinned }.count
-        moved.insert(tab, at: pinned ? min(max(position, 0), pins) : pins + min(max(position, 0), moved.count - pins))
+        let places = moved.indices.dropFirst(pins).filter { among(moved[$0]) }
+        let position = max(position, 0)
+        moved.insert(tab, at: pinned ? min(position, pins)
+                     : position < places.count ? places[position] : places.last.map { $0 + 1 } ?? pins)
         // Called on every step of a drag: nothing to tell when nothing moved.
         guard tab.isPinned != pinned || !moved.elementsEqual(tabs, by: ===) else { return }
         if tab.isPinned != pinned { tab.home = pinned ? tab.site : nil }
@@ -240,8 +246,20 @@ final class Browser: NSObject {
         commandBarOpen = false
     }
 
+    /// The sidebar's list: the tabs not pinned, nor a bookmark's.
+    static let listed: (Tab) -> Bool = { !$0.isPinned && $0.bookmark == nil }
+
+    /// The tabs in the order they are shown: down the side, the pinned, the
+    /// bookmarks' open ones, then the list; across the top, as they are.
+    var inTurn: [Tab] {
+        guard TabStyle.current == .vertical, tabs.contains(where: { $0.bookmark != nil }) else { return tabs }
+        let open = Dictionary(tabs.compactMap { tab in tab.bookmark.map { ($0, tab) } }) { first, _ in first }
+        return tabs.filter(\.isPinned) + bookmarks.all.compactMap { open[$0.id] } + tabs.filter(Self.listed)
+    }
+
     /// ⌘1 to ⌘8, top down; ⌘9 is always the last, as in every browser.
     func selectTab(number: Int) {
+        let tabs = inTurn
         guard !tabs.isEmpty else { return }
         let index = number == 9 ? tabs.count - 1 : number - 1
         if tabs.indices.contains(index) { selectedID = tabs[index].id }
@@ -249,6 +267,7 @@ final class Browser: NSObject {
 
     /// ⌃Tab and ⌃⇧Tab: the next tab down, or up, round from the end to the start.
     func selectTab(after step: Int) {
+        let tabs = inTurn
         guard let index = tabs.firstIndex(where: { $0.id == selectedID }) else { return }
         selectedID = tabs[(index + step + tabs.count) % tabs.count].id
     }

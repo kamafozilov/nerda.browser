@@ -634,6 +634,8 @@ Theme.apply()
 
 let browser = Browser()
 History.shared.load(from: History.file)
+// Before the tabs: those of bookmarks are told by them.
+Bookmarks.shared.load(from: Bookmarks.file)
 Favicons.shared.folder = Favicons.folder
 browser.restore(from: Session.file)
 Favicons.shared.preload(browser.tabs.compactMap(\.site))

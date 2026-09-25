@@ -150,7 +150,7 @@ struct TabStrip: View {
 
     /// A tab with a site is being dragged: the pinned sites show, to take it,
     /// even while there are none.
-    private var pinning: Bool { draggedTab.map { !$0.isPinned && $0.hasPage } ?? false }
+    private var pinning: Bool { draggedTab.map { !$0.isPinned && $0.hasPage && $0.bookmark == nil } ?? false }
 
     /// The pinned sites, as icons in a group of their own. A tab dragged over
     /// them opens a gap where it would go; with none pinned yet, the group
