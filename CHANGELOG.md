@@ -11,6 +11,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - AI chats, one click away: the sparkles button beside Downloads at the bottom of the sidebar shows ChatGPT, Claude, Gemini, Grok, Perplexity and DeepSeek. Pick one to go to its tab, or open it in a new one. Add your own with +, or right-click one to remove it.
 
+### Changed
+
+- A new version no longer pops up in the middle of the window: a card at the bottom of the sidebar shows it with its number. Click it and the update downloads right there, with a bar filling from 0 to 100%, then Nerda opens again as the new version and shows what's new in it.
+
 ### Fixed
 
 - Renaming a tab or bookmark ends with a click anywhere: another tab, the sidebar's empty space or a button, where before only a click on the page did. The new name is kept, and a click on the address bar leaves the keyboard there instead of taking it back to the page.

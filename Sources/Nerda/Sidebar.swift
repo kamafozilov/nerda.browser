@@ -2,7 +2,8 @@ import SwiftUI
 
 /// The column down the left, on glass: pinned sites as tiles at the top, the
 /// bookmarks under them, then the tabs, newest first, under the button that
-/// opens another, and along the bottom, the app's menu, AI chats and downloads. Pinned
+/// opens another, and along the bottom, a newer Nerda when there is one
+/// (UpdateCard), the app's menu, AI chats and downloads. Pinned
 /// beside the page, or, while collapsed, brought out over it from the window's
 /// edge. Tabs and tiles are dragged into another order; a tab dragged onto the
 /// tiles is pinned, a tile dragged down among the tabs unpinned. Either
@@ -205,6 +206,13 @@ struct Sidebar: View {
                         }
                     }
                 }
+            }
+
+            if let release = Updater.shared.found {
+                UpdateCard(release: release, incognito: browser.isPrivate)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 6)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
             HStack {
