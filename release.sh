@@ -8,6 +8,9 @@
 #
 #   ./release.sh          the next patch after the latest tag: 0.0.1, 0.0.2, …
 #   ./release.sh 1.0.0    a version of your choosing
+#   NERDA_NOTARIZE=0 ./release.sh   signed but not notarized: Gatekeeper asks
+#                         for System Settings › Privacy & Security › Open
+#                         Anyway on the first install; updates are unaffected
 #
 # docs/releasing.md has the whole process.
 set -euo pipefail
@@ -23,6 +26,7 @@ TEAM="${NERDA_TEAM:-}"
 # Notarization credentials, kept in the keychain by
 #   xcrun notarytool store-credentials nerda --apple-id <email> --team-id <team>
 PROFILE="${NERDA_NOTARY_PROFILE:-nerda}"
+NOTARIZE="${NERDA_NOTARIZE:-1}"
 fail() { echo "release: $*" >&2; exit 1; }
 [ -n "$TEAM" ] || fail "NERDA_TEAM isn't set: put NERDA_TEAM=<team id> in release.env"
 
@@ -49,7 +53,7 @@ git fetch --quiet --tags origin
 ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || fail "$TAG exists already"
 IDENTITY="$(security find-identity -v -p codesigning | grep -o "\"Developer ID Application: [^\"]*($TEAM)\"" | head -1 | tr -d '"' || true)"
 [ -n "$IDENTITY" ] || fail "no Developer ID Application certificate for team $TEAM in the keychain"
-xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1 \
+[ "$NOTARIZE" = 0 ] || xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1 \
   || fail "no notarization credentials: xcrun notarytool store-credentials $PROFILE --apple-id <email> --team-id $TEAM"
 
 # What's new: the [Unreleased] section, up to the next section or the links.
@@ -73,6 +77,7 @@ grep -q "flags=.*runtime" <<< "$SIGNED" || fail "$APP isn't signed with the hard
 # Sends a file to Apple and waits for the verdict; the log says why when it
 # isn't Accepted.
 notarize() {
+  [ "$NOTARIZE" = 0 ] && { echo "not notarized: $1"; return; }
   local result id status
   result="$(xcrun notarytool submit "$1" --keychain-profile "$PROFILE" --wait --output-format json)" || true
   id="$(plutil -extract id raw - <<< "$result" 2>/dev/null || true)"
@@ -91,9 +96,11 @@ rm -f "$ZIP" "$DMG"
 # updater fetches is made again from the stapled app.
 ditto -c -k --keepParent "$APP" "$ZIP"
 notarize "$ZIP"
-xcrun stapler staple -q "$APP"
-rm "$ZIP"
-ditto -c -k --keepParent "$APP" "$ZIP"
+if [ "$NOTARIZE" != 0 ]; then
+  xcrun stapler staple -q "$APP"
+  rm "$ZIP"
+  ditto -c -k --keepParent "$APP" "$ZIP"
+fi
 # The disk image: the stapled app beside a shortcut to Applications, to drag
 # it onto; signed, notarized and stapled itself.
 STAGE="$(mktemp -d)"
@@ -103,11 +110,13 @@ hdiutil create -volname "Nerda $VERSION" -srcfolder "$STAGE" -ov -format UDZO -q
 rm -rf "$STAGE"
 codesign --timestamp --sign "$IDENTITY" "$DMG"
 notarize "$DMG"
-xcrun stapler staple -q "$DMG"
-# What a Mac that downloaded them checks: both tickets, and Gatekeeper's verdict.
-xcrun stapler validate -q "$APP" && xcrun stapler validate -q "$DMG" || fail "a ticket isn't stapled"
-spctl --assess --type execute "$APP" || fail "Gatekeeper refuses $APP"
-spctl --assess --type open --context context:primary-signature "$DMG" || fail "Gatekeeper refuses $DMG"
+if [ "$NOTARIZE" != 0 ]; then
+  xcrun stapler staple -q "$DMG"
+  # What a Mac that downloaded them checks: both tickets, and Gatekeeper's verdict.
+  xcrun stapler validate -q "$APP" && xcrun stapler validate -q "$DMG" || fail "a ticket isn't stapled"
+  spctl --assess --type execute "$APP" || fail "Gatekeeper refuses $APP"
+  spctl --assess --type open --context context:primary-signature "$DMG" || fail "Gatekeeper refuses $DMG"
+fi
 printf '%s\n' "$NOTES" > build/notes.md
 
 # The section gets its version and date under a new, empty [Unreleased], and

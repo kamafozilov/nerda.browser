@@ -64,6 +64,8 @@ Every release is signed by that one team. An installed Nerda only takes an updat
 
 If the release step fails after the push, the script prints the `gh release create` command that finishes it.
 
+`NERDA_NOTARIZE=0 ./release.sh` publishes a release signed with Developer ID but not notarized, for while Apple's notary service leaves submissions In Progress. Updates install as usual (the updater checks the signature, not the ticket), but a first install from the disk image is refused until System Settings › Privacy & Security › Open Anyway.
+
 ## Installing the first time
 
 Download `Nerda.dmg` from the [latest release](https://github.com/kamafozilov/nerda.browser/releases/latest), open it and drag Nerda onto Applications. From then on, Nerda updates itself.
