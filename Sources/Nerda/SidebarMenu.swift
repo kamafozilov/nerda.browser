@@ -222,16 +222,19 @@ struct TabMenu: View {
 
     var body: some View {
         if let tab = browser.tabs.first(where: { $0.id == id }) {
-            let rest = browser.tabs.filter { !$0.isPinned }
+            let rest = browser.tabs.filter(Browser.listed)
             let others = rest.filter { $0.id != id }
             let after = tab.isPinned ? [] : Array(rest.drop { $0.id != id }.dropFirst())
             Button("New Tab", action: browser.newTab)
             Divider()
             if tab.hasPage {
                 Button("Reload") { tab.reload() }
-                // Incognito keeps nothing pinned.
-                if !browser.isPrivate {
+                // Incognito keeps nothing pinned, nor bookmarks.
+                if !browser.isPrivate, let bookmark = tab.bookmark {
+                    Button("Remove Bookmark") { withAnimation(.slide) { browser.removeBookmark(bookmark) } }
+                } else if !browser.isPrivate {
                     Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { withAnimation(.slide) { browser.setPinned(!tab.isPinned, id) } }
+                    AddToBookmarks(browser: browser, id: id)
                 }
                 Divider()
             }
@@ -251,6 +254,32 @@ struct TabMenu: View {
     private func close(_ tabs: [Tab]) {
         if tabs.contains(where: { $0.id == browser.selectedID }) { browser.select(id) }
         withAnimation(.slide) { tabs.forEach { browser.close($0.id) } }
+    }
+}
+
+/// Add to Bookmarks: at the end of them, or, once there are folders, in the
+/// one picked, each folder under the one it is in.
+private struct AddToBookmarks: View {
+    let browser: Browser
+    let id: Tab.ID
+
+    var body: some View {
+        let folders = browser.bookmarks.folders
+        if folders.isEmpty {
+            Button("Add to Bookmarks") { add(to: nil) }
+        } else {
+            Menu("Add to Bookmarks") {
+                Button("Bookmarks") { add(to: nil) }
+                Divider()
+                ForEach(folders) { folder in
+                    Button(String(repeating: "    ", count: folder.depth) + folder.item.title) { add(to: folder.id) }
+                }
+            }
+        }
+    }
+
+    private func add(to folder: Bookmarks.Item.ID?) {
+        withAnimation(.slide) { browser.bookmark(id, in: folder) }
     }
 }
 

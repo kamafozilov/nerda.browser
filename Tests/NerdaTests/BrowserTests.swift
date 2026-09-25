@@ -1610,3 +1610,84 @@ private final class BlockerNavigation: NSObject, WKNavigationDelegate {
     #expect(decoded.allSatisfy { part in part.count { ($0["action"] as? [String: String])?["type"] == "ignore-previous-rules" } == exceptions })
     #expect(decoded.reduce(0) { $0 + $1.count { ($0["action"] as? [String: String])?["type"] == "block" } } == 5)
 }
+
+/// Bookmarks go into folders and out again, and are put where a drop aims,
+/// counted as they were before the move; a folder never into itself.
+@MainActor
+@Test func bookmarksMoveBetweenFoldersButNeverIntoThemselves() {
+    let bookmarks = Bookmarks()
+    let a = Bookmarks.Item(title: "a", url: somewhere), b = Bookmarks.Item(title: "b", url: somewhere)
+    let outer = Bookmarks.Item(title: "outer", children: []), inner = Bookmarks.Item(title: "inner", children: [])
+    [a, b, outer].forEach { bookmarks.add($0) }
+    bookmarks.add(inner, to: outer.id)
+
+    bookmarks.move(a.id, to: nil, at: 2)  // below b: aimed before it moves
+    #expect(bookmarks.items.map(\.title) == ["b", "a", "outer"])
+    bookmarks.move(a.id, to: inner.id, at: .max)
+    #expect(bookmarks.item(inner.id)?.children?.map(\.id) == [a.id])
+    bookmarks.move(outer.id, to: inner.id, at: 0)  // into what is inside it
+    #expect(bookmarks.items.map(\.title) == ["b", "outer"])
+
+    // Only open folders show what is in them, each one deeper.
+    #expect(bookmarks.rows.map(\.item.title) == ["b", "outer"])
+    bookmarks.toggle(outer.id)
+    bookmarks.toggle(inner.id)
+    #expect(bookmarks.rows.map(\.depth) == [0, 0, 1, 2])
+
+    #expect(bookmarks.remove(outer.id)?.children?.first?.children?.first?.id == a.id)
+    #expect(bookmarks.item(a.id) == nil)
+}
+
+/// A bookmark opens in a tab of its own, kept out of the list; closed, it
+/// stays, and opens again at its address. Taken out of the bookmarks, its
+/// tab goes on in the list.
+@MainActor
+@Test func aBookmarkIsATabThatStays() throws {
+    let browser = Browser()
+    browser.bookmarks = Bookmarks()
+    browser.open(somewhere)
+    let tab = try #require(browser.selected)
+    browser.bookmark(tab.id)
+    let id = try #require(tab.bookmark)
+    #expect(browser.bookmarks.item(id)?.url?.host() == "example.com")
+    #expect(!browser.tabs.contains(where: Browser.listed))
+
+    browser.close(tab.id)
+    #expect(browser.bookmarks.item(id) != nil)
+    browser.open(bookmark: id)
+    let again = try #require(browser.selected)
+    #expect(again.bookmark == id && again.site?.host() == "example.com")
+    browser.open(bookmark: id)  // already open: that one, not another
+    #expect(browser.tabs.filter { $0.bookmark == id }.count == 1)
+
+    browser.toggleBookmark()  // ⌘D on it
+    #expect(browser.bookmarks.items.isEmpty)
+    #expect(again.bookmark == nil && Browser.listed(again))
+}
+
+/// Chrome, Safari and Firefox export bookmarks as the same old HTML: its
+/// folders come in as folders, and what is escaped in it as it was.
+@Test func bookmarksComeInFromAnExportedFile() {
+    let html = """
+        <!DOCTYPE NETSCAPE-Bookmark-file-1>
+        <TITLE>Bookmarks</TITLE>
+        <H1>Bookmarks</H1>
+        <DL><p>
+            <DT><H3 ADD_DATE="1" PERSONAL_TOOLBAR_FOLDER="true">Bookmarks bar</H3>
+            <DL><p>
+                <DT><A HREF="https://example.com/?a=1&amp;b=2" ADD_DATE="1">Tom &amp; Jerry</A>
+                <DT><H3>Empty</H3>
+                <DL><p>
+                </DL><p>
+            </DL><p>
+            <DT><A HREF="https://swift.org/">Swift</A>
+            <DT><A HREF="javascript:alert(1)">Not a page</A>
+        </DL><p>
+        """
+    let items = Bookmarks.parse(html: html)
+    #expect(items.map(\.title) == ["Bookmarks bar", "Swift"])
+    #expect(items[0].children?.map(\.title) == ["Tom & Jerry", "Empty"])
+    #expect(items[0].children?[0].url == URL(string: "https://example.com/?a=1&b=2"))
+    #expect(items[0].children?[1].children == [])
+    #expect(Bookmarks.pages(in: items) == 2)
+}

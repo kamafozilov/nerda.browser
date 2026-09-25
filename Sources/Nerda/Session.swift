@@ -22,6 +22,8 @@ struct Session: Codable {
         var history: Bool? = nil
         /// The name the tab was given in place of its page's title.
         var name: String? = nil
+        /// The bookmark it is the tab of.
+        var bookmark: UUID? = nil
     }
 
     var tabs: [Tab]
@@ -47,6 +49,8 @@ extension Browser {
         }
         for saved in session.tabs.reversed() { add(Tab(restoring: saved), inBackground: true, last: false) }
         guard !tabs.isEmpty else { return }
+        // A bookmark taken away since (in another window, before a crash): its tab joins the list.
+        for tab in tabs where tab.bookmark.map({ bookmarks.item($0) == nil }) == true { tab.bookmark = nil }
         // Pinned sites are there at once, as they always are.
         for tab in tabs where tab.isPinned { _ = tab.webView }
         if let index = session.selected, tabs.indices.contains(index) { selectedID = tabs[index].id } else { add(Tab()) }

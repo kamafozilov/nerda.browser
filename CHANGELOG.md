@@ -9,6 +9,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Added
 
+- Bookmarks, under the pinned sites in the sidebar: drag a tab there, or press ⌘D, to keep it. As in Arc, a bookmark opens in its own place and stays when you close it, ready to open again at the page you kept. A thin line parts them from the tabs, as in Arc and Zen: drag a tab above it to keep it. Put them in folders, and folders in folders (right-click › New Folder), drag them into another order, or down below the line to make one a tab again. They are in the Bookmarks menu too, and File › Import Bookmarks… brings them in from the file Chrome, Safari, Firefox or Arc exports.
 - Auto Picture-in-Picture can float the video when you switch to another app too: tick Also when switching to another app under it in Settings › General. Back in Nerda, the video goes back into its page.
 - Type the path of a file on your Mac in the address bar (`/Users/you/Movies/clip.mp4` or `~/Movies/clip.mp4`) to open it, as in Chrome.
 

@@ -704,7 +704,7 @@ extension Browser {
         }
     }
 
-    private static func tell(_ title: String, _ message: String) {
+    static func tell(_ title: String, _ message: String) {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message

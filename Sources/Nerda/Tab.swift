@@ -28,6 +28,9 @@ final class Tab: Identifiable {
     var isPinned = false
     /// Where a pinned tab was when pinned; double-clicking its tile goes back there.
     var home: URL?
+    /// The bookmark it is the tab of (`Browser.open(bookmark:)`): shown in
+    /// the bookmark's place in the sidebar, not in the list.
+    var bookmark: Bookmarks.Item.ID?
     /// A name of your own for the tab (double-click it in the sidebar), kept
     /// in place of the page's title wherever the tab goes.
     var name: String?
@@ -117,6 +120,7 @@ final class Tab: Identifiable {
         settings = saved.settings
         showsHistory = saved.history == true
         name = saved.name
+        bookmark = saved.bookmark
     }
 
     /// What it takes to open the tab again at the next launch: the settings, or
@@ -139,7 +143,7 @@ final class Tab: Identifiable {
         }
         return Session.Tab(url: site, title: failure == nil ? pageTitle : "", state: state as? Data,
                            zoom: page?.pageZoom ?? slept?.zoom ?? 1, pinned: isPinned ? true : nil, home: home,
-                           name: name)
+                           name: name, bookmark: bookmark)
     }
 
     convenience init(url: URL) {
