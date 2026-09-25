@@ -148,7 +148,6 @@ struct Sidebar: View {
                                 // A new tab, or the settings, keeps the name it has.
                                 rename: tab.hasPage ? { name in
                                     if let name { browser.rename(id, to: name) }
-                                    browser.focusPage()
                                 } : nil,
                                 press: { browser.select(id) }
                             ) {
@@ -473,7 +472,6 @@ struct Sidebar: View {
             rename: { name in
                 renaming = nil
                 if let name { browser.bookmarks.rename(id, to: name) }
-                browser.focusPage()
             },
             renameNow: renaming == id,
             doubleClickRenames: !item.isFolder,
@@ -903,14 +901,15 @@ private struct SidebarRow: View {
 }
 
 /// A tab's title made editable where it is, all of it selected, so typing
-/// replaces it. Return or a click elsewhere keeps what is typed; Esc keeps
-/// the title as it was.
+/// replaces it. Return or a click anywhere else keeps what is typed; Esc
+/// keeps the title as it was.
 struct RenameField: View {
     let title: String
     let done: (String?) -> Void
 
     @State private var text = ""
     @State private var finished = false
+    @State private var clicks: Any?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -919,24 +918,43 @@ struct RenameField: View {
             .font(.system(size: 14))
             .foregroundStyle(Palette.ink)
             .focused($focused)
-            .onSubmit { finish(text) }
+            .onSubmit { finish(text, focusPage: true) }
             .onKeyPress(.escape) {
-                finish(nil)
+                finish(nil, focusPage: true)
                 return .handled
             }
+            // The keyboard taken by another field (⌘L, ⌘F) stays with it.
             .onChange(of: focused) { if !focused { finish(text) } }
             .onAppear {
                 text = title
                 // A turn later, once the field is in the window (see CommandBar).
                 DispatchQueue.main.async { focused = true }
+                clicks = watchClicksAway()
             }
+            .onDisappear { clicks.map(NSEvent.removeMonitor) }
+    }
+
+    /// A click anywhere but in the field keeps what is typed, before it goes
+    /// on to do what it was for: most of the window (the sidebar, its rows)
+    /// never takes the keyboard, so the field would stay open. The keyboard
+    /// goes back to the page, unless the click lands in a field of its own.
+    private func watchClicksAway() -> Any? {
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { event in
+            // While typed in, the field's editor is its window's first responder.
+            let editor = event.window?.firstResponder as? NSTextView
+            let inField = event.window === NSApp.keyWindow && editor?.isFieldEditor == true
+                && editor!.visibleRect.contains(editor!.convert(event.locationInWindow, from: nil))
+            if !inField { finish(text, focusPage: true) }
+            return event
+        }
     }
 
     /// Once: Return also takes the focus away, which would finish it again.
-    private func finish(_ name: String?) {
+    private func finish(_ name: String?, focusPage: Bool = false) {
         guard !finished else { return }
         finished = true
         done(name)
+        if focusPage { (NSApp.keyWindow as? BrowserWindow)?.browser.focusPage() }
     }
 }
 
