@@ -76,11 +76,11 @@ The first release build asks once for the login keychain password when it reache
 
 ## How an update is installed
 
-`Sources/Nerda/Updater.swift` reads `release.json` from the latest release (`https://github.com/kamafozilov/nerda.browser/releases/latest/download/release.json`), which `release.sh` writes in the shape of GitHub's API: tag, notes, page, and `Nerda.zip` with its SHA-256. Not the API itself, which answers only 60 requests an hour to an address without a GitHub account, and a provider's shared address runs out of them. When its tag is newer than the running version, Nerda shows the release notes. "Install and Relaunch" then:
+`Sources/Nerda/Updater.swift` reads `release.json` from the latest release (`https://github.com/kamafozilov/nerda.browser/releases/latest/download/release.json`), which `release.sh` writes in the shape of GitHub's API: tag, notes, page, and `Nerda.zip` with its SHA-256. Not the API itself, which answers only 60 requests an hour to an address without a GitHub account, and a provider's shared address runs out of them. When its tag is newer than the running version, a card at the bottom of the sidebar shows it (in Settings › About Nerda too). A click on it then:
 
 1. downloads `Nerda.zip` and checks it against the SHA-256 that GitHub lists (a release without one isn't taken);
 2. checks that the new app has the same bundle id, a newer version, and a valid signature, everything inside it included, from a Developer ID Application certificate Apple gave the same team;
-3. moves the old app to `Nerda.app.old`, moves the new one into place, and reopens Nerda, which restores its tabs.
+3. moves the old app to `Nerda.app.old`, moves the new one into place, and reopens Nerda, which restores its tabs and shows the release notes once, as What's New.
 
 Only the app bundle is replaced; the data folder, settings and keychain stay as they are. If Nerda can't replace itself (for example when it runs from the disk image instead of Applications), it says why and opens the release page.
 

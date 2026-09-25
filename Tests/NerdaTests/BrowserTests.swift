@@ -19,6 +19,16 @@ private let somewhere = URL(string: "https://example.com")!
     #expect(!Version.isNewer("0.0.1", than: "0.0.2"))
 }
 
+/// What's New shows a release's notes by heading, a wrapped line kept with its item.
+@Test func whatsNewReadsTheNotesByHeading() {
+    let notes = "### Added\n\n- AI chats, `one` click away.\n- Bookmarks,\n  in folders.\n\n### Fixed\n\n- Renaming ends with a click."
+    #expect(WhatsNew.sections(notes) == [
+        .init(title: "Added", items: ["AI chats, `one` click away.", "Bookmarks, in folders."]),
+        .init(title: "Fixed", items: ["Renaming ends with a click."]),
+    ])
+    #expect(WhatsNew.sections("Just a line.") == [.init(title: nil, items: ["Just a line."])])
+}
+
 /// An update is taken only with a Developer ID signature from Nerda's team:
 /// an app Apple signed itself, or anyone else did, doesn't meet it. Only a
 /// feed on this Mac is read over plain http.

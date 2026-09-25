@@ -178,6 +178,12 @@ struct BrowserView: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
         }
+        .overlay {
+            if let notes = Updater.shared.news {
+                WhatsNew(notes: notes) { withAnimation(.easeOut(duration: 0.2)) { Updater.shared.news = nil } }
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+        }
         // What is under the lock (tab titles) is hidden from accessibility too.
         .accessibilityHidden(browser.locked)
         .overlay {

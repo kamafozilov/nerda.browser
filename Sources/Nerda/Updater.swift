@@ -6,9 +6,10 @@ import SwiftUI
 // Keeping the released Nerda up to date, from the repository's GitHub
 // Releases: release.sh publishes each version there with Nerda.dmg for
 // people and Nerda.zip for this. A little after launch and every few hours
-// the latest release is read; if it is newer, Nerda says so with what's new,
-// and on "Install and Relaunch" fetches the ZIP, checks it, puts it where
-// this bundle is, and opens again as the new one, tabs and all.
+// the latest release is read; if it is newer, a card at the foot of the
+// sidebar says so (UpdateCard), and a click on it fetches the ZIP, showing
+// how far along it is, checks it, puts it where this bundle is, and opens
+// again as the new one, tabs and all, with what's new over it (WhatsNew).
 //
 // Only the bundle changes hands. The data folder (Edition.folder), the
 // defaults and the keychain are left alone; the new build keeps the bundle id
@@ -61,7 +62,7 @@ final class Updater {
         url.scheme == "https" || url.scheme == "http" && Browser.isThisMac(url.host() ?? "")
     }
 
-    nonisolated struct Release: Sendable {
+    nonisolated struct Release: Sendable, Equatable {
         let version: String
         /// The release's text on GitHub: its part of CHANGELOG.md.
         let notes: String
@@ -73,9 +74,14 @@ final class Updater {
     }
 
     enum State: Equatable {
-        case idle, checking, upToDate, available(String), installing, failed(String)
+        case idle, checking, upToDate, available(String), downloading(Double), installing, failed(String)
 
-        var isBusy: Bool { self == .checking || self == .installing }
+        var isBusy: Bool {
+            switch self {
+            case .checking, .downloading, .installing: true
+            default: false
+            }
+        }
 
         var detail: String {
             switch self {
@@ -83,6 +89,7 @@ final class Updater {
             case .checking: "Checking for updates…"
             case .upToDate: "Nerda is up to date."
             case .available(let version): "Version \(version) is available."
+            case .downloading: "Downloading update…"
             case .installing: "Installing update. Nerda will relaunch…"
             case .failed(let message): message
             }
@@ -92,10 +99,15 @@ final class Updater {
     var canCheck: Bool { Edition.updates && !state.isBusy }
     /// Quitting to come back as the new one: no asking first.
     private(set) var relaunching = false
-    /// The version last put in front of the user: not offered again unasked
-    /// until the next launch, whatever the answer was.
-    private var offered: String?
+    /// A newer release than this one, offered at the foot of the sidebar
+    /// until it is installed.
+    private(set) var found: Release?
+    /// What the version just installed brought, shown once as it first opens.
+    var news = Updater.unreadNews()
     private var clock: Timer?
+
+    /// Set by the version installing the update, read by the one it installs.
+    private static let newsKey = "updater.news"
 
     nonisolated static var current: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
@@ -127,8 +139,8 @@ final class Updater {
                 return
             }
             if Version.isNewer(found.version, than: Self.current) {
+                withAnimation(.spring(duration: 0.5, bounce: 0.3)) { self.found = found }
                 state = .available(found.version)
-                if asked || offered != found.version { offer(found) }
             } else {
                 state = .upToDate
                 if asked { tell("You're up to date", "Nerda \(Self.current) is the newest version.") }
@@ -136,32 +148,21 @@ final class Updater {
         }
     }
 
-    private func offer(_ release: Release) {
-        let alert = NSAlert()
-        alert.messageText = "Nerda \(release.version) is available"
-        alert.informativeText = "You have \(Self.current). Nerda opens again as the new one, with your tabs."
-        if !release.notes.isEmpty {
-            let notes = NSHostingView(rootView: Notes(text: release.notes))
-            notes.frame = NSRect(x: 0, y: 0, width: 400, height: 220)
-            alert.accessoryView = notes
-        }
-        alert.addButton(withTitle: "Install and Relaunch")
-        alert.addButton(withTitle: "Later")
-        offered = release.version
-        NSApp.requestUserAttention(.informationalRequest)
-        present(alert) { [self] answer in
-            if answer == .alertFirstButtonReturn { install(release) }
-        }
-    }
-
-    private func install(_ release: Release) {
-        state = .installing
+    /// From the card: fetches the release found, then relaunches as it.
+    func install() {
+        guard let release = found, !state.isBusy else { return }
+        state = .downloading(0)
         Task {
             do {
-                try await Task.detached(priority: .userInitiated) { try await Swap.install(release) }.value
+                try await Task.detached(priority: .userInitiated) {
+                    try await Swap.install(release) { fraction in
+                        DispatchQueue.main.async { MainActor.assumeIsolated { Updater.shared.advance(fraction) } }
+                    }
+                }.value
+                UserDefaults.standard.set(["version": release.version, "notes": release.notes], forKey: Self.newsKey)
                 relaunch()
             } catch {
-                state = .failed("Couldn't install the update. Try again.")
+                state = .available(release.version)
                 let alert = NSAlert()
                 alert.messageText = "Couldn't install Nerda \(release.version)"
                 alert.informativeText = ((error as? Swap.Refused)?.reason ?? "The download didn't finish.")
@@ -173,6 +174,20 @@ final class Updater {
                 }
             }
         }
+    }
+
+    /// The download's progress; once it is all in, the checking and moving.
+    private func advance(_ fraction: Double) {
+        guard case .downloading = state else { return }
+        state = fraction < 1 ? .downloading(fraction) : .installing
+    }
+
+    /// The notes the update saved, if this is the version it installed; read once.
+    private static func unreadNews() -> String? {
+        guard let saved = UserDefaults.standard.dictionary(forKey: newsKey) as? [String: String] else { return nil }
+        UserDefaults.standard.removeObject(forKey: newsKey)
+        guard saved["version"] == current, let notes = saved["notes"], !notes.isEmpty else { return nil }
+        return notes
     }
 
     /// Quits, and a shell opens the bundle again once this process is gone
@@ -266,34 +281,6 @@ nonisolated enum Version {
     }
 }
 
-/// What's new, from the release's Markdown: its ### headings in bold, its
-/// items as bullets.
-private struct Notes: View {
-    let text: String
-
-    var body: some View {
-        ScrollView {
-            Text(styled)
-                .font(.system(size: 12))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
-        }
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
-    }
-
-    private var styled: AttributedString {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
-            if line.hasPrefix("#") { return "**\(line.drop(while: { $0 == "#" || $0 == " " }))**" }
-            if line.hasPrefix("- ") { return "•  " + line.dropFirst(2) }
-            return String(line)
-        }
-        let markdown = lines.joined(separator: "\n")
-        return (try? AttributedString(markdown: markdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(markdown)
-    }
-}
-
 /// The part that touches the disk, off the main thread. Every step checks
 /// before anything changes, and the only things ever removed are the scratch
 /// folder it made and the `.old` bundle it set aside.
@@ -321,7 +308,8 @@ nonisolated private enum Swap {
         target.deletingLastPathComponent().appendingPathComponent(target.lastPathComponent + ".old")
     }
 
-    static func install(_ release: Updater.Release) async throws {
+    /// `progress`: how much of the ZIP is in, 0 to 1, in whole percents.
+    static func install(_ release: Updater.Release, progress: @escaping @Sendable (Double) -> Void) async throws {
         let files = FileManager.default
         // No team: an ad-hoc build, which can't tell who made a download.
         guard let team = teamID(of: target) else { throw Refused.unsigned }
@@ -334,8 +322,9 @@ nonisolated private enum Swap {
         let zip = scratch.appending(path: "Nerda.zip")
         var request = URLRequest(url: release.archive, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)
         request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
-        let (got, response) = try await URLSession.shared.download(for: request)
+        let (got, response) = try await URLSession.shared.download(for: request, delegate: Watcher(report: progress))
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw Refused.download }
+        progress(1)
         try files.moveItem(at: got, to: zip)
         // GitHub gives every asset's; one without is not taken.
         guard let expected = release.sha256, try digest(of: zip) == expected.lowercased() else { throw Refused.hash }
@@ -347,6 +336,25 @@ nonisolated private enum Swap {
         else { throw Refused.archive }
         try verify(fresh, team: team)
         try swap(fresh)
+    }
+
+    /// Passes on the download's progress each time it reaches another percent.
+    nonisolated private final class Watcher: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        let report: @Sendable (Double) -> Void
+        private var watching: NSKeyValueObservation?
+        private var percent = 0
+
+        init(report: @escaping @Sendable (Double) -> Void) { self.report = report }
+
+        func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {
+            watching = task.progress.observe(\.fractionCompleted) { [self] progress, _ in
+                let fraction = progress.fractionCompleted
+                // All in is said once the download is over, not while it is saved.
+                guard Int(fraction * 100) != percent, fraction < 1 else { return }
+                percent = Int(fraction * 100)
+                report(fraction)
+            }
+        }
     }
 
     private static func digest(of file: URL) throws -> String {
