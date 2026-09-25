@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- AI chats, one click away: the sparkles button beside Downloads at the bottom of the sidebar shows ChatGPT, Claude, Gemini, Grok, Perplexity and DeepSeek. Pick one to go to its tab, or open it in a new one. Add your own with +, or right-click one to remove it.
+
 ### Fixed
 
 - Renaming a tab or bookmark ends with a click anywhere: another tab, the sidebar's empty space or a button, where before only a click on the page did. The new name is kept, and a click on the address bar leaves the keyboard there instead of taking it back to the page.

@@ -10,7 +10,8 @@
 #
 #   ./vm.sh up            start it; made the first time from Cirrus Labs'
 #                         macOS 27 image (a 29 GB download)
-#   ./vm.sh open          build Nerda Dev, put it in the VM and open it there
+#   ./vm.sh open          build Nerda Dev, put it in the VM and open it there,
+#                         without the tabs the last test left open
 #   ./vm.sh put FILE...   copy files into the VM's home folder
 #   ./vm.sh ssh [CMD]     a shell, or a command, in the VM (user admin, sudo
 #                         without a password)
@@ -187,7 +188,8 @@ case "${1:-}" in
     ./build.sh debug >"$RUN/build.log" 2>&1 || { grep -E "error" "$RUN/build.log" || tail -20 "$RUN/build.log"; exit 1; }
     claim
     up >/dev/null
-    vm 'pkill -x "Nerda Dev"; while pgrep -x "Nerda Dev" >/dev/null; do sleep 0.1; done; rm -rf "Applications/Nerda Dev.app"; mkdir -p Applications'
+    # Without the last test's tabs: kept, every test's tabs piled up there.
+    vm 'pkill -x "Nerda Dev"; while pgrep -x "Nerda Dev" >/dev/null; do sleep 0.1; done; rm -rf "Applications/Nerda Dev.app" "Library/Application Support/Nerda Dev/session.json"; mkdir -p Applications'
     tar -C build -cf - "Nerda Dev.app" | vm 'tar -C Applications -xf - && open "Applications/Nerda Dev.app"'
     printf '%s\n' "$ME" >"$RUN/app"
     ;;

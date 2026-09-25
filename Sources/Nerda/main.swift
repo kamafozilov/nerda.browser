@@ -28,6 +28,7 @@ struct BrowserView: View {
     @State private var peeking = false
     @State private var overPeek = false
     @State private var downloadsShown = false
+    @State private var aiChatsShown = false
     @State private var menuShown = false
     /// The page is laid out beside the sidebar (see `laidOut`).
     @State private var docked = true
@@ -97,7 +98,7 @@ struct BrowserView: View {
                 // added and taken away, so it comes back as it was left (scrolled
                 // where it was) without being built again.
                 Sidebar(browser: browser, pinned: browser.sidebarOpen, downloadsShown: $downloadsShown,
-                        menuShown: $menuShown, width: $sidebarWidth)
+                        aiChatsShown: $aiChatsShown, menuShown: $menuShown, width: $sidebarWidth)
                     .onHover { overPeek = $0 }
                     // Far enough that its shadow goes too.
                     .offset(x: sidebarShown ? 0 : -(sidebarWidth + 32))
@@ -233,9 +234,9 @@ struct BrowserView: View {
         }
         // Leaving it puts it away, as quickly as it came: the moment waited is
         // only for the pointer to be seen over it once it has slid out. The
-        // downloads list or the menu open from it holds it out.
-        .task(id: peeking && !overPeek && !downloadsShown && !menuShown) {
-            guard peeking, !overPeek, !downloadsShown, !menuShown else { return }
+        // downloads list, the AI chats or the menu open from it holds it out.
+        .task(id: peeking && !overPeek && !downloadsShown && !aiChatsShown && !menuShown) {
+            guard peeking, !overPeek, !downloadsShown, !aiChatsShown, !menuShown else { return }
             try? await Task.sleep(for: .milliseconds(80))
             if !Task.isCancelled { withAnimation(.slide) { peeking = false } }
         }
