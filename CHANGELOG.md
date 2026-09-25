@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-09-25
+
 ### Added
 
 - Developer tools: Inspect Element when you right-click a page, and a Developer submenu in the sidebar's menu and in View, with Developer Tools (⌥⌘I), JavaScript Console (⌥⌘J) and Inspect Element (⌥⌘C), as in Chrome.
@@ -114,7 +116,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.5...HEAD
+[0.0.5]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.1...v0.0.2
