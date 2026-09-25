@@ -41,7 +41,7 @@ struct TabStrip: View {
     @State private var layout = Layout()
     /// The tab the pointer is on, and the one whose card shows (`TabPeek`).
     @State private var hovered: Tab.ID?
-    @State private var peeked: Tab.ID?
+    @State private var peeked: Peek?
     @Environment(\.colorScheme) private var scheme
 
     /// A tab or pinned site being dragged.
@@ -115,17 +115,18 @@ struct TabStrip: View {
         }
         // The card of the tab the pointer rests on, just under it, over the page.
         .overlay(alignment: .topLeading) {
-            if dragged == nil, let peeked, let index = items.firstIndex(of: peeked), let tab = browser.tabs.first(where: { $0.id == peeked }) {
+            if dragged == nil, let peeked, let index = items.firstIndex(of: peeked.id), let tab = browser.tabs.first(where: { $0.id == peeked.id }) {
                 PeekPlacement(at: CGPoint(x: layout.tabs.minX + CGFloat(index) * tabWidth, y: Self.height + 2),
                               clamping: .horizontal) {
-                    TabPeek(tab: tab, selected: peeked == browser.selectedID)
+                    TabPeek(tab: tab, look: peeked.look)
                 }
                 .allowsHitTesting(false)
                 .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.12), value: peeked)
-        .peeking(hovered, $peeked)
+        // In and out, faded; from one tab's card to the next, at once.
+        .animation(.easeOut(duration: 0.12), value: peeked == nil)
+        .peeking(browser.tabs.first { $0.id == hovered }, $peeked, selected: browser.selectedID)
     }
 
     /// What is being dragged, while it is still open.

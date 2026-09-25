@@ -50,12 +50,15 @@ vtool -set-build-version macos 15.4 "$(xcrun --show-sdk-version)" -replace \
 
 # The icon, drawn in assets/AppIcon.svg, rendered with what macOS ships:
 # sips draws the SVG at each size (keeping it transparent, which Quick Look
-# doesn't), iconutil packs the sizes.
+# doesn't), iconutil packs the sizes. Development builds wear
+# AppIconDev.svg, so Nerda Dev isn't taken for Nerda in the Dock.
+ICON=assets/AppIconDev.svg
+[ "$CONFIG" = release ] && ICON=assets/AppIcon.svg
 ICONSET="$(mktemp -d)/AppIcon.iconset"
 mkdir -p "$ICONSET" "$APP/Contents/Resources"
 for size in 16 32 128 256 512; do
-  sips -s format png -z $size $size assets/AppIcon.svg --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
-  sips -s format png -z $((size * 2)) $((size * 2)) assets/AppIcon.svg --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+  sips -s format png -z $size $size "$ICON" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+  sips -s format png -z $((size * 2)) $((size * 2)) "$ICON" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 

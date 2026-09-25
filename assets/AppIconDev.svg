@@ -1,4 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Nerda Dev's icon: AppIcon.svg with a DEV band across
+       its foot, so it isn't taken for Nerda. -->
   <!-- No SVG filters: sips, which renders this in build.sh, ignores them.
        Shadows are stacked translucent copies instead. -->
   <defs>
@@ -27,6 +29,7 @@
   <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
   <g clip-path="url(#tile)">
     <rect x="100" y="100" width="824" height="824" fill="url(#glow)"/>
+
     <!-- The bars' shadow -->
     <g fill="#0A1850">
       <rect x="306" y="312" width="148" height="436" rx="74" opacity="0.06"/>
@@ -43,4 +46,8 @@
   <line x1="380" y1="370" x2="644" y2="670" stroke="#0A1850" stroke-width="134" stroke-linecap="round" opacity="0.1"/>
   <line x1="380" y1="366" x2="644" y2="666" stroke="#0A1850" stroke-width="126" stroke-linecap="round" opacity="0.16"/>
   <line x1="380" y1="362" x2="644" y2="662" stroke="url(#fold)" stroke-width="124" stroke-linecap="round"/>
+  <g clip-path="url(#tile)">
+    <rect x="100" y="800" width="824" height="124" fill="#FFC53D"/>
+    <text x="512" y="886" text-anchor="middle" font-family="Helvetica Neue" font-weight="bold" font-size="84" letter-spacing="14" fill="#1B2A8F">DEV</text>
+  </g>
 </svg>
