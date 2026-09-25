@@ -172,6 +172,10 @@ final class Tab: Identifiable {
         // meanwhile, WebKit's own doing.
         // WebKit SPI: should it go, the page is white meanwhile, as it was.
         Self.set(page, "_setDrawsBackground:", false)
+        // Scrolled to its end, the page stays put, as in Chrome: WebKit's
+        // rubber band pulls it on, over a blank ground. No edge bounces.
+        // WebKit SPI (`_WKRectEdge`): should it go, pages bounce again.
+        Self.set(page, "_setRubberBandingEnabled:", UInt(0))
         page.uiDelegate = delegate
         page.navigationDelegate = delegate
         // WebKit reports these on the main thread, where the tab lives.
@@ -565,6 +569,13 @@ final class Tab: Identifiable {
         let selector = NSSelectorFromString(setter)
         guard object.responds(to: selector) else { return }
         typealias Setter = @convention(c) (AnyObject, Selector, Double) -> Void
+        unsafeBitCast(object.method(for: selector), to: Setter.self)(object, selector, value)
+    }
+
+    private static func set(_ object: NSObject, _ setter: String, _ value: UInt) {
+        let selector = NSSelectorFromString(setter)
+        guard object.responds(to: selector) else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, UInt) -> Void
         unsafeBitCast(object.method(for: selector), to: Setter.self)(object, selector, value)
     }
 

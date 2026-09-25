@@ -17,6 +17,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Changed
 
 - ⌘W on a pinned tab now closes its page and gives its memory back, keeping its tile: click the tile to open it again, where you left it. Pinned sites still load on their own when Nerda opens.
+- A page scrolled to its top or bottom now stays put, as in Chrome, where it used to stretch on past its edge over a black ground.
 
 ## [0.0.1] - 2026-09-25
 
