@@ -261,14 +261,40 @@ private let somewhere = URL(string: "https://example.com")!
     window.orderFront(nil)
     defer { window.close() }
     weak var tab: Nerda.Tab?
+    weak var page: WKWebView?
     autoreleasepool {
         browser.open(somewhere)
         tab = browser.tabs[0]
+        page = browser.tabs[0].page
     }
     try await Task.sleep(for: .milliseconds(500))
     autoreleasepool { withAnimation(.slide) { browser.close(browser.tabs[0].id) } }
     try await Task.sleep(for: .seconds(1))
     #expect(tab == nil)
+    // Its page too, and with it the page's process.
+    #expect(page == nil)
+}
+
+/// A tab put to sleep out of sight lets go of its page, and so of its process.
+@MainActor
+@Test func sleepingTabsFreeTheirPage() async throws {
+    let browser = Browser()
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+                          styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = NSHostingView(rootView: BrowserView(browser: browser, window: window))
+    window.orderFront(nil)
+    defer { window.close() }
+    weak var page: WKWebView?
+    autoreleasepool {
+        browser.open(somewhere)
+        page = browser.tabs[0].page
+        browser.open(somewhere)
+    }
+    try await Task.sleep(for: .milliseconds(500))
+    autoreleasepool { browser.tabs.first { $0.page === page }?.sleep() }
+    try await Task.sleep(for: .seconds(1))
+    #expect(page == nil)
 }
 
 /// A closed tab's page goes quiet at once, even while something still holds it.
