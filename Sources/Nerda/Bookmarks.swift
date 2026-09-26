@@ -214,6 +214,20 @@ extension Browser {
     /// A bookmark's tab, while it is open.
     func tab(of bookmark: Bookmarks.Item.ID) -> Tab? { tabs.first { $0.bookmark == bookmark } }
 
+    /// A folder's open tabs, those in folders inside it too.
+    func tabs(in folder: Bookmarks.Item.ID) -> [Tab] {
+        guard let item = bookmarks.item(folder) else { return [] }
+        let ids = Set(Bookmarks.ids(in: item))
+        return tabs.filter { $0.bookmark.map(ids.contains) == true }
+    }
+
+    func hasTabs(in folder: Bookmarks.Item.ID) -> Bool { !tabs(in: folder).isEmpty }
+
+    /// A folder's open tabs closed; the bookmarks stay.
+    func closeTabs(in folder: Bookmarks.Item.ID) {
+        for tab in tabs(in: folder) { close(tab.id) }
+    }
+
     /// A bookmark's tab on screen: the one open, or else a new one, at its address.
     func open(bookmark id: Bookmarks.Item.ID) {
         if let tab = tab(of: id) { return select(tab.id) }

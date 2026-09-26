@@ -7,6 +7,15 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- A folder with open tabs in it shows a minus that closes them all, and Close Tabs in Folder in its menu. The bookmarks stay.
+- A button at the end of the line under the bookmarks makes a new folder, where before it took a right-click.
+
+### Changed
+
+- An open bookmark shows its close button all the time, not only under the pointer, so you can see at a glance which ones are open.
+
 ## [0.0.7] - 2026-09-26
 
 ### Added
