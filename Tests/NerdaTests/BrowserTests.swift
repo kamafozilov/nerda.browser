@@ -1188,19 +1188,19 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     let before = Favicons()
     before.folder = folder.appending(path: "Favicons")
     await before.load(site, icon: icon)
-    #expect(before.images[site] != nil)
+    #expect(before.icon(site).image != nil)
 
     let after = Favicons()
     after.folder = before.folder
     await after.load(site)
-    #expect(after.images[site] != nil)
-    #expect(after.tints[site]?.colors.count == 1)
+    #expect(after.icon(site).image != nil)
+    #expect(after.icon(site).tint?.colors.count == 1)
 
     // At launch, read at once for the tabs coming back, before any frame.
     let launch = Favicons()
     launch.folder = before.folder
     launch.preload([URL(string: site + "/some/page")!])
-    #expect(launch.images[site] != nil)
+    #expect(launch.icon(site).image != nil)
 }
 
 /// A pinned tile wears its icon's colours: each hue in it, or, for a dark
