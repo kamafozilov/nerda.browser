@@ -11,6 +11,8 @@
   - `type_text` into a field by its token, then `press_key` `return`; Nerda's own keys (`hotkey` `ctrl`+`tab`) work too.
   - Menu shortcuts (⌘, ⌘T) don't arrive in the background: `invoke_menu` with the menu's path (`["Nerda Test", "Settings…"]`) does.
   - `right_click` opens a real menu on the owner's screen: only when the test is about that menu, closed at once with `press_key` `escape`.
+  - Anything that changes this Mac beyond Nerda Test (Make default, the default browser, notifications, keychain, system settings) goes to the owner, not through cua-driver: those are the owner's Mac's, not Nerda Test's data.
+  - After `./build.sh test`, `pkill -x "Nerda Test"` and open it again: a running one keeps the old build.
   - Never `bring_to_front`, `delivery_mode: "foreground"` or `get_desktop_state` (the owner's whole screen). Quit it with `pkill -x "Nerda Test"`; its data is `~/Library/Application Support/Nerda Test`, to delete for a fresh start. What can't be done in the background (trackpad swipes, Touch ID, camera) goes to the owner.
 - **Decisions** and their reasons: [docs/decisions.md](docs/decisions.md).
 - **Performance**: time a change that could cost speed or memory with `./bench.sh` before and after it, and compare the numbers.

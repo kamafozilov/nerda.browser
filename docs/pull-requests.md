@@ -53,7 +53,7 @@ build/screenshots/3-extensions-menu.after.png
 The name becomes the caption above it ("Store page", "Extensions menu").
 
 1. For something that changes, before touching the code: `./build.sh test`, open Nerda Test behind the window in use, bring it to the state that shows it with cua-driver, and picture its window (`get_window_state` with `screenshot_out_file`, see [AGENTS.md](../AGENTS.md)) into `build/screenshots/3-extensions-menu.before.png`. Forgot? `git worktree add /tmp/nerda-base main`, the same steps from there, then `git worktree remove /tmp/nerda-base`.
-2. After the change: `./build.sh test` again, the same steps, each picture into `build/screenshots/`.
+2. After the change: `pkill -x "Nerda Test"` (a running one keeps the old build), `./build.sh test` again, open it, the same steps, each picture into `build/screenshots/`.
 3. Crop each to the part that matters, with enough around it to see where it is: `sips -c HEIGHT WIDTH --cropOffset Y X build/screenshots/…`. Crop a before and its after alike.
 
 Once in `build/screenshots/`, they reach the pull request on their own:
@@ -69,7 +69,7 @@ Before opening, check:
 
 - `swift test` passes.
 - The changelog line is in the same commit as the change, if people would notice it.
-- Every picture is in `build/screenshots/`, one for each thing the pull request changes on screen (or it has nothing on screen): the push uploads them.
+- Any pictures taken are in `build/screenshots/` (optional; see Screenshots): the push uploads them.
 
 **From T3 Code**, with its commit and pull request buttons: T3 Code writes commit messages and the pull request from this repository's `AGENTS.md`, its last 20 commit subjects and the template on `main`. Its settings, under Source Control, stay at *Source control writing style: Repository conventions* with *Follow change request templates* on. It sees only the diff, so read what it wrote and correct it with `gh pr edit` where it guessed (Testing above all).
 
