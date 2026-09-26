@@ -112,6 +112,25 @@ struct PeekPlacement: Layout {
     }
 }
 
+/// The tab the pointer is on, in the sidebar or across the top. Out of their
+/// sight: only `PeekWatch` reads it, so the pointer going from tab to tab
+/// has that alone worked out again, not every tab's row.
+@Observable
+final class Hovered {
+    var id: Tab.ID?
+}
+
+/// Keeps the card to the tab under the pointer (see `peeking`), drawing nothing.
+struct PeekWatch: View {
+    let browser: Browser
+    let hovered: Hovered
+    @Binding var peeked: Peek?
+
+    var body: some View {
+        Color.clear.peeking(browser.tabs.first { $0.id == hovered.id }, $peeked, selected: browser.selectedID)
+    }
+}
+
 extension View {
     /// The tab under the pointer (`hovered`) as the one whose card shows
     /// (`peeked`): the first once the pointer has rested on it 0.7 s,

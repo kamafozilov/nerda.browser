@@ -16,6 +16,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Fixed
 
 - Closing a tab or putting one to sleep frees its memory. Before, a closed tab kept its page running out of sight: after an evening of browsing, gigabytes of memory and a busy processor, until Nerda quit.
+- The sidebar stays quick with thousands of imported bookmarks. Before, each switch of tab, or a page loading, could hold it up for a quarter of a second.
 
 ## [0.0.8] - 2026-09-26
 

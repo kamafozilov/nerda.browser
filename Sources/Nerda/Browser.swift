@@ -273,7 +273,9 @@ final class Browser: NSObject {
     var inTurn: [Tab] {
         guard TabStyle.current == .vertical, tabs.contains(where: { $0.bookmark != nil }) else { return tabs }
         let open = Dictionary(tabs.compactMap { tab in tab.bookmark.map { ($0, tab) } }) { first, _ in first }
-        return tabs.filter(\.isPinned) + bookmarks.all.compactMap { open[$0.id] } + tabs.filter(Self.listed)
+        var marked: [Tab] = []
+        Bookmarks.inOrder(open, in: bookmarks.items, into: &marked)
+        return tabs.filter(\.isPinned) + marked + tabs.filter(Self.listed)
     }
 
     /// ⌘1 to ⌘8, top down; ⌘9 is always the last, as in every browser.
