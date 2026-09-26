@@ -9,9 +9,16 @@ import WebKit
 final class Tab: Identifiable {
     let id = UUID()
     /// Where the page is now, which is not where it started once links are followed.
-    private(set) var url: URL?
-    private var pageTitle = ""
-    private(set) var isLoading = false
+    // Extensions are told what changes (see Extensions.changed).
+    private(set) var url: URL? {
+        didSet { if url != oldValue { Extensions.shared.changed(self, .URL) } }
+    }
+    private var pageTitle = "" {
+        didSet { if pageTitle != oldValue { Extensions.shared.changed(self, .title) } }
+    }
+    private(set) var isLoading = false {
+        didSet { if isLoading != oldValue { Extensions.shared.changed(self, .loading) } }
+    }
     /// For the address bar's buttons, and the line under it that fills as the page loads.
     private(set) var canGoBack = false
     private(set) var canGoForward = false
@@ -25,7 +32,9 @@ final class Tab: Identifiable {
     /// Kept at the top of the sidebar as a tile, and never put to sleep for
     /// being idle: the sites always open. ⌘W lets its page go, tile and all
     /// kept (`Browser.closeSelectedTab`). See `Browser.setPinned`.
-    var isPinned = false
+    var isPinned = false {
+        didSet { if isPinned != oldValue { Extensions.shared.changed(self, .pinned) } }
+    }
     /// Where a pinned tab was when pinned; double-clicking its tile goes back there.
     var home: URL?
     /// The bookmark it is the tab of (`Browser.open(bookmark:)`): shown in
@@ -83,6 +92,11 @@ final class Tab: Identifiable {
     @ObservationIgnored var signIn: SentSignIn?
     /// A name sent on its own, for the password step that comes after it.
     @ObservationIgnored var nameSent: (host: String, user: String, at: Date)?
+    /// The tab whose page opened this one's (a sign-in popup).
+    @ObservationIgnored var opener: Tab.ID?
+    /// The extension whose pages the page was made for (see `go`), or nil
+    /// for the web's.
+    @ObservationIgnored private(set) var madeFor: String?
 
     /// The page, woken first if the tab was asleep.
     var webView: WKWebView { page ?? wake() }
@@ -116,8 +130,11 @@ final class Tab: Identifiable {
     init() {}
 
     /// A tab for a window a page opens, on the configuration WebKit hands over,
-    /// so that it can still talk to its opener (sign-in popups).
-    init(configuration: WKWebViewConfiguration) {
+    /// so that it can still talk to its opener (sign-in popups): the opener's
+    /// kind, an extension's pages or the web's.
+    init(configuration: WKWebViewConfiguration, opener: Tab? = nil) {
+        self.opener = opener?.id
+        madeFor = opener?.madeFor
         page = makePage(configuration)
     }
 
@@ -169,8 +186,17 @@ final class Tab: Identifiable {
     func go(to url: URL) {
         settings = nil
         showsHistory = false
+        // An extension's page is only served to a view made from its
+        // extension's configuration, and the web only outside one: going
+        // from one kind to the other, the page is made anew.
+        if let page, madeFor != Extensions.host(of: url) {
+            page.removeFromSuperview()
+            observations = []
+            self.page = nil
+            slept = nil
+        }
         // Woken first, while it has nowhere to go, or it would load `url` twice.
-        let page = webView
+        let page = page ?? wake(for: url)
         self.url = url
         page.load(URLRequest(url: url))
     }
@@ -423,14 +449,16 @@ final class Tab: Identifiable {
     }
 
     @discardableResult
-    private func wake() -> WKWebView {
+    private func wake(for target: URL? = nil) -> WKWebView {
         look = nil
-        let page = makePage(Self.configuration(dataStore))
+        let site = target ?? url
+        madeFor = Extensions.host(of: site)
+        let page = makePage(site.flatMap(Extensions.configuration(for:)) ?? Self.configuration(dataStore))
         self.page = page
         if let slept { page.pageZoom = slept.zoom }
         if let state = slept?.state {
             page.interactionState = state
-        } else if let url {
+        } else if let url, target == nil {
             page.load(URLRequest(url: url))
         }
         slept = nil
@@ -596,6 +624,11 @@ final class Tab: Identifiable {
         configuration.userContentController.addUserScript(Fullscreen.bridge)
         configuration.userContentController.add(Fullscreen.messages, contentWorld: .defaultClient, name: "fullscreen")
         Passwords.install(in: configuration.userContentController)
+        WebStore.install(in: configuration.userContentController)
+        // Chrome extensions see the pages of the regular window, not an
+        // incognito one's, as in Chrome. The controller has to be there when
+        // the page is made; it can't be added after.
+        if dataStore.isPersistent { configuration.webExtensionController = Extensions.shared.controller }
         Selection.install(in: configuration.userContentController)
         // The first page made starts the blocker: WebKit is being started for
         // it anyway. Cached rules arrive asynchronously; navigation never waits.
@@ -718,7 +751,7 @@ final class Tab: Identifiable {
     /// Sites serve their full pages only to browsers that say they are Safari;
     /// without this Google, for one, sends its bare fallback. Safari's own
     /// version, so it keeps up with the system.
-    private static let applicationName: String = {
+    static let applicationName: String = {
         let safari = Bundle(path: "/Applications/Safari.app")?.infoDictionary?["CFBundleShortVersionString"] as? String
         return "Version/\(safari ?? "26.0") Safari/605.1.15"
     }()

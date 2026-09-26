@@ -67,6 +67,11 @@ final class SwipingWebView: WKWebView {
             item.representedObject = menu.items[index]
             menu.insertItem(item, at: index + 1)
         }
+        let added = Extensions.shared.menuItems(for: self)
+        if !added.isEmpty {
+            menu.addItem(.separator())
+            added.forEach(menu.addItem)
+        }
         guard Screenshot.isOn else { return }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Copy Screenshot", action: #selector(copyScreenshot), keyEquivalent: "").target = self

@@ -149,6 +149,11 @@ final class AppMenu: NSObject {
                 MainActor.assumeIsolated { if !browser.locked { browser.selectTab(number: index + 1) } }
                 return nil
             }
+            // A key an extension registered (⌥⇧D, ⌃⇧Y), when none of Nerda's is that key.
+            if !modifiers.isDisjoint(with: [.command, .option, .control]), event.window?.attachedSheet == nil,
+               NSApp.modalWindow == nil, MainActor.assumeIsolated({ Extensions.shared.take(event) }) {
+                return nil
+            }
             return MainActor.assumeIsolated { Self.browserKey(event) } ? nil : event
         }
     }

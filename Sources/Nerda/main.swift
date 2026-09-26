@@ -528,19 +528,25 @@ extension Browser {
         endAddressEdit()
         let tab = Tab()
         withAnimation(.slide) { add(tab) }
+        // An extension's new tab page, once you said it may be one.
+        if !isPrivate, let page = Extensions.shared.newTabPage { return tab.go(to: page) }
         newTabRequests += 1
+        if !isPrivate { Extensions.shared.offerNewTabPage(into: tab) }
     }
 
     /// ⌘, and Settings in the sidebar's menu: the settings, in a tab of their
     /// own, and only ever one, as in Chrome.
-    func openSettings() {
+    func openSettings(_ page: SettingsPage? = nil) {
         // Nerda's own pages open in the regular window, as in Chrome.
-        if isPrivate { return Windows.showRegular().openSettings() }
+        if isPrivate { return Windows.showRegular().openSettings(page) }
         if commandBarOpen { hideCommandBar() }
         endAddressEdit()
-        if let open = tabs.first(where: { $0.settings != nil }) { return selectedID = open.id }
+        if let open = tabs.first(where: { $0.settings != nil }) {
+            if let page { open.settings = page }
+            return selectedID = open.id
+        }
         let tab = Tab()
-        tab.settings = .general
+        tab.settings = page ?? .general
         withAnimation(.slide) { add(tab) }
     }
 
@@ -699,6 +705,8 @@ if Edition.updates { Updater.shared.start() }
 let window = BrowserWindow(browser: browser)
 Windows.regular = window
 window.makeKeyAndOrderFront(nil)
+// Once the window is up: loading them takes the main thread a while.
+DispatchQueue.main.async { Extensions.shared.start(for: browser) }
 
 #if DEBUG
 // Nerda Dev: which view each key goes to, for when keys stop reaching a

@@ -7,6 +7,14 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- Chrome extensions: open one's page in the Chrome Web Store and press Add to Nerda, or paste its link in Settings › Extensions. The puzzle button at the right of the address bar opens their popups and pins the ones you use beside it. They update themselves and stay out of incognito windows, as in Chrome.
+
+### Changed
+
+- What's New, after Nerda updates itself, stays a compact card however tall the window is: the first notes show at a glance and the rest scroll, where before it stretched over most of a tall window.
+
 ### Fixed
 
 - Downloads, AI chats and the menu read clearly over a light page. Before, they turned grey over a white site and their text faded into it, most of all with the tabs across the top.

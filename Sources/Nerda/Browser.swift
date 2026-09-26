@@ -15,6 +15,7 @@ final class Browser: NSObject {
                 recent.removeAll { $0 === tab }
             }
             sessionChanged()
+            Extensions.shared.follow(self)
         }
     }
     /// The open tabs in the order they were on screen, the one on screen
@@ -35,6 +36,7 @@ final class Browser: NSObject {
                 tabs.first { $0.id == oldValue }?.page?.evaluateJavaScript(PictureInPicture.enter)
                 selected?.page?.evaluateJavaScript(PictureInPicture.exit)
             }
+            if selectedID != oldValue { Extensions.shared.activated(self, from: oldValue) }
             sessionChanged()
         }
     }
@@ -151,10 +153,12 @@ final class Browser: NSObject {
 
     /// A tab for `url`, on screen, or for a link opened in the background
     /// (⌘-click), behind the one that is.
-    func open(_ url: URL, inBackground: Bool = false) {
+    @discardableResult
+    func open(_ url: URL, inBackground: Bool = false) -> Tab {
         let tab = Tab()
         add(tab, inBackground: inBackground)
         tab.go(to: url)
+        return tab
     }
 
     /// Pinned tabs come first, in their own order; the rest follow, newest
@@ -334,7 +338,7 @@ extension Browser: WKUIDelegate {
             if ["http", "https"].contains(url.scheme?.lowercased() ?? "") { Windows.openIncognito(url) }
             return nil
         }
-        let tab = Tab(configuration: configuration)
+        let tab = Tab(configuration: configuration, opener: tab(for: webView))
         withAnimation(.slide) { add(tab) }
         return tab.webView
     }
@@ -419,6 +423,17 @@ extension Browser: WKNavigationDelegate {
         guard let url = action.request.url else { return .cancel }
         if action.shouldPerformDownload { return .download }
 
+        // An extension's sign-in coming back: the address is its answer,
+        // handed to the extension, and never loaded.
+        if ExtensionAuth.intercept(url, browser: self, from: webView) { return .cancel }
+        // An extension's page sending its tab to a website: the tab makes
+        // itself a page for the web (see Tab.go).
+        if ["http", "https"].contains(url.scheme?.lowercased() ?? ""), action.targetFrame?.isMainFrame ?? true,
+           let tab = tab(for: webView), tab.madeFor != nil {
+            Task { tab.go(to: url) }
+            return .cancel
+        }
+
         // mailto:, tel:, zoommtg: and the like belong to other apps, and only
         // with a yes: a page could otherwise start any app it names.
         if !Self.pageSchemes.contains(url.scheme?.lowercased() ?? "") {
@@ -443,7 +458,7 @@ extension Browser: WKNavigationDelegate {
         return .allow
     }
 
-    private static let pageSchemes: Set = ["http", "https", "file", "about", "data", "blob", "javascript", ViewSource.scheme]
+    private static let pageSchemes: Set = ["http", "https", "file", "about", "data", "blob", "javascript", ViewSource.scheme, Extensions.scheme]
 
     /// What a page can't show (a zip), or is told to save (an attachment), is downloaded.
     func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse) async -> WKNavigationResponsePolicy {
@@ -477,6 +492,14 @@ extension Browser: WKNavigationDelegate {
         }
     }
 
+    /// A download an extension asked for (chrome.downloads), through the
+    /// page on screen, or any page awake; false with none.
+    func download(_ url: URL) async -> Bool {
+        guard let page = selected?.page ?? tabs.lazy.compactMap(\.page).first else { return false }
+        track(await page.startDownload(using: URLRequest(url: url)))
+        return true
+    }
+
     private func track(_ download: WKDownload) {
         download.delegate = self
         withAnimation(.slide) { downloads.insert(Download(download), at: 0) }
@@ -495,6 +518,7 @@ extension Browser: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         tab(for: webView)?.pageDidLoad()
         if let tab = tab(for: webView) { signInLanded(on: tab) }
+        WebStore.tell(webView)
         sessionChanged()
     }
 

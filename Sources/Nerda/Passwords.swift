@@ -620,7 +620,9 @@ extension Browser {
     }
 
     private func offer(_ sent: SentSignIn, on tab: Tab) {
-        guard !Passwords.never.contains(Site.of(sent.host)) else { return }
+        // A password manager extension that saves passwords itself asked
+        // Nerda not to offer (chrome.privacy), as it asks Chrome.
+        guard !Passwords.never.contains(Site.of(sent.host)), Extensions.shared.passwordSavingTakenBy == nil else { return }
         Task {
             guard let (known, replaces) = await vault.check(sent), !known,
                   tabs.contains(where: { $0 === tab }) else { return }
