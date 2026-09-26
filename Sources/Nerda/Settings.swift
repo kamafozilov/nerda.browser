@@ -4,7 +4,7 @@ import WebKit
 /// The pages of Nerda's settings, listed down the settings tab's left. Only
 /// what works is listed: a page comes once it has something in it.
 enum SettingsPage: String, CaseIterable, Identifiable, Codable {
-    case general, appearance, privacy, shortcuts, releaseNotes
+    case general, appearance, privacy, extensions, shortcuts, releaseNotes
 
     var id: Self { self }
 
@@ -13,6 +13,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .general: "General"
         case .appearance: "Appearance"
         case .privacy: "Security & Privacy"
+        case .extensions: "Extensions"
         case .shortcuts: "Keyboard Shortcuts"
         case .releaseNotes: "Release Notes"
         }
@@ -23,6 +24,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .general: "gearshape"
         case .appearance: "circle.lefthalf.filled"
         case .privacy: "lock"
+        case .extensions: "puzzlepiece.extension"
         case .shortcuts: "keyboard"
         case .releaseNotes: "sparkles"
         }
@@ -31,7 +33,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
     /// The heading it is listed under.
     var section: String {
         switch self {
-        case .general, .appearance, .privacy, .shortcuts: "Personal"
+        case .general, .appearance, .privacy, .extensions, .shortcuts: "Personal"
         case .releaseNotes: "Nerda"
         }
     }
@@ -42,6 +44,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .general: ["default browser", "search engine", "google", "picture in picture", "video", "screenshot", "language", "spell", "quit", "warn", "about", "version", "updates"]
         case .appearance: ["theme", "dark", "light", "zoom", "tab style", "vertical", "horizontal", "sidebar", "transparency", "tinted", "transparent", "glass"]
         case .privacy: ["security", "history", "delete", "clear", "cookies", "cache", "site data", "ads", "trackers", "adblock", "blocking", "filters", "easylist", "ublock", "adguard"]
+        case .extensions: ["chrome web store", "add-ons", "plugins", "unpacked", "developer"] + Extensions.shared.installed.map(\.name)
         case .shortcuts: ["keyboard", "keys", "hotkeys"] + ShortcutsSettings.groups.flatMap { $0.shortcuts.map(\.title) }
         case .releaseNotes: ["what's new", "changelog", "changes", "version", "updates"]
         }
@@ -119,6 +122,8 @@ struct SettingsView: View {
                         AppearanceSettings()
                     case .privacy:
                         PrivacySettings(browser: browser) { deletingData = true }
+                    case .extensions:
+                        ExtensionsSettings(browser: browser)
                     case .shortcuts:
                         ShortcutsSettings()
                     case .releaseNotes:
@@ -297,6 +302,131 @@ private struct PrivacySettings: View {
         if blocker.failed { return "Some filters couldn't be updated. Nerda tries again later" }
         guard let updated = blocker.updated else { return "If a site has trouble, turn this off and reload it" }
         return "Last updated \(updated.formatted(.relative(presentation: .named)))"
+    }
+}
+
+/// Chrome extensions: the two ways in (the Chrome Web Store, or a folder),
+/// and what is installed, each turned on or off, set up or removed.
+private struct ExtensionsSettings: View {
+    let browser: Browser
+
+    @State private var link = ""
+    private var extensions: Extensions { .shared }
+
+    var body: some View {
+        SettingsGroup(title: "Add extensions") {
+            SettingsLink(title: "Chrome Web Store", detail: "Find one, and press Add to Nerda on its page", icon: "bag") {
+                browser.open(WebStore.home)
+            }
+            SettingsRow(title: "Add from a link", icon: "link") {
+                HStack(spacing: 8) {
+                    TextField("Store link or extension ID", text: $link)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 220)
+                        .onSubmit(add)
+                    if extensions.busy != nil {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("Add", action: add)
+                            .buttonStyle(SettingsButtonStyle())
+                            .disabled(Crx.id(in: link) == nil)
+                    }
+                }
+            }
+        }
+        SettingsGroup(title: "Installed") {
+            if extensions.installed.isEmpty {
+                SettingsRow(title: "No extensions yet", icon: "puzzlepiece.extension") { EmptyView() }
+            }
+            ForEach(extensions.installed) { item in
+                InstalledRow(item: item)
+            }
+        }
+        SettingsGroup(title: "Developer") {
+            SettingsRow(title: "Load unpacked", detail: "A folder with a manifest.json. Reload picks up what you change in it", icon: "folder") {
+                Button("Choose…", action: extensions.installFolder)
+                    .buttonStyle(SettingsButtonStyle())
+            }
+        }
+    }
+
+    private func add() {
+        guard Crx.id(in: link) != nil else { return }
+        extensions.install(from: link)
+        link = ""
+    }
+}
+
+private struct InstalledRow: View {
+    let item: InstalledExtension
+    private var extensions: Extensions { .shared }
+
+    var body: some View {
+        let context = extensions.contexts[item.id]
+        HStack(spacing: 12) {
+            Group {
+                if let icon = context?.webExtension.icon(for: CGSize(width: 40, height: 40)) {
+                    Image(nsImage: icon).resizable().interpolation(.high)
+                } else {
+                    Image(systemName: "puzzlepiece.extension").foregroundStyle(Palette.muted)
+                }
+            }
+            .frame(width: 20, height: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                Text(detail(context))
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(1)
+                    .help((extensions.errors[item.id] ?? []).joined(separator: "\n"))
+            }
+            Spacer(minLength: 8)
+            if context?.optionsPageURL != nil {
+                Button("Options") { extensions.openOptions(item.id) }
+                    .buttonStyle(SettingsButtonStyle())
+            }
+            Menu {
+                Button(item.pinned == true ? "Unpin from Address Bar" : "Pin to Address Bar") {
+                    extensions.setPinned(item.id, item.pinned != true)
+                }
+                if context?.overrideNewTabPageURL != nil {
+                    let on = extensions.showsNewTab(item.id)
+                    Button(on ? "Stop Showing in New Tabs" : "Show in New Tabs") { extensions.setShowsNewTab(item.id, !on) }
+                }
+                if item.source != nil || !item.fromStore { Button("Reload") { extensions.reload(item.id) } }
+                if item.fromStore, let url = URL(string: "https://chromewebstore.google.com/detail/\(item.id)") {
+                    Button("View in Chrome Web Store") { extensions.browser?.open(url) }
+                }
+                Divider()
+                Button("Remove from Nerda…") { extensions.confirmRemove(item.id) }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .foregroundStyle(Palette.muted)
+            .fixedSize()
+            SettingsToggle(title: item.name, isOn: Binding(get: { item.enabled }, set: { extensions.setEnabled(item.id, $0) }))
+        }
+        .padding(.horizontal, 13)
+        .frame(minHeight: 52)
+    }
+
+    private func detail(_ context: WKWebExtensionContext?) -> String {
+        _ = extensions.settingsChanged
+        var parts = ["Version \(item.version)", item.fromStore ? "Chrome Web Store"
+                     : item.source.map { "From “\(URL(fileURLWithPath: $0).lastPathComponent)”" } ?? "From a folder"]
+        if item.enabled, context == nil { parts.append("couldn't start") }
+        if context?.overrideNewTabPageURL != nil, extensions.showsNewTab(item.id) { parts.append("shows in new tabs") }
+        let warnings = extensions.errors[item.id]?.count ?? 0
+        if warnings > 0 { parts.append(warnings == 1 ? "1 warning" : "\(warnings) warnings") }
+        return parts.joined(separator: " · ")
     }
 }
 

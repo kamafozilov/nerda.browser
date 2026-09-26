@@ -70,6 +70,10 @@ struct AddressBar: View {
                 }
             }
             .padding(.leading, 4)
+            if !browser.isPrivate {
+                ExtensionButtons()
+                    .padding(.leading, 4)
+            }
         }
         .padding(.horizontal, Self.edge)
         .frame(height: Self.height)

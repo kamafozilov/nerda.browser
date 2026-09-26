@@ -106,6 +106,14 @@ final class Bookmarks {
         edit(id) { $0.title = title }
     }
 
+    /// A new title or address, for what is given (an extension's chrome.bookmarks.update).
+    func update(_ id: Item.ID, title: String?, url: URL?) {
+        edit(id) { item in
+            if let title { item.title = title }
+            if let url, !item.isFolder { item.url = url }
+        }
+    }
+
     /// A folder opened, or closed.
     func toggle(_ id: Item.ID) { edit(id) { $0.open = $0.open == true ? nil : true } }
 

@@ -69,7 +69,7 @@ struct SidebarMenu: View {
                     .onHover { if $0 { open = .history } }
                 }
 
-                MenuRow(icon: "gearshape", title: "Settings", shortcut: "⌘,") { run(browser.openSettings) }
+                MenuRow(icon: "gearshape", title: "Settings", shortcut: "⌘,") { run { browser.openSettings() } }
                     .onHover { if $0 { open = nil } }
                 MenuRow(icon: "chevron.left.forwardslash.chevron.right", title: "Developer", submenu: true, lit: open == .developer) {
                     open = .developer

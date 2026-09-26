@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import ImageIO
 import Network
@@ -1741,4 +1742,71 @@ private final class BlockerNavigation: NSObject, WKNavigationDelegate {
     tab.resize(width: 500)
     #expect(tab.responsive?.device == nil)
     #expect(tab.responsive?.agent == Device.iPhoneAgent)
+}
+
+/// An extension is found by its id wherever a link carries it: the store's
+/// address, the old one, or the id alone.
+@Test func extensionIDsAreReadFromStoreLinks() {
+    let id = "cjpalhdlnbpafiamejdnhcphjbkeiagm"
+    #expect(Crx.id(in: "https://chromewebstore.google.com/detail/ublock-origin/\(id)") == id)
+    #expect(Crx.id(in: "https://chrome.google.com/webstore/detail/\(id)?hl=en") == id)
+    #expect(Crx.id(in: id.uppercased()) == id)
+    #expect(Crx.id(in: "https://chromewebstore.google.com/category/extensions") == nil)
+    #expect(Crx.id(in: "\(id)q") == nil)
+}
+
+/// A package from the store is unpacked only when it is signed by the key
+/// its id is made from, over the very zip that came with it.
+@Test func storePackagesMustBeSignedByTheirOwnKey() throws {
+    let attributes: [String: Any] = [kSecAttrKeyType as String: kSecAttrKeyTypeRSA, kSecAttrKeySizeInBits as String: 2048]
+    let key = try #require(SecKeyCreateRandomKey(attributes as CFDictionary, nil))
+    let publicKey = try #require(SecKeyCopyPublicKey(key))
+    let pkcs1 = try #require(SecKeyCopyExternalRepresentation(publicKey, nil)) as Data
+    // SubjectPublicKeyInfo, as Chrome writes a key: the RSA algorithm, then the key as a bit string.
+    func der(_ tag: UInt8, _ body: Data) -> Data {
+        let n = body.count
+        let length: [UInt8] = n < 128 ? [UInt8(n)] : n < 256 ? [0x81, UInt8(n)] : [0x82, UInt8(n >> 8), UInt8(n & 0xff)]
+        return Data([tag] + length) + body
+    }
+    let algorithm = Data([0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00])
+    let spki = der(0x30, algorithm + der(0x03, Data([0]) + pkcs1))
+    let id = Crx.letters(Array(SHA256.hash(data: spki).prefix(16)))
+    func field(_ number: Int, _ body: Data) -> Data {
+        var out = Data(), key = number << 3 | 2, n = body.count
+        while key >= 0x80 { out.append(UInt8(key & 0x7f | 0x80)); key >>= 7 }
+        out.append(UInt8(key))
+        while n >= 0x80 { out.append(UInt8(n & 0x7f | 0x80)); n >>= 7 }
+        out.append(UInt8(n))
+        return out + body
+    }
+    func crx(id: String, zip: Data, signed: Data) throws -> Data {
+        let idBytes = Data(stride(from: 0, to: 32, by: 2).map { i -> UInt8 in
+            let letters = Array(id.utf8)
+            return (letters[i] - 97) << 4 | (letters[i + 1] - 97)
+        })
+        let signedData = field(1, idBytes)
+        var message = Data("CRX3 SignedData".utf8) + Data([0])
+        message += withUnsafeBytes(of: UInt32(signedData.count).littleEndian) { Data($0) } + signedData + signed
+        let signature = try #require(SecKeyCreateSignature(key, .rsaSignatureMessagePKCS1v15SHA256, message as CFData, nil)) as Data
+        let header = field(2, field(1, spki) + field(2, signature)) + field(10000, signedData)
+        return Data("Cr24".utf8) + withUnsafeBytes(of: UInt32(3).littleEndian) { Data($0) }
+            + withUnsafeBytes(of: UInt32(header.count).littleEndian) { Data($0) } + header + zip
+    }
+    let zip = Data("PK a zip".utf8)
+    #expect(try Crx.verifiedZip(crx(id: id, zip: zip, signed: zip), id: id) == zip)
+    // Changed on the way: the signature no longer holds.
+    #expect(throws: Crx.Refused.self) { try Crx.verifiedZip(crx(id: id, zip: zip + Data([0]), signed: zip), id: id) }
+    // Passed off as another extension.
+    let other = String(repeating: "a", count: 32)
+    #expect(throws: Crx.Refused.self) { try Crx.verifiedZip(crx(id: id, zip: zip, signed: zip), id: other) }
+}
+
+/// The store's update check is read from its <updatecheck>, not from the
+/// first version="" in the reply, which is the XML declaration's.
+@Test func extensionUpdatesAreReadFromTheUpdateCheck() {
+    let newer = #"<?xml version="1.0" encoding="UTF-8"?><gupdate><app appid="x" status="ok"><updatecheck codebase="https://x" status="ok" version="2.1"/></app></gupdate>"#
+    let none = #"<?xml version="1.0" encoding="UTF-8"?><gupdate><app appid="x" status="ok"><updatecheck status="noupdate"/></app></gupdate>"#
+    #expect(Extensions.newerVersion(in: newer, than: "2.0") == "2.1")
+    #expect(Extensions.newerVersion(in: newer, than: "2.1") == nil)
+    #expect(Extensions.newerVersion(in: none, than: "2.0") == nil)
 }

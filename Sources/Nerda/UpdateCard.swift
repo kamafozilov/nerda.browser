@@ -134,6 +134,9 @@ struct WhatsNew: View {
     let releases: [ReleaseNotes]
     let close: () -> Void
 
+    /// How tall the notes stand before they scroll.
+    static let listHeight: CGFloat = 280
+
     nonisolated struct Section: Equatable {
         var title: String?
         var items: [String]
@@ -161,7 +164,10 @@ struct WhatsNew: View {
                                 }
                             }
                     }
-                    .frame(maxHeight: max(160, window.size.height * 0.75 - 260))
+                    // A few notes' worth, however tall the window: the first
+                    // are read at a glance, the rest scrolled to. Less in a
+                    // window too short for that.
+                    .frame(maxHeight: min(Self.listHeight, max(120, window.size.height - 360)))
                     Button(action: close) {
                         Text("Continue").frame(maxWidth: .infinity)
                     }
