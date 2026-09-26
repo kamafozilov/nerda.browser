@@ -199,7 +199,7 @@ case "${1:-}" in
   key) shift; claim; whose_app; up >/dev/null; keys "$@" ;;
   # vncdo's own typing loses Shift (":" comes out ";"): pasted instead.
   type) shift; claim; whose_app; up >/dev/null; printf %s "$*" | vm pbcopy; keys cmd-v ;;
-  shot) claim; whose_app; up >/dev/null; vnc capture "${2:-build/vm.png}" ;;
+  shot) claim; whose_app; up >/dev/null; mkdir -p "$(dirname "${2:-build/vm.png}")"; vnc capture "${2:-build/vm.png}" ;;
   done) locked release ;;
   down) claim; if running; then locked suspend; fi ;;
   watch) echo $$ >"$RUN/watch.pid"; watch_idle ;;
