@@ -188,9 +188,21 @@ enum Bench {
     /// (History.limit). On its own, so that history is gone before memory is measured.
     private static func typing(into results: inout [String: Any]) {
         let history = History()
+        // As long as real ones: addresses of 80 to 140 characters, titles of 40 to 90.
+        let sites = ["www.youtube.com", "github.com", "en.wikipedia.org", "stackoverflow.com", "developer.apple.com",
+                     "www.reddit.com", "medium.com", "news.ycombinator.com"]
+        let names = ["YouTube", "GitHub", "Wikipedia", "Stack Overflow", "Apple Developer", "Reddit", "Medium", "Hacker News"]
+        let words = ["swift", "concurrency", "actors", "memory", "layout", "performance", "server", "rendering",
+                     "pipeline", "release", "notes", "design", "system", "tutorial", "guide", "review", "benchmark",
+                     "network", "storage", "privacy", "search", "history", "window", "keyboard"]
         for page in 0..<20_000 {
-            let site = ["youtube.com", "github.com", "wikipedia.org", "news.site\(page % 500).com"][page % 4]
-            history.visit(URL(string: "https://\(site)/page/\(page)")!, title: "Page \(page) about topic \(page % 97)")
+            let news = page % 5 == 4
+            let site = news ? "news.site\(page % 500).com" : sites[page % sites.count]
+            let slug = (0..<(3 + page % 4)).map { words[(page / (3 + $0) + $0 * 7) % words.count] }
+            let url = "https://\(site)/\(slug[0])/\(page)/\(slug.joined(separator: "-"))?utm_source=newsletter&ref=\(page % 97)"
+            let title = slug.map(\.capitalized).joined(separator: " ") + ", topic \(page % 97) - "
+                + (news ? "Daily News" : names[page % names.count])
+            history.visit(URL(string: url)!, title: title)
         }
         let indexed = Date.now
         _ = history.recent(1)

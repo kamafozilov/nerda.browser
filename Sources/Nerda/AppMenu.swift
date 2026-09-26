@@ -453,8 +453,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationWillTerminate(_ notification: Notification) { save() }
 
-    /// Going to another app is a good moment: nothing is happening here.
-    func applicationDidResignActive(_ notification: Notification) { save() }
+    /// Going to another app is a good moment: nothing is happening here. Not
+    /// waited for, as quitting does: the switch isn't held up by it.
+    func applicationDidResignActive(_ notification: Notification) { save(waiting: false) }
 
     /// The video on screen floats while another app is in front (Settings ›
     /// General). Asked before Nerda's window stops being the main one.
@@ -471,9 +472,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         floating = nil
     }
 
-    func save() {
+    func save(waiting: Bool = true) {
         browser.saveSession()
-        History.shared.save()
+        History.shared.save(waiting: waiting)
     }
 
     /// The toolbar is empty: in full screen it goes with the menu bar, rather
