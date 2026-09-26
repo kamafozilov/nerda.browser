@@ -865,6 +865,7 @@ struct PageView: NSViewRepresentable {
             if page.superview !== slot.stage { slot.stage.addSubview(page) }
             guard page === shown else { continue }
             slot.stage.device = selected?.responsive?.size
+            slot.stage.resized = { [weak selected] in selected?.resize(width: $0.width, height: $0.height) }
             slot.isHidden = false
             page.isHidden = false
             guard arriving, takesFocus else { continue }

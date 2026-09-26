@@ -64,8 +64,9 @@ struct Device: Hashable {
 
 }
 
-/// Over the page in Responsive Design Mode: which device, its size (typed
-/// in, or turned on its side), and the way out.
+/// Over the page in Responsive Design Mode: which device and its size
+/// (typed in, or turned on its side), in the middle, over the page they are
+/// for; the way out at the right.
 struct ResponsiveBar: View {
     let tab: Tab
     let responsive: Responsive
@@ -77,17 +78,17 @@ struct ResponsiveBar: View {
             DevicePicker(tab: tab, responsive: responsive)
 
             HStack(spacing: 4) {
-                SizeField(value: responsive.width) { tab.resize(width: $0) }
+                SizeField(value: responsive.width, help: "Width") { tab.resize(width: $0) }
                 Text("×").foregroundStyle(Palette.muted)
-                SizeField(value: responsive.height) { tab.resize(height: $0) }
+                SizeField(value: responsive.height, help: "Height") { tab.resize(height: $0) }
             }
 
             BarButton(icon: "rectangle.portrait.rotate", help: "Rotate") {
                 tab.resize(width: responsive.height, height: responsive.width)
             }
-
-            Spacer(minLength: 0)
-
+        }
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .trailing) {
             BarButton(icon: "xmark", help: "Exit Responsive Design Mode") { tab.responsive = nil }
         }
         .font(.system(size: 12))
@@ -149,9 +150,13 @@ private struct DevicePicker: View {
     }
 }
 
-/// A width or a height, in CSS pixels: taken once Return is pressed or the field is left.
+/// A width or a height, in CSS pixels: taken once Return is pressed or the
+/// field is left, all of it selected when clicked into, so a new number
+/// replaces it. ↑ and ↓ step it by 1, with Shift by 10, at once; Escape
+/// puts back what it was.
 private struct SizeField: View {
     let value: CGFloat
+    let help: String
     let commit: (CGFloat) -> Void
 
     @State private var text = ""
@@ -163,35 +168,77 @@ private struct SizeField: View {
             .multilineTextAlignment(.center)
             .monospacedDigit()
             .focused($focused)
-            .frame(width: 44, height: 22)
-            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Palette.hover))
-            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Palette.hairline))
+            .frame(width: 48, height: 24)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Palette.hover))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(focused ? Color.accentColor : Palette.hairline, lineWidth: focused ? 1.5 : 1)
+            )
+            .help(help)
             .onAppear { text = "\(Int(value))" }
             .onChange(of: value) { text = "\(Int(value))" }
             .onSubmit(take)
-            .onChange(of: focused) { if !focused { take() } }
+            .onChange(of: focused) {
+                if focused {
+                    // After the click has put the caret where it landed.
+                    DispatchQueue.main.async { NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil) }
+                } else {
+                    take()
+                }
+            }
+            .onKeyPress(keys: [.upArrow, .downArrow]) { press in
+                let step: CGFloat = press.modifiers.contains(.shift) ? 10 : 1
+                let number = CGFloat(Double(text.trimmingCharacters(in: .whitespaces)) ?? Double(value))
+                set(number + (press.key == .upArrow ? step : -step))
+                return .handled
+            }
+            .onKeyPress(.escape) {
+                text = "\(Int(value))"
+                return .handled
+            }
     }
 
-    /// Between 50 and 4000; anything else goes back to what it was.
+    /// A number, held between 50 and 4000; anything else goes back to what it was.
     private func take() {
-        guard let number = Double(text.trimmingCharacters(in: .whitespaces)), (50...4000).contains(number) else {
+        guard let number = Double(text.trimmingCharacters(in: .whitespaces)) else {
             text = "\(Int(value))"
             return
         }
-        if CGFloat(number.rounded()) != value { commit(CGFloat(number.rounded())) }
+        set(CGFloat(number))
+    }
+
+    private func set(_ number: CGFloat) {
+        // `Double("nan")` is a number too, and one no `Int` can be made of.
+        guard number.isFinite else {
+            text = "\(Int(value))"
+            return
+        }
+        let number = min(max(number.rounded(), 50), 4000)
+        text = "\(Int(number))"
+        if number != value { commit(number) }
     }
 }
 
 /// Where a page sits in its `PageSlot`: all of it, or in Responsive Design
-/// Mode, a device's screen at the top, scaled down to fit when it is larger.
+/// Mode, a device's screen at the top, scaled down to fit when it is larger,
+/// with grips on its right and bottom edges and the corner between to pull
+/// it to another size.
 /// WebKit's inspector docks beside this rather than beside the page, so it
 /// keeps the card's width whatever the page's.
 final class PageStage: NSView {
     var device: CGSize? {
         didSet { if device != oldValue { place() } }
     }
-    /// Under the device's screen: its shadow, and ground while the page is see-through.
+    /// A size pulled to with a grip, for the tab to take.
+    var resized: ((CGSize) -> Void)?
+    /// Under the device's screen: its edge, its shadow, and ground while the page is see-through.
     private let screen = NSView()
+    private let grips = [ResizeGrip(.right), ResizeGrip(.bottom), ResizeGrip(.bottomRight)]
+    /// How far down the page is drawn.
+    private var scale: CGFloat = 1
+    /// While a grip is pulled: the size it started from, and the scale, kept
+    /// as it was, so the edge stays under the pointer.
+    private var pull: (size: CGSize, scale: CGFloat)?
     static let margin: CGFloat = 16
 
     init() {
@@ -199,6 +246,11 @@ final class PageStage: NSView {
         screen.wantsLayer = true
         screen.isHidden = true
         addSubview(screen)
+        for grip in grips {
+            grip.stage = self
+            grip.isHidden = true
+            addSubview(grip)
+        }
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -214,26 +266,34 @@ final class PageStage: NSView {
     /// None while WebKit has it in its own full screen.
     private var page: WKWebView? { subviews.lazy.compactMap { $0 as? WKWebView }.first }
 
+    private var room: CGSize { CGSize(width: bounds.width - 2 * Self.margin, height: bounds.height - 2 * Self.margin) }
+
     func place() {
         guard let page else { return }
         guard let device else {
             screen.isHidden = true
+            for grip in grips { grip.isHidden = true }
+            scale = 1
             Self.scale(page, 1)
             page.frame = bounds
             return
         }
-        let room = CGSize(width: bounds.width - 2 * Self.margin, height: bounds.height - 2 * Self.margin)
-        let scale = max(min(1, room.width / device.width, room.height / device.height), 0.1)
+        let room = room
+        scale = pull?.scale ?? max(min(1, room.width / device.width, room.height / device.height), 0.1)
         let size = CGSize(width: (device.width * scale).rounded(), height: (device.height * scale).rounded())
         // Scaled down, the page still lays out at the device's width.
         Self.scale(page, scale)
         page.frame = CGRect(x: ((bounds.width - size.width) / 2).rounded(), y: bounds.height - Self.margin - size.height,
                             width: size.width, height: size.height)
-        screen.frame = page.frame
+        // A point past the page all round, for a hairline that shows where
+        // a page as dark as the stage ends.
+        screen.frame = page.frame.insetBy(dx: -1, dy: -1)
         screen.isHidden = false
         effectiveAppearance.performAsCurrentDrawingAppearance {
             screen.layer?.backgroundColor = NSColor(Palette.ground).cgColor
+            screen.layer?.borderColor = NSColor(Palette.hairline).cgColor
         }
+        screen.layer?.borderWidth = 1
         screen.shadow = {
             let shadow = NSShadow()
             shadow.shadowColor = .black.withAlphaComponent(0.25)
@@ -241,6 +301,45 @@ final class PageStage: NSView {
             shadow.shadowOffset = NSSize(width: 0, height: -3)
             return shadow
         }()
+        // In the margin round the screen, clear of the page, so none of the
+        // page's own clicks are taken.
+        let frame = page.frame, gap: CGFloat = 2, thick = Self.margin - 2 * gap
+        for grip in grips {
+            switch grip.position {
+            case .right:
+                grip.frame = CGRect(x: frame.maxX + gap, y: frame.minY, width: thick, height: frame.height)
+            case .bottom:
+                grip.frame = CGRect(x: frame.minX, y: frame.minY - gap - thick, width: frame.width, height: thick)
+            default:
+                grip.frame = CGRect(x: frame.maxX + gap, y: frame.minY - gap - thick, width: thick, height: thick)
+            }
+            grip.isHidden = false
+        }
+    }
+
+    func beginPull() {
+        guard let device else { return }
+        pull = (device, scale)
+    }
+
+    /// Pulled right by `dx` and down by `dy`, in points: the screen, kept in
+    /// the middle, grows by twice `dx` so its edge follows the pointer. Held
+    /// to the room there is, at the scale the pull began at.
+    func pull(dx: CGFloat, dy: CGFloat) {
+        guard let pull else { return }
+        let most = CGSize(width: min(room.width / pull.scale, 4000), height: min(room.height / pull.scale, 4000))
+        let size = CGSize(
+            width: min(max(pull.size.width + 2 * dx / pull.scale, 50), max(most.width, pull.size.width)).rounded(),
+            height: min(max(pull.size.height + dy / pull.scale, 50), max(most.height, pull.size.height)).rounded()
+        )
+        guard size != device else { return }
+        device = size
+        resized?(size)
+    }
+
+    func endPull() {
+        pull = nil
+        place()
     }
 
     /// The page drawn at this scale, laid out as `frame ÷ scale` wide, as
@@ -255,6 +354,99 @@ final class PageStage: NSView {
         unsafeBitCast(page.method(for: mode), to: Mode.self)(page, mode, scale == 1 ? 0 : 2)
         typealias Setter = @convention(c) (AnyObject, Selector, CGFloat) -> Void
         unsafeBitCast(page.method(for: setter), to: Setter.self)(page, setter, scale)
+    }
+}
+
+/// An edge or corner of the page's screen in Responsive Design Mode, pulled
+/// to make it another size: a short bar in the middle of an edge, lines
+/// across the corner, brighter under the pointer and while pulled.
+private final class ResizeGrip: NSView {
+    let position: NSCursor.FrameResizePosition
+    weak var stage: PageStage?
+
+    private let mark = CAShapeLayer()
+    private var start: NSPoint?
+    private var hovering = false
+
+    init(_ position: NSCursor.FrameResizePosition) {
+        self.position = position
+        super.init(frame: .zero)
+        wantsLayer = true
+        mark.fillColor = nil
+        mark.lineCap = .round
+        mark.lineWidth = 2
+        layer?.addSublayer(mark)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var wantsUpdateLayer: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func layout() {
+        super.layout()
+        let path = CGMutablePath(), mid = CGPoint(x: bounds.midX, y: bounds.midY)
+        switch position {
+        case .right:
+            path.move(to: CGPoint(x: mid.x, y: mid.y - 16))
+            path.addLine(to: CGPoint(x: mid.x, y: mid.y + 16))
+        case .bottom:
+            path.move(to: CGPoint(x: mid.x - 16, y: mid.y))
+            path.addLine(to: CGPoint(x: mid.x + 16, y: mid.y))
+        default:
+            // Two strokes across the corner, as a window's own grip once was.
+            let r = bounds.insetBy(dx: 2, dy: 2)
+            path.move(to: CGPoint(x: r.minX, y: r.minY))
+            path.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+            path.move(to: CGPoint(x: r.midX, y: r.minY))
+            path.addLine(to: CGPoint(x: r.maxX, y: r.midY))
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        mark.frame = bounds
+        mark.path = path
+        CATransaction.commit()
+    }
+
+    override func updateLayer() {
+        let lit = hovering || start != nil
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            mark.strokeColor = (lit ? NSColor.labelColor : NSColor.tertiaryLabelColor).cgColor
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                       owner: self))
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .frameResize(position: position, directions: .all))
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
+
+    override func mouseDown(with event: NSEvent) {
+        start = event.locationInWindow
+        needsDisplay = true
+        stage?.beginPull()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start else { return }
+        let point = event.locationInWindow
+        stage?.pull(dx: position == .bottom ? 0 : point.x - start.x,
+                    dy: position == .right ? 0 : start.y - point.y)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        start = nil
+        needsDisplay = true
+        stage?.endPull()
     }
 }
 
