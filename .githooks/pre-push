@@ -1,6 +1,6 @@
 #!/bin/bash
 # When the branch in use goes to GitHub, the pictures its change was shown
-# with go too: every picture in build/screenshots/, taken in the test VM.
+# with go too: every picture in build/screenshots/.
 # They land on refs/screenshots/<branch> (./screenshots.sh) before the branch
 # does, so the pull request's Screenshots check finds them and puts them in
 # its body. A failed upload never stops the push; the check says it's missing.
