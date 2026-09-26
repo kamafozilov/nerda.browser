@@ -9,6 +9,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Added
 
+- Developer Mode: a page from a server on your own Mac (localhost, 127.0.0.1) comes framed in amber and black tape, its tab edged in amber, and its address shown whole with the port picked out. Buttons for the console, with the page's JavaScript errors counted on it, Inspect Element, Hard Reload and Responsive Design Mode sit at the right of the address bar.
 - A folder with open tabs in it shows a minus that closes them all, and Close Tabs in Folder in its menu. The bookmarks stay.
 - A button at the end of the line under the bookmarks makes a new folder, where before it took a right-click.
 
@@ -20,6 +21,11 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Fixed
 
 - A tab dragged along the tabs across the top stays among them: it stops at the last tab and at the pinned sites, instead of sliding over the traffic lights, the downloads button or off the window.
+
+### Fixed
+
+- Local projects open as typed: 127.0.0.1:5173, [::1]:3000, a network address like 192.168.1.1, and any address with a port go to http://, where before most ended on a TLS error.
+- An address with 0.0.0.0 in it, as many local servers print, opens the server on this Mac instead of failing.
 
 ## [0.0.7] - 2026-09-26
 

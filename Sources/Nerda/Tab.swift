@@ -112,6 +112,16 @@ final class Tab: Identifiable {
     /// The site the tab is about: the one that failed, if one did.
     var site: URL? { failure?.url ?? url }
 
+    /// A page from a server on this Mac, one being made: it shows as such,
+    /// with the tools for it in the address bar (Developer Mode, as Arc's).
+    var isOnThisMac: Bool {
+        guard let site, ["http", "https"].contains(site.scheme) else { return false }
+        return Browser.isThisMac(site.host() ?? "")
+    }
+    /// The page's uncaught JavaScript errors since it loaded, on this Mac
+    /// only (`isOnThisMac`), for the address bar's Console button.
+    var errors = 0
+
     /// The page's own title; until it has one, the site's name, or for an
     /// address without one (file:, about:blank), the address itself.
     var title: String {
@@ -337,6 +347,28 @@ final class Tab: Identifiable {
         })();
         """, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient)
 
+    /// An uncaught error, or a promise rejected with nothing to catch it, on
+    /// a page from this Mac: counted for its tab (`errors`). Only listened
+    /// for, so the console still says where each one came from. The events
+    /// reach Nerda's own world too, where the page can't see the handler.
+    private static let pageErrors = WKUserScript(source: """
+        if (/^(localhost|.+\\.localhost|127(\\.\\d+){3}|\\[::1\\])$/.test(location.hostname)) {
+            const tell = () => webkit.messageHandlers.pageError.postMessage(null);
+            addEventListener('error', tell);
+            addEventListener('unhandledrejection', tell);
+        }
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .defaultClient)
+
+    private static let pageErrorCounts = PageErrors()
+
+    final class PageErrors: NSObject, WKScriptMessageHandler {
+        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.frameInfo.isMainFrame, let page = message.webView,
+                  let tab = (page.uiDelegate as? Browser)?.tab(for: page), tab.isOnThisMac else { return }
+            tab.errors += 1
+        }
+    }
+
     private static let middleClicks = MiddleClicks()
 
     final class MiddleClicks: NSObject, WKScriptMessageHandler {
@@ -470,6 +502,7 @@ final class Tab: Identifiable {
     /// until it has something to show, so the ground under it never shows through.
     func pageDidCommit() {
         if let page { Self.set(page, "_setDrawsBackground:", true) }
+        errors = 0
     }
 
     /// Puts the page's address in history, once it is really there: loaded,
@@ -641,6 +674,8 @@ final class Tab: Identifiable {
         configuration.userContentController.addUserScript(middleClick)
         configuration.userContentController.add(middleClicks, contentWorld: .defaultClient, name: "middleClick")
         configuration.userContentController.addUserScript(keepFocus)
+        configuration.userContentController.addUserScript(pageErrors)
+        configuration.userContentController.add(pageErrorCounts, contentWorld: .defaultClient, name: "pageError")
         configuration.userContentController.addUserScript(JSONViewer.script)
         configuration.setURLSchemeHandler(ViewSource.handler, forURLScheme: ViewSource.scheme)
         // WebKit samples the page's top edge only when asked, allowing this

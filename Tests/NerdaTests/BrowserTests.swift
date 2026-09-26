@@ -468,7 +468,18 @@ func onlyThisMacIsTrustedAsItIs(host: String, trusted: Bool) {
     ("  github.com/apple/swift ", "https://github.com/apple/swift"),
     ("http://example.com", "http://example.com"),
     ("localhost:3000", "http://localhost:3000"),
-    ("192.168.1.1", "https://192.168.1.1"),
+    ("LOCALHOST", "http://LOCALHOST"),
+    ("127.0.0.1:5174/clubs/1", "http://127.0.0.1:5174/clubs/1"),
+    ("[::1]:3000", "http://[::1]:3000"),
+    ("app.localhost:8080", "http://app.localhost:8080"),
+    ("0.0.0.0:8000", "http://0.0.0.0:8000"),
+    ("192.168.1.1", "http://192.168.1.1"),
+    ("printer.local", "http://printer.local"),
+    ("myapp.test", "http://myapp.test"),
+    ("devbox:8080/api", "http://devbox:8080/api"),
+    ("myapp.lvh.me:3000", "http://myapp.lvh.me:3000"),
+    ("example.com:443", "https://example.com:443"),
+    ("localhost.example.com", "https://localhost.example.com"),
     ("ob-havo toshkent", "https://www.google.com/search?q=ob-havo%20toshkent"),
     ("swift", "https://www.google.com/search?q=swift"),
 ])
@@ -1833,4 +1844,19 @@ private final class BlockerNavigation: NSObject, WKNavigationDelegate {
     #expect(Extensions.newerVersion(in: newer, than: "2.0") == "2.1")
     #expect(Extensions.newerVersion(in: newer, than: "2.1") == nil)
     #expect(Extensions.newerVersion(in: none, than: "2.0") == nil)
+}
+
+/// A page from this Mac has its uncaught errors counted for the address
+/// bar's console button; any other page, nothing.
+@MainActor
+@Test(arguments: [("http://localhost:5173/", 2), ("https://example.com/", 0)])
+func errorsAreCountedOnThisMacOnly(address: String, counted: Int) async throws {
+    let browser = Browser()
+    let tab = Tab()
+    browser.add(tab)
+    tab.webView.loadHTMLString("<script>setTimeout(() => { throw new Error('boom') }); Promise.reject(new Error('nope'))</script>",
+                               baseURL: URL(string: address)!)
+    while tab.webView.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(tab.errors == counted)
 }

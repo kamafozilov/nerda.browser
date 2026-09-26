@@ -146,6 +146,7 @@ struct Sidebar: View {
                                 loading: tab.isLoading,
                                 title: tab.title,
                                 selected: id == browser.selectedID,
+                                dev: tab.isOnThisMac,
                                 close: { withAnimation(.slide) { browser.close(id) } },
                                 // A new tab, or the settings, keeps the name it has.
                                 rename: tab.hasPage ? { name in
@@ -479,6 +480,7 @@ struct Sidebar: View {
             loading: tab?.isLoading ?? false,
             title: item.title,
             selected: tabID != nil && tabID == browser.selectedID,
+            dev: tab?.isOnThisMac ?? false,
             close: folderOpen ? { withAnimation(.slide) { browser.closeTabs(in: id) } }
                 : tabID.map { tabID in { withAnimation(.slide) { browser.close(tabID) } } },
             closeShown: tabID != nil || folderOpen,
@@ -864,6 +866,8 @@ private struct SidebarRow: View {
     var loading = false
     let title: String
     var selected = false
+    /// A page from a server on this Mac: edged in dashed amber, as its page is taped.
+    var dev = false
     /// Greyed, for the New Tab button, so it reads as an action rather than a tab.
     var dimmed = false
     /// Given, the row shows a close button while the pointer is over it.
@@ -918,7 +922,13 @@ private struct SidebarRow: View {
                     .fill(selected ? wash : hovering ? hover : .clear)
                     .shadow(color: .black.opacity(selected ? 0.15 : 0), radius: 2, y: 1)
             }
-            .overlay { shape.strokeBorder(selected ? rim : .clear) }
+            .overlay {
+                if dev {
+                    shape.strokeBorder(Palette.dev, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                } else {
+                    shape.strokeBorder(selected ? rim : .clear)
+                }
+            }
             .contentShape(shape)
         }
         .buttonStyle(.plain)
