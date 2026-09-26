@@ -145,3 +145,20 @@ private func pixels(_ image: NSImage?) -> [Int] {
     await icons.load(gone)
     #expect(icons.icon(gone).image != nil)
 }
+
+/// Deleting history takes the icons of the sites it named off disk.
+@MainActor
+@Test func forgottenSitesLeaveNoIconOnDisk() async throws {
+    let root = try folder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appending(path: "icon.png")
+    try png(16).write(to: file)
+    let icons = Favicons()
+    icons.folder = root.appending(path: "Nerda Dev/Favicons")
+    await icons.load("https://kept.invalid", icon: file)
+    await icons.load("https://visited.invalid", icon: file)
+
+    icons.forget(keeping: ["https://kept.invalid"])
+    let names = try FileManager.default.contentsOfDirectory(atPath: icons.folder!.path(percentEncoded: false))
+    #expect(names.map { $0.removingPercentEncoding } == ["https://kept.invalid"])
+}
