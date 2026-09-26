@@ -74,7 +74,12 @@ final class Tab: Identifiable {
     /// When the tab was last on screen, so it sleeps only once it has been away a while.
     @ObservationIgnored var lastSeen = Date.now
     /// The page, while awake.
-    @ObservationIgnored private(set) var page: WKWebView?
+    @ObservationIgnored private(set) var page: WKWebView? {
+        didSet { if isAsleep != (page == nil) { isAsleep = page == nil } }
+    }
+    /// Whether its page is let go (`sleep`), kept in step with `page` so a
+    /// pinned site's icon can show it, where `page` itself isn't watched.
+    private(set) var isAsleep = true
     /// What a sleeping page needs to wake as it was: its history, where it
     /// was scrolled to, and its zoom.
     @ObservationIgnored private var slept: (state: Any?, zoom: CGFloat)?
@@ -103,7 +108,6 @@ final class Tab: Identifiable {
 
     /// The page, woken first if the tab was asleep.
     var webView: WKWebView { page ?? wake() }
-    var isAsleep: Bool { page == nil }
     /// A new tab: nowhere yet, and no page until it is told where to go.
     var isBlank: Bool { url == nil && page == nil && settings == nil && !showsHistory }
     /// A web page to show, rather than a new tab's field or the settings.
@@ -149,6 +153,7 @@ final class Tab: Identifiable {
         self.opener = opener?.id
         madeFor = opener?.madeFor
         page = makePage(configuration)
+        isAsleep = false
     }
 
     /// A tab from an earlier run, asleep: it shows its title and icon, and
