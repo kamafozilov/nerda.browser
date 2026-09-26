@@ -70,6 +70,10 @@ struct AddressBar: View {
                 }
             }
             .padding(.leading, 4)
+            if let tab, tab.isOnThisMac {
+                DevButtons(browser: browser, errors: tab.errors)
+                    .padding(.leading, 4)
+            }
             if !browser.isPrivate {
                 ExtensionButtons(scheme: scheme)
                     .padding(.leading, 4)
@@ -138,7 +142,14 @@ private struct AddressField: View {
                     }
                 }
                 .frame(width: AddressBar.fieldIcon)
-                if let site {
+                if let site, Browser.isThisMac(site.host() ?? "") {
+                    // A server on this Mac, being worked on: the address
+                    // whole, scheme and all, and which server by its port.
+                    let port = site.port.map { ":\($0)" } ?? ""
+                    let (_, rest) = Self.parts(of: site)
+                    Text("\(Text("\(site.scheme ?? "http")://").foregroundStyle(Palette.muted))\(Text(site.host(percentEncoded: false) ?? "").foregroundStyle(Palette.ink))\(Text(port).foregroundStyle(Palette.devInk))\(Text(rest).foregroundStyle(Palette.muted))")
+                        .font(.system(size: 12, design: .monospaced))
+                } else if let site {
                     let (name, rest) = Self.parts(of: site)
                     Text("\(Text(name).foregroundStyle(Palette.ink))\(Text(rest).foregroundStyle(Palette.muted))")
                     if site.scheme == "http" {
@@ -190,6 +201,35 @@ private struct AddressField: View {
         if let query = url.query(percentEncoded: false) { rest += "?" + query }
         if let fragment = url.fragment(percentEncoded: false) { rest += "#" + fragment }
         return (site, rest)
+    }
+}
+
+/// On a page from this Mac's own server, the Developer menu's tools at hand:
+/// the console, with the page's errors counted on it, picking an element,
+/// a reload past the cache, and Responsive Design Mode.
+private struct DevButtons: View {
+    let browser: Browser
+    let errors: Int
+
+    var body: some View {
+        HStack(spacing: 2) {
+            BarButton(icon: "terminal", help: "JavaScript Console  ⌥⌘J") { browser.selected?.inspect(.console) }
+                .overlay(alignment: .topTrailing) {
+                    if errors > 0 {
+                        Text(errors > 99 ? "99+" : "\(errors)")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .frame(minWidth: 14, minHeight: 14)
+                            .background(Color.red, in: Capsule())
+                            .offset(x: 3, y: -1)
+                            .allowsHitTesting(false)
+                    }
+                }
+            BarButton(icon: "cursorarrow.rays", help: "Inspect Element  ⌥⌘C") { browser.selected?.inspect(.element) }
+            BarButton(icon: "arrow.clockwise.circle", help: "Hard Reload  ⇧⌘R") { browser.selected?.reload(fromOrigin: true) }
+            BarButton(icon: "iphone", help: "Responsive Design Mode  ⌥⌘R", action: browser.toggleResponsive)
+        }
     }
 }
 

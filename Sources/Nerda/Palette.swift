@@ -26,6 +26,14 @@ enum Palette {
     // Its accent, a muted violet, as Firefox and Arc mark private windows:
     // the selected tab, the row under the pointer, the new tab's field.
     static let incognitoAccent = Color(red: 0.63, green: 0.55, blue: 0.95)
+    // A page from a server on this Mac (Developer Mode): amber, as Arc's
+    // hazard tape, round the page, round its tab, and on its port.
+    static let dev = Color(red: 0.96, green: 0.72, blue: 0.23)
+    // As text (the port in the address): darker over a light page, to be read.
+    static let devInk = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(red: 0.96, green: 0.72, blue: 0.23, alpha: 1) : NSColor(red: 0.62, green: 0.40, blue: 0, alpha: 1)
+    })
 
     private static func pair(_ light: CGFloat, _ dark: CGFloat, alpha: CGFloat = 1) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in

@@ -433,6 +433,14 @@ extension Browser: WKNavigationDelegate {
             Task { tab.go(to: url) }
             return .cancel
         }
+        // 0.0.0.0, the address local servers print as where they listen, is
+        // refused by WebKit; it means this Mac, so 127.0.0.1 is opened instead.
+        if action.targetFrame?.isMainFrame ?? true, url.host() == "0.0.0.0",
+           var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            parts.host = "127.0.0.1"
+            if let local = parts.url { webView.load(URLRequest(url: local)) }
+            return .cancel
+        }
 
         // mailto:, tel:, zoommtg: and the like belong to other apps, and only
         // with a yes: a page could otherwise start any app it names.
@@ -610,13 +618,25 @@ nonisolated enum Address {
             if FileManager.default.fileExists(atPath: path) { return URL(fileURLWithPath: path) }
         }
 
-        let host = text.split(separator: "/", maxSplits: 1).first.map(String.init) ?? text
-        let looksLikeAddress = !text.contains(" ") && (host.contains(".") || host.hasPrefix("localhost"))
-        if looksLikeAddress, let url = URL(string: (host.hasPrefix("localhost") ? "http://" : "https://") + text) {
-            return url
-        }
+        guard !text.contains(" "), let typed = URL(string: "http://" + text),
+              let host = typed.host(percentEncoded: false)?.lowercased(), !host.isEmpty,
+              host.contains(".") || host.contains(":") || typed.port != nil || Browser.isThisMac(host)
+        else { return search(text) }
+        // Somewhere local (a server on this Mac, a router, a machine on the
+        // network), or on a port of its own, answers http: https:// there
+        // fails, as it did for 127.0.0.1:5173. The rest of the web is https,
+        // as in Chrome.
+        let plain = typed.port.map { $0 != 443 } ?? isLocal(host)
+        return plain ? typed : URL(string: "https://" + text)
+    }
 
-        return search(text)
+    /// An IP address, or a name only a local network has: localhost, one
+    /// word, or a name under a suffix kept for local use (.local, .test, …).
+    static func isLocal(_ host: String) -> Bool {
+        let parts = host.split(separator: ".")
+        return host.contains(":") || !host.contains(".") || Browser.isThisMac(host)
+            || parts.count == 4 && parts.allSatisfy { UInt8($0) != nil }
+            || ["local", "localhost", "test", "internal", "lan", "home.arpa"].contains { host.hasSuffix("." + $0) }
     }
 
     static func search(_ text: String) -> URL? {
