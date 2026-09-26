@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Downloads, AI chats and the menu read clearly over a light page. Before, they turned grey over a white site and their text faded into it, most of all with the tabs across the top.
+
 ## [0.0.6] - 2026-09-26
 
 ### Added

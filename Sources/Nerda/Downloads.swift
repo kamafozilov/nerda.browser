@@ -124,6 +124,8 @@ struct DownloadsButton: View {
         .animation(.easeOut(duration: 0.14), value: hovering)
         .popover(isPresented: $shown, arrowEdge: arrowEdge) {
             DownloadsList(browser: browser)
+                // Wider than the sidebar, and across the top over the page.
+                .popoverGlass()
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
         .overlay {
@@ -421,6 +423,7 @@ private struct FooterButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusEffectDisabled()
         .onHover { hovering = $0 }
     }
 }
