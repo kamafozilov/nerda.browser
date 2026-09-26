@@ -179,8 +179,8 @@ struct BrowserView: View {
             }
         }
         .overlay {
-            if let notes = Updater.shared.news {
-                WhatsNew(notes: notes) { withAnimation(.easeOut(duration: 0.2)) { Updater.shared.news = nil } }
+            if let releases = Updater.shared.news {
+                WhatsNew(releases: releases) { withAnimation(.easeOut(duration: 0.2)) { Updater.shared.news = nil } }
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
         }

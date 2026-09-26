@@ -66,6 +66,15 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 mkdir -p "$APP/Contents/Resources/Backgrounds"
 cp assets/backgrounds/*.heic "$APP/Contents/Resources/Backgrounds/"
 
+# Every version's notes, for What's New and Settings › Release Notes
+# (ReleaseNotes in UpdateCard.swift). release.sh builds before it gives
+# [Unreleased] its version and date, so the release gets them here.
+if [ -n "${NERDA_VERSION:-}" ]; then
+  sed "s/^## \[Unreleased\]\$/## [$VERSION] - $(date +%Y-%m-%d)/" CHANGELOG.md > "$APP/Contents/Resources/CHANGELOG.md"
+else
+  cp CHANGELOG.md "$APP/Contents/Resources/"
+fi
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

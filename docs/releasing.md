@@ -110,7 +110,9 @@ The first release build asks once for the login keychain password when it reache
 
 1. downloads `Nerda.zip` and checks it against the SHA-256 that GitHub lists (a release without one isn't taken);
 2. checks that the new app has the same bundle id, a newer version, and a valid signature, everything inside it included, from a Developer ID Application certificate Apple gave the same team;
-3. moves the old app to `Nerda.app.old`, moves the new one into place, and reopens Nerda, which restores its tabs and shows the release notes once, as What's New.
+3. moves the old app to `Nerda.app.old`, moves the new one into place, and reopens Nerda, which restores its tabs and shows What's New once: the notes of every version since the one that ran last, newest first.
+
+The notes come from the `CHANGELOG.md` that `build.sh` puts in the app (a release gets `[Unreleased]` there as its version and date), so What's New and Settings › Release Notes, which lists every version, need no network.
 
 Only the app bundle is replaced; the data folder, settings and keychain stay as they are. If Nerda can't replace itself (for example when it runs from the disk image instead of Applications), it says why and opens the release page.
 

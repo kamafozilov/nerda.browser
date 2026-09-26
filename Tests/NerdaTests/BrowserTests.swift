@@ -29,6 +29,35 @@ private let somewhere = URL(string: "https://example.com")!
     #expect(WhatsNew.sections("Just a line.") == [.init(title: nil, items: ["Just a line."])])
 }
 
+/// The bundled changelog gives each version its notes and date, newest
+/// first; an empty [Unreleased] and the links at the bottom are left out.
+@Test func releaseNotesReadEveryVersion() {
+    let changelog = """
+    # Changelog
+
+    Intro.
+
+    ## [Unreleased]
+
+    ## [0.0.2] - 2026-09-25
+
+    ### Fixed
+
+    - Two.
+
+    ## [0.0.1] - 2026-09-24
+
+    - One.
+
+    [Unreleased]: https://example.com/compare/v0.0.2...HEAD
+    [0.0.2]: https://example.com/compare/v0.0.1...v0.0.2
+    """
+    let releases = ReleaseNotes.parse(changelog)
+    #expect(releases.map(\.version) == ["0.0.2", "0.0.1"])
+    #expect(releases.map(\.notes) == ["### Fixed\n\n- Two.", "- One."])
+    #expect(releases[0].date == (try? Date("2026-09-25", strategy: .iso8601.year().month().day())))
+}
+
 /// An update is taken only with a Developer ID signature from Nerda's team:
 /// an app Apple signed itself, or anyone else did, doesn't meet it. Only a
 /// feed on this Mac is read over plain http.

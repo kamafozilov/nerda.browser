@@ -9,7 +9,9 @@ import SwiftUI
 // the latest release is read; if it is newer, a card at the foot of the
 // sidebar says so (UpdateCard), and a click on it fetches the ZIP, showing
 // how far along it is, checks it, puts it where this bundle is, and opens
-// again as the new one, tabs and all, with what's new over it (WhatsNew).
+// again as the new one, tabs and all, with what's new over it (WhatsNew):
+// every version since the one that ran last, from the CHANGELOG.md in the
+// bundle (ReleaseNotes).
 //
 // Only the bundle changes hands. The data folder (Edition.folder), the
 // defaults and the keychain are left alone; the new build keeps the bundle id
@@ -64,8 +66,6 @@ final class Updater {
 
     nonisolated struct Release: Sendable, Equatable {
         let version: String
-        /// The release's text on GitHub: its part of CHANGELOG.md.
-        let notes: String
         /// The release on GitHub, where the disk image is.
         let page: URL
         let archive: URL
@@ -102,11 +102,14 @@ final class Updater {
     /// A newer release than this one, offered at the foot of the sidebar
     /// until it is installed.
     private(set) var found: Release?
-    /// What the version just installed brought, shown once as it first opens.
+    /// What came since the version that ran last, newest first, shown once as
+    /// a newer one first opens: after an update, or a newer disk image.
     var news = Updater.unreadNews()
     private var clock: Timer?
 
-    /// Set by the version installing the update, read by the one it installs.
+    /// The version that ran last.
+    private static let launchedKey = "updater.launched"
+    /// Set by 0.0.5 and earlier as they installed an update; they kept no launchedKey.
     private static let newsKey = "updater.news"
 
     nonisolated static var current: String {
@@ -159,7 +162,6 @@ final class Updater {
                         DispatchQueue.main.async { MainActor.assumeIsolated { Updater.shared.advance(fraction) } }
                     }
                 }.value
-                UserDefaults.standard.set(["version": release.version, "notes": release.notes], forKey: Self.newsKey)
                 relaunch()
             } catch {
                 state = .available(release.version)
@@ -182,12 +184,19 @@ final class Updater {
         state = fraction < 1 ? .downloading(fraction) : .installing
     }
 
-    /// The notes the update saved, if this is the version it installed; read once.
-    private static func unreadNews() -> String? {
-        guard let saved = UserDefaults.standard.dictionary(forKey: newsKey) as? [String: String] else { return nil }
-        UserDefaults.standard.removeObject(forKey: newsKey)
-        guard saved["version"] == current, let notes = saved["notes"], !notes.isEmpty else { return nil }
-        return notes
+    /// Nothing on a first launch; after one of 0.0.5 and earlier, which
+    /// can't say what it was, only this version.
+    private static func unreadNews() -> [ReleaseNotes]? {
+        let defaults = UserDefaults.standard
+        let last = defaults.string(forKey: launchedKey)
+        let updated = defaults.object(forKey: newsKey) != nil
+        defaults.set(current, forKey: launchedKey)
+        defaults.removeObject(forKey: newsKey)
+        let news = ReleaseNotes.all.filter {
+            if let last { Version.isNewer($0.version, than: last) && !Version.isNewer($0.version, than: current) }
+            else { updated && $0.version == current }
+        }
+        return news.isEmpty ? nil : news
     }
 
     /// Quits, and a shell opens the bundle again once this process is gone
@@ -234,7 +243,6 @@ final class Updater {
         else { throw Swap.Refused.feed }
         return Release(
             version: found.tagName.hasPrefix("v") ? String(found.tagName.dropFirst()) : found.tagName,
-            notes: found.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
             page: found.htmlUrl,
             archive: zip.browserDownloadUrl,
             sha256: zip.digest.flatMap { $0.hasPrefix("sha256:") ? String($0.dropFirst(7)) : nil }
@@ -263,7 +271,6 @@ final class Updater {
         }
 
         let tagName: String
-        let body: String?
         let htmlUrl: URL
         let assets: [Asset]
     }

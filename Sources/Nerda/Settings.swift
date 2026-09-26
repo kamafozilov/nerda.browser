@@ -4,7 +4,7 @@ import WebKit
 /// The pages of Nerda's settings, listed down the settings tab's left. Only
 /// what works is listed: a page comes once it has something in it.
 enum SettingsPage: String, CaseIterable, Identifiable, Codable {
-    case general, appearance, privacy, shortcuts
+    case general, appearance, privacy, shortcuts, releaseNotes
 
     var id: Self { self }
 
@@ -14,6 +14,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .appearance: "Appearance"
         case .privacy: "Security & Privacy"
         case .shortcuts: "Keyboard Shortcuts"
+        case .releaseNotes: "Release Notes"
         }
     }
 
@@ -23,6 +24,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .appearance: "circle.lefthalf.filled"
         case .privacy: "lock"
         case .shortcuts: "keyboard"
+        case .releaseNotes: "sparkles"
         }
     }
 
@@ -30,6 +32,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
     var section: String {
         switch self {
         case .general, .appearance, .privacy, .shortcuts: "Personal"
+        case .releaseNotes: "Nerda"
         }
     }
 
@@ -40,6 +43,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .appearance: ["theme", "dark", "light", "zoom", "tab style", "vertical", "horizontal", "sidebar", "transparency", "tinted", "transparent", "glass"]
         case .privacy: ["security", "history", "delete", "clear", "cookies", "cache", "site data", "ads", "trackers", "adblock", "blocking", "filters", "easylist", "ublock", "adguard"]
         case .shortcuts: ["keyboard", "keys", "hotkeys"] + ShortcutsSettings.groups.flatMap { $0.shortcuts.map(\.title) }
+        case .releaseNotes: ["what's new", "changelog", "changes", "version", "updates"]
         }
     }
 
@@ -109,13 +113,16 @@ struct SettingsView: View {
                         .padding(.bottom, 14)
                     switch open {
                     case .general:
-                        GeneralSettings(browser: browser, languages: languages) { editingLanguages = true }
+                        GeneralSettings(browser: browser, languages: languages, editLanguages: { editingLanguages = true },
+                                        openReleaseNotes: { tab.settings = .releaseNotes })
                     case .appearance:
                         AppearanceSettings()
                     case .privacy:
                         PrivacySettings(browser: browser) { deletingData = true }
                     case .shortcuts:
                         ShortcutsSettings()
+                    case .releaseNotes:
+                        ReleaseNotesSettings()
                     }
                 }
                 .frame(maxWidth: 640, alignment: .leading)
@@ -155,6 +162,7 @@ private struct GeneralSettings: View {
     let browser: Browser
     let languages: [String]
     let editLanguages: () -> Void
+    let openReleaseNotes: () -> Void
 
     @AppStorage(SearchEngine.key) private var engine = SearchEngine.google
     @AppStorage(PictureInPicture.key) private var pictureInPicture = false
@@ -207,7 +215,7 @@ private struct GeneralSettings: View {
                 SettingsToggle(title: "Warn before quitting", isOn: $warnsBeforeQuitting)
             }
         }
-        AboutSettings()
+        AboutSettings(openReleaseNotes: openReleaseNotes)
     }
 
     /// Sites are told a new first language only from the next launch on.
@@ -958,6 +966,8 @@ private struct DefaultBrowserCard: View {
 }
 
 private struct AboutSettings: View {
+    let openReleaseNotes: () -> Void
+
     private let updater = Updater.shared
 
     var body: some View {
@@ -976,6 +986,7 @@ private struct AboutSettings: View {
                 }
             }
             .padding(.vertical, 6)
+            SettingsLink(title: "Release notes", detail: "What each version brought", icon: "sparkles", action: openReleaseNotes)
         }
         VStack(alignment: .leading, spacing: 3) {
             if let copyright = Bundle.main.infoDictionary?["NSHumanReadableCopyright"] as? String {
@@ -989,6 +1000,33 @@ private struct AboutSettings: View {
         .textSelection(.enabled)
         .padding(.horizontal, 13)
         .padding(.top, 4)
+    }
+}
+
+/// What every version brought, from CHANGELOG.md in the bundle, newest
+/// first, the one running marked.
+private struct ReleaseNotesSettings: View {
+    var body: some View {
+        ForEach(ReleaseNotes.all) { release in
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    ReleaseHeading(release: release)
+                    if release.version == Updater.current {
+                        Text("Installed")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Palette.muted)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Color.primary.opacity(0.08), in: Capsule())
+                    }
+                }
+                .padding(.leading, 12)
+                .padding(.top, 22)
+                ReleaseNotesList(notes: release.notes)
+                    .padding(16)
+                    .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
     }
 }
 
