@@ -17,8 +17,9 @@ A fix: what went wrong before, and what happens now.
 ## Screenshots
 
 <!--
-Pictures from the test VM (./vm.sh), uploaded by ./screenshots.sh, which
-prints these lines. The address is always
+Pictures from the test VM (./vm.sh), left in build/ as before.png and
+after.png: pushing the branch uploads them, and the Screenshots check puts
+them here. The address is always
 https://raw.githubusercontent.com/kamafozilov/nerda.browser/screenshots/<head branch>/<file>
 
 A new feature (feat), one picture:

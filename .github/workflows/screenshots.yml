@@ -1,0 +1,29 @@
+# Every pull request shows what it changes on screen, or says nothing does
+# (docs/pull-requests.md#screenshots); .github/screenshots.py does the work.
+# pull_request_target, so it can edit a pull request from a fork too: it runs
+# main's copy of this and never checks out the pull request's code.
+name: Screenshots
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+      - run: python3 .github/screenshots.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          BODY: ${{ github.event.pull_request.body }}
+          BASE_REPO: ${{ github.repository }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
