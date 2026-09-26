@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.10] - 2026-09-26
+
 ### Added
 
 - Settings › General › Load pinned tabs at launch. Turned off, Nerda opens on a new tab, and a pinned tab loads only when you open it.
@@ -191,7 +193,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.9...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.10...HEAD
+[0.0.10]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.9...v0.0.10
 [0.0.9]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.6...v0.0.7
