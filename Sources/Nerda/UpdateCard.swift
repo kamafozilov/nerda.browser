@@ -90,11 +90,48 @@ struct UpdateCard: View {
     }
 }
 
-/// Over the window the first time a newly installed version opens: what it
-/// brought, from its release notes (its section of CHANGELOG.md), each
-/// heading with a mark of its own. A click outside it, or Continue, puts it away.
-struct WhatsNew: View {
+/// A version's part of CHANGELOG.md, which build.sh puts in the bundle.
+nonisolated struct ReleaseNotes: Equatable, Identifiable {
+    /// "Unreleased" in a development build: what is on its way.
+    let version: String
+    let date: Date?
     let notes: String
+
+    var id: String { version }
+
+    /// Every version's, newest first.
+    static let all: [ReleaseNotes] = Bundle.main.url(forResource: "CHANGELOG", withExtension: "md")
+        .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+        .map(parse) ?? []
+
+    /// Each `## [version] - date` and what is under it, up to the next one or
+    /// the links at the bottom; a version with nothing under it is left out.
+    static func parse(_ changelog: String) -> [ReleaseNotes] {
+        var found: [(heading: Substring, lines: [Substring])] = []
+        for line in changelog.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("## [") {
+                found.append((line.dropFirst(4), []))
+            } else if line.hasPrefix("["), line.contains("]: ") {
+                break
+            } else if !found.isEmpty {
+                found[found.count - 1].lines.append(line)
+            }
+        }
+        return found.compactMap { heading, lines in
+            let notes = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !notes.isEmpty, let end = heading.firstIndex(of: "]") else { return nil }
+            let date = heading[end...].split(separator: " ").last
+                .flatMap { try? Date(String($0), strategy: .iso8601.year().month().day()) }
+            return ReleaseNotes(version: String(heading[..<end]), date: date, notes: notes)
+        }
+    }
+}
+
+/// Over the window the first time a newer version opens: what each version
+/// since the one that ran last brought, newest first, each heading with a
+/// mark of its own. A click outside it, or Continue, puts it away.
+struct WhatsNew: View {
+    let releases: [ReleaseNotes]
     let close: () -> Void
 
     nonisolated struct Section: Equatable {
@@ -149,7 +186,9 @@ struct WhatsNew: View {
             Text("What's New in Nerda")
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(Palette.ink)
-            Text("Version \(Updater.current)")
+            Text(releases.count > 1
+                 ? "\(releases.count) updates, \(releases.last?.version ?? "") to \(Updater.current)"
+                 : "Version \(Updater.current)")
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
         }
@@ -157,48 +196,21 @@ struct WhatsNew: View {
         .padding(.bottom, 18)
     }
 
+    /// With more than one version, each under its number and date.
     private var list: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            ForEach(Array(Self.sections(notes).enumerated()), id: \.offset) { _, section in
-                let mark = Self.mark(section.title)
-                VStack(alignment: .leading, spacing: 10) {
-                    if let title = section.title {
-                        Label {
-                            Text(mark.name ?? title)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Palette.ink)
-                        } icon: {
-                            Image(systemName: mark.icon)
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 22, height: 22)
-                                .background(mark.color.gradient, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        }
-                    }
-                    ForEach(Array(section.items.enumerated()), id: \.offset) { _, item in
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Circle()
-                                .fill(mark.color)
-                                .frame(width: 5, height: 5)
-                                .padding(.leading, 9)
-                                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-                            Text(Self.inline(item))
-                                .font(.system(size: 13))
-                                .foregroundStyle(Palette.ink.opacity(0.85))
-                                .lineSpacing(2)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .textSelection(.enabled)
-                        }
-                    }
+        VStack(alignment: .leading, spacing: 26) {
+            ForEach(releases) { release in
+                VStack(alignment: .leading, spacing: 14) {
+                    if releases.count > 1 { ReleaseHeading(release: release) }
+                    ReleaseNotesList(notes: release.notes)
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 24)
     }
 
     /// Keep a Changelog's headings, in plainer words, with an icon and colour each.
-    private static func mark(_ title: String?) -> (name: String?, icon: String, color: Color) {
+    static func mark(_ title: String?) -> (name: String?, icon: String, color: Color) {
         switch title {
         case "Added": ("New", "sparkles", .blue)
         case "Changed": ("Changed", "wand.and.stars", .purple)
@@ -210,7 +222,7 @@ struct WhatsNew: View {
         }
     }
 
-    private static func inline(_ markdown: String) -> AttributedString {
+    static func inline(_ markdown: String) -> AttributedString {
         (try? AttributedString(markdown: markdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(markdown)
     }
@@ -236,5 +248,67 @@ struct WhatsNew: View {
             }
         }
         return sections.filter { !$0.items.isEmpty }
+    }
+}
+
+/// A version's number and the day it came out.
+struct ReleaseHeading: View {
+    let release: ReleaseNotes
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(release.version == "Unreleased" ? "Coming next" : "Nerda \(release.version)")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            if let date = release.date {
+                Text(date.formatted(date: .long, time: .omitted))
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+            }
+        }
+    }
+}
+
+/// A version's notes by heading, each with its mark and a dot before each line.
+struct ReleaseNotesList: View {
+    let notes: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ForEach(Array(WhatsNew.sections(notes).enumerated()), id: \.offset) { _, section in
+                let mark = WhatsNew.mark(section.title)
+                VStack(alignment: .leading, spacing: 10) {
+                    if let title = section.title {
+                        Label {
+                            Text(mark.name ?? title)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Palette.ink)
+                        } icon: {
+                            Image(systemName: mark.icon)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 22, height: 22)
+                                .background(mark.color.gradient, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+                    }
+                    ForEach(Array(section.items.enumerated()), id: \.offset) { _, item in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Circle()
+                                .fill(mark.color)
+                                .frame(width: 5, height: 5)
+                                .padding(.leading, 9)
+                                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                            Text(WhatsNew.inline(item))
+                                .font(.system(size: 13))
+                                .foregroundStyle(Palette.ink.opacity(0.85))
+                                .lineSpacing(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
