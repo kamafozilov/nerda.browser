@@ -88,7 +88,10 @@ struct HistoryPage: View {
     }
 
     private func refresh() {
-        lines = Self.lines(of: Self.days(of: History.shared.visits.values, matching: query))
+        // Found in History's index, as the address bar's are: latest first,
+        // with titles and addresses already folded to look through.
+        let found = History.shared.pages(containing: [query.trimmingCharacters(in: .whitespaces)])
+        lines = Self.lines(of: Self.days(of: found))
         hasPages = !History.shared.visits.isEmpty
     }
 
@@ -114,19 +117,17 @@ struct HistoryPage: View {
         }
     }
 
-    /// The visits whose title or address has what is typed in it, latest
-    /// first, by the day of their last visit.
-    static func days(of visits: some Sequence<History.Visit>, matching query: String,
-                     calendar: Calendar = .current) -> [(day: Date, visits: [History.Visit])] {
-        let text = query.trimmingCharacters(in: .whitespaces)
-        let found = visits
-            .filter { text.isEmpty || $0.title.localizedCaseInsensitiveContains(text)
-                || $0.url.absoluteString.localizedCaseInsensitiveContains(text) }
-            .sorted { $0.last > $1.last }
+    /// The visits, latest first, by the day of their last visit.
+    static func days(of visits: [History.Visit], calendar: Calendar = .current) -> [(day: Date, visits: [History.Visit])] {
         var days: [(day: Date, visits: [History.Visit])] = []
-        for visit in found {
-            let day = calendar.startOfDay(for: visit.last)
-            if days.last?.day == day { days[days.count - 1].visits.append(visit) } else { days.append((day, [visit])) }
+        for visit in visits {
+            // One no earlier than the last day's start is on it: only a new
+            // day is worked out.
+            if let day = days.last?.day, visit.last >= day {
+                days[days.count - 1].visits.append(visit)
+            } else {
+                days.append((calendar.startOfDay(for: visit.last), [visit]))
+            }
         }
         return days
     }
