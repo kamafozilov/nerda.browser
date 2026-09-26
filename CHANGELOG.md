@@ -12,6 +12,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Responsive Design Mode: the device, its size and Rotate sit in the middle of the bar, over the page. Pull the page's right or bottom edge, or the corner between, to make it any size. The size fields select all of themselves when clicked, step by 1 with ↑ and ↓ (10 with Shift), and put back the old number with Escape. A hairline shows where a dark page ends.
 - Developer Mode no longer frames the page in amber and black tape. A local page is still marked by its amber port in the address bar, and in the sidebar's list of tabs by its amber edge.
 
+### Fixed
+
+- Closing a tab or putting one to sleep frees its memory. Before, a closed tab kept its page running out of sight: after an evening of browsing, gigabytes of memory and a busy processor, until Nerda quit.
+
 ## [0.0.8] - 2026-09-26
 
 ### Added
