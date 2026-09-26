@@ -99,8 +99,12 @@ struct TabStrip: View {
             if let tab = draggedTab {
                 let asPin = tab.isPinned != (landing != nil)
                 let width = asPin ? Self.icon : tabWidth > 0 ? tabWidth : Self.widths.upperBound
+                // From the pinned sites, for what is one or turns into one, or
+                // else the first tab, to the last tab: not over the traffic
+                // lights, the + button, the downloads or off the window.
                 Along(pointer: pointer, grab: landing == nil ? dragged?.grab ?? 0 : 0, width: width,
-                      y: asPin ? Self.height / 2 : Self.height - Self.tabHeight / 2) {
+                      y: asPin ? Self.height / 2 : Self.height - Self.tabHeight / 2,
+                      span: { [layout] in (asPin ? layout.pins.minX : layout.tabs.minX, layout.tabs.maxX) }) {
                     if asPin {
                         PinnedIcon(site: tab.site, loading: false, title: tab.title, selected: true) {}
                     } else {
@@ -352,16 +356,19 @@ struct TabStrip: View {
 }
 
 /// What is dragged, under the pointer, along the strip: the one view a move of
-/// the pointer draws again. Kept from going off its start.
+/// the pointer draws again. Kept within `span`, read on each move, so the
+/// row it is in is up to date as it makes way.
 private struct Along<Content: View>: View {
     let pointer: Pointer
     let grab: CGFloat
     let width: CGFloat
     let y: CGFloat
+    let span: () -> (from: CGFloat, to: CGFloat)
     @ViewBuilder let content: Content
 
     var body: some View {
-        content.position(x: max(pointer.at.x - grab, width / 2), y: y)
+        let span = span()
+        content.position(x: max(min(pointer.at.x - grab, span.to - width / 2), span.from + width / 2), y: y)
     }
 }
 
