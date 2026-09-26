@@ -135,7 +135,9 @@ struct WhatsNew: View {
     let close: () -> Void
 
     /// How tall the notes stand before they scroll.
-    static let listHeight: CGFloat = 280
+    static let listHeight: CGFloat = 400
+
+    @State private var notesHeight: CGFloat = 0
 
     nonisolated struct Section: Equatable {
         var title: String?
@@ -145,29 +147,34 @@ struct WhatsNew: View {
     var body: some View {
         GeometryReader { window in
             ZStack {
-                Color.black.opacity(0.25)
+                Color.black.opacity(0.1)
                     .contentShape(Rectangle())
                     .onTapGesture(perform: close)
                 VStack(spacing: 0) {
                     header
-                    // Scrolls only when the notes don't fit.
-                    ViewThatFits(in: .vertical) {
-                        list
-                        ScrollView { list.padding(.vertical, 8) }
-                            .scrollIndicators(.never)
-                            // Fading out at its edges rather than cut off there.
-                            .mask {
-                                VStack(spacing: 0) {
-                                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 12)
-                                    Color.black
-                                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 24)
-                                }
-                            }
-                    }
                     // A few notes' worth, however tall the window: the first
                     // are read at a glance, the rest scrolled to. Less in a
                     // window too short for that.
-                    .frame(maxHeight: min(Self.listHeight, max(120, window.size.height - 360)))
+                    let most = min(Self.listHeight, max(120, window.size.height - 360))
+                    // As tall as the notes, up to that; ViewThatFits took the
+                    // whole of it and left short notes floating in its middle.
+                    ScrollView {
+                        list
+                            .padding(.vertical, 8)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { notesHeight = $0 }
+                    }
+                    .scrollIndicators(.never)
+                    .scrollBounceBehavior(.basedOnSize)
+                    // Fading out at its edges rather than cut off there, when it scrolls.
+                    .mask {
+                        let fade = notesHeight > most
+                        VStack(spacing: 0) {
+                            LinearGradient(colors: [fade ? .clear : .black, .black], startPoint: .top, endPoint: .bottom).frame(height: 12)
+                            Color.black
+                            LinearGradient(colors: [.black, fade ? .clear : .black], startPoint: .top, endPoint: .bottom).frame(height: 24)
+                        }
+                    }
+                    .frame(height: min(notesHeight, most))
                     Button(action: close) {
                         Text("Continue").frame(maxWidth: .infinity)
                     }
@@ -176,8 +183,10 @@ struct WhatsNew: View {
                     .keyboardShortcut(.defaultAction)
                     .padding(20)
                 }
-                .frame(width: 460)
-                .glassPanel(cornerRadius: 24)
+                .frame(width: min(580, window.size.width - 48))
+                // Lightly tinted, as the other panels over the window: the
+                // window's ground at its usual strength turned it near black.
+                .glassPanel(cornerRadius: 26, tint: 0.35)
             }
         }
         .onExitCommand(perform: close)
