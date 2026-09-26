@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-09-26
+
 ### Added
 
 - Developer Mode: a page from a server on your own Mac (localhost, 127.0.0.1) comes framed in amber and black tape, its tab edged in amber, and its address shown whole with the port picked out. Buttons for the console, with the page's JavaScript errors counted on it, Inspect Element, Hard Reload and Responsive Design Mode sit at the right of the address bar.
@@ -164,7 +166,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.7...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.8...HEAD
+[0.0.8]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.4...v0.0.5
