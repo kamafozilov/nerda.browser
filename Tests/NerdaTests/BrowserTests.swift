@@ -1705,6 +1705,30 @@ private final class BlockerNavigation: NSObject, WKNavigationDelegate {
     #expect(again.bookmark == nil && Browser.listed(again))
 }
 
+/// A folder's minus closes its open tabs, and those of folders inside it,
+/// but no other; its bookmarks stay.
+@MainActor
+@Test func aFolderClosesItsTabs() {
+    let browser = Browser()
+    browser.bookmarks = Bookmarks()
+    let outer = Bookmarks.Item(title: "outer", children: []), inner = Bookmarks.Item(title: "inner", children: [])
+    let a = Bookmarks.Item(title: "a", url: somewhere), b = Bookmarks.Item(title: "b", url: somewhere)
+    let c = Bookmarks.Item(title: "c", url: somewhere)
+    browser.bookmarks.add(outer)
+    browser.bookmarks.add(inner, to: outer.id)
+    browser.bookmarks.add(a, to: outer.id)
+    browser.bookmarks.add(b, to: inner.id)
+    browser.bookmarks.add(c)
+    #expect(!browser.hasTabs(in: outer.id))
+    [a, b, c].forEach { browser.open(bookmark: $0.id) }
+    #expect(browser.hasTabs(in: outer.id) && browser.hasTabs(in: inner.id))
+
+    browser.closeTabs(in: outer.id)
+    #expect(!browser.hasTabs(in: outer.id))
+    #expect(browser.tab(of: c.id) != nil)
+    #expect(browser.bookmarks.item(a.id) != nil && browser.bookmarks.item(b.id) != nil)
+}
+
 /// Chrome, Safari and Firefox export bookmarks as the same old HTML: its
 /// folders come in as folders, and what is escaped in it as it was.
 @Test func bookmarksComeInFromAnExportedFile() {

@@ -440,7 +440,7 @@ struct Sidebar: View {
                         .padding(.bottom, 4)
                         .transition(.opacity)
                 } else {
-                    BookmarksLine()
+                    BookmarksLine { newFolder(in: nil) }
                 }
             }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.line = $0 }
@@ -472,13 +472,17 @@ struct Sidebar: View {
         let id = row.id, item = row.item
         let tab = browser.tab(of: id)
         let tabID = tab?.id
+        let folderOpen = item.isFolder && browser.hasTabs(in: id)
         return SidebarRow(
             icon: item.isFolder ? "folder" : "globe",
             site: item.isFolder ? nil : tab?.site ?? item.url,
             loading: tab?.isLoading ?? false,
             title: item.title,
             selected: tabID != nil && tabID == browser.selectedID,
-            close: tabID.map { tabID in { withAnimation(.slide) { browser.close(tabID) } } },
+            close: folderOpen ? { withAnimation(.slide) { browser.closeTabs(in: id) } }
+                : tabID.map { tabID in { withAnimation(.slide) { browser.close(tabID) } } },
+            closeShown: tabID != nil || folderOpen,
+            closesFolder: item.isFolder,
             rename: { name in
                 renaming = nil
                 if let name { browser.bookmarks.rename(id, to: name) }
@@ -508,6 +512,9 @@ struct Sidebar: View {
         if row.item.isFolder {
             Button("New Folder") { newFolder(in: id) }
             Button("Rename") { renaming = id }
+            if browser.hasTabs(in: id) {
+                Button("Close Tabs in Folder") { withAnimation(.slide) { browser.closeTabs(in: id) } }
+            }
             Divider()
             Button("Delete Folder") { withAnimation(.slide) { browser.removeBookmark(id) } }
         } else if let url = row.item.url {
@@ -813,15 +820,38 @@ extension Animation {
 }
 
 /// Under the bookmarks, the line between them and the tabs, a hairline as
-/// Zen's, in a strip tall enough to right-click and drop onto.
+/// Zen's, in a strip tall enough to right-click and drop onto; at its end,
+/// the button that makes a folder.
 private struct BookmarksLine: View {
+    let newFolder: () -> Void
+
+    @State private var hovering = false
+
     var body: some View {
-        Rectangle()
-            .fill(Color.primary.opacity(0.1))
-            .frame(height: 1)
-            .padding(.horizontal, 6)
-            .frame(height: 14)
-            .contentShape(Rectangle())
+        HStack(spacing: 6) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.1))
+                .frame(height: 1)
+            Button(action: newFolder) {
+                Image(systemName: "folder.badge.plus")
+                    .font(.system(size: 12))
+                    .foregroundStyle(hovering ? Palette.ink : Palette.muted)
+                    .frame(width: 26, height: 20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(hovering ? Palette.hover : .clear)
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("New Folder")
+            .accessibilityLabel("New Folder")
+            .onHover { hovering = $0 }
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, 2)
+        .frame(height: 20)
+        .contentShape(Rectangle())
     }
 }
 
@@ -838,6 +868,11 @@ private struct SidebarRow: View {
     var dimmed = false
     /// Given, the row shows a close button while the pointer is over it.
     var close: (() -> Void)?
+    /// The close button shown with the pointer anywhere: a bookmark's tab
+    /// is open, or some in a folder are.
+    var closeShown = false
+    /// A minus, to close a folder's tabs; an ×, a tab.
+    var closesFolder = false
     /// Given, a double-click makes the title editable in place: Return or a
     /// click away keeps the new name (nil for Esc, which keeps the old).
     var rename: ((String?) -> Void)?
@@ -894,8 +929,8 @@ private struct SidebarRow: View {
         // Over the row rather than inside it, so a click on it closes the tab
         // without also selecting it.
         .overlay(alignment: .trailing) {
-            if let close, hovering, !renaming {
-                CloseButton(action: close).padding(.trailing, 6)
+            if let close, hovering || closeShown, !renaming {
+                CloseButton(folder: closesFolder, action: close).padding(.trailing, 6)
             }
         }
         // After the overlay, so moving onto the close button still counts as
@@ -1101,13 +1136,15 @@ private struct PinSlot: View {
 }
 
 struct CloseButton: View {
+    /// A minus, closing a folder's tabs, rather than an ×.
+    var folder = false
     let action: () -> Void
 
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "xmark")
+            Image(systemName: folder ? "minus" : "xmark")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(hovering ? Palette.ink : Palette.muted)
                 .frame(width: 22, height: 22)
@@ -1118,7 +1155,7 @@ struct CloseButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Close Tab")
+        .accessibilityLabel(folder ? "Close Tabs in Folder" : "Close Tab")
         .onHover { hovering = $0 }
     }
 }
