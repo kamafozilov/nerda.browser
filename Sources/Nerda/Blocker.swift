@@ -167,7 +167,8 @@ final class Blocker {
         }
         guard status == 0 || status == Self.someMissing else { return failed = true }
         failed = status != 0
-        if fetch {
+        // A list never had isn't fetched: stay due, so the timer tries again.
+        if fetch, status == 0 {
             updated = .now
             UserDefaults.standard.set(Date.now, forKey: Self.fetchedKey)
         }

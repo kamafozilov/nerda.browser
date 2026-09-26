@@ -12,6 +12,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Responsive Design Mode: the device, its size and Rotate sit in the middle of the bar, over the page. Pull the page's right or bottom edge, or the corner between, to make it any size. The size fields select all of themselves when clicked, step by 1 with ↑ and ↓ (10 with Shift), and put back the old number with Escape. A hairline shows where a dark page ends.
 - Developer Mode no longer frames the page in amber and black tape. A local page is still marked by its amber port in the address bar, and in the sidebar's list of tabs by its amber edge.
 
+### Fixed
+
+- Blocking ads and trackers works after a first launch without internet, where before nothing was blocked for four days. Nerda fetches the lists again every few hours and at each launch until it has them.
+
 ## [0.0.8] - 2026-09-26
 
 ### Added
