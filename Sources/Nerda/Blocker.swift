@@ -139,7 +139,10 @@ final class Blocker {
         await withCheckedContinuation { waiting.append($0) }
     }
 
+    /// Due every few days, and while a chosen list was never had, whatever the
+    /// date says: an offline launch before 0.0.9 wrote it without one.
     private var isDue: Bool {
+        if chosen.contains(where: { !FileManager.default.fileExists(atPath: FilterList(title: "", url: $0).cached.path) }) { return true }
         guard let fetched = UserDefaults.standard.object(forKey: Self.fetchedKey) as? Date else { return true }
         return Date.now.timeIntervalSince(fetched) > Self.refreshAfter
     }
@@ -177,7 +180,8 @@ final class Blocker {
         }
         guard status == 0 || status == Self.someMissing else { return failed = true }
         failed = status != 0
-        if fetch {
+        // A list never had isn't fetched: stay due, so the schedule tries again.
+        if fetch, status == 0 {
             updated = .now
             UserDefaults.standard.set(Date.now, forKey: Self.fetchedKey)
         }

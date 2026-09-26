@@ -19,6 +19,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Closing a tab or putting one to sleep frees its memory. Before, a closed tab kept its page running out of sight: after an evening of browsing, gigabytes of memory and a busy processor, until Nerda quit.
 - The sidebar stays quick with thousands of imported bookmarks. Before, each switch of tab, or a page loading, could hold it up for a quarter of a second.
 - Delete browsing data, with Browsing history ticked, also deletes the icons Nerda kept of the sites it takes out of your history. Before, they stayed on this Mac, a list of the sites you had visited.
+- Blocking ads and trackers works after a first launch without internet, where before nothing was blocked for four days. Nerda tries the lists again about every half hour until it has them.
 
 ## [0.0.8] - 2026-09-26
 
