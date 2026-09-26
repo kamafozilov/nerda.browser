@@ -542,7 +542,7 @@ private struct PinnedIcon: View {
 
     var body: some View {
         Button(action: action) {
-            TabIcon(site: site, loading: loading && Favicons.origin(of: site).flatMap { Favicons.shared.images[$0] } == nil,
+            TabIcon(site: site, loading: loading && Favicons.origin(of: site).flatMap { Favicons.shared.icon($0).image } == nil,
                     size: 16)
                 .frame(width: TabStrip.icon, height: 26)
                 .background(shape.fill(selected ? Palette.wash : hovering ? Palette.hover : .clear))

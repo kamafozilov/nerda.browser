@@ -1077,13 +1077,13 @@ private struct PinnedTile: View {
     private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
 
     var body: some View {
-        let tint = Favicons.origin(of: site).flatMap { Favicons.shared.tints[$0] }
+        let tint = Favicons.origin(of: site).flatMap { Favicons.shared.icon($0).tint }
         let colors = tint?.colors.map { Color(nsColor: $0) } ?? []
         Button(action: action) {
             // Its icon stays while the site loads, once there is one: a
             // pinned site loads at launch, and a slow one (Gmail) would
             // otherwise sit as a spinner for seconds.
-            TabIcon(site: site, loading: loading && Favicons.origin(of: site).flatMap { Favicons.shared.images[$0] } == nil,
+            TabIcon(site: site, loading: loading && Favicons.origin(of: site).flatMap { Favicons.shared.icon($0).image } == nil,
                     size: 16)
                 .frame(maxWidth: .infinity)
                 .frame(height: Sidebar.tileHeight)
