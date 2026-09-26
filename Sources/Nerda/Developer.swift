@@ -208,6 +208,11 @@ private struct SizeField: View {
     }
 
     private func set(_ number: CGFloat) {
+        // `Double("nan")` is a number too, and one no `Int` can be made of.
+        guard number.isFinite else {
+            text = "\(Int(value))"
+            return
+        }
         let number = min(max(number.rounded(), 50), 4000)
         text = "\(Int(number))"
         if number != value { commit(number) }
