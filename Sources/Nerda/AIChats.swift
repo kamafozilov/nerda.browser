@@ -145,6 +145,7 @@ struct AIChatsButton: View {
         .animation(.easeOut(duration: 0.14), value: hovering)
         .popover(isPresented: $shown, arrowEdge: .top) {
             AIChatsList(browser: browser) { shown = false }
+                .popoverGlass()
         }
     }
 }
