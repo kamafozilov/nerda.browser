@@ -450,6 +450,9 @@ final class Tab: Identifiable {
         slept = (page.interactionState, page.pageZoom)
         observations = []
         topColor = nil
+        // Its PageSlot too, now: it holds the page, and PageView takes it out
+        // only when it next updates, which a tab out of sight doesn't make it do.
+        page.superview?.superview?.removeFromSuperview()
         page.removeFromSuperview()
         self.page = nil
         isLoading = false
@@ -589,6 +592,9 @@ final class Tab: Identifiable {
         page.setAllMediaPlaybackSuspended(true)
         page.setCameraCaptureState(.none)
         page.setMicrophoneCaptureState(.none)
+        // Out of its stage: WebKit holds the stage as where its inspector
+        // docks, so a page left in it holds itself, and its process runs on.
+        page.removeFromSuperview()
         Self.endServiceWorkers()
     }
 

@@ -14,6 +14,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Fixed
 
+- Closing a tab or putting one to sleep frees its memory. Before, a closed tab kept its page running out of sight: after an evening of browsing, gigabytes of memory and a busy processor, until Nerda quit.
 - Blocking ads and trackers works after a first launch without internet, where before nothing was blocked for four days. Nerda fetches the lists again every few hours and at each launch until it has them.
 
 ## [0.0.8] - 2026-09-26
