@@ -78,8 +78,11 @@ final class Tab: Identifiable {
     /// What a sleeping page needs to wake as it was: its history, where it
     /// was scrolled to, and its zoom.
     @ObservationIgnored private var slept: (state: Any?, zoom: CGFloat)?
-    /// The top of the page as it went to sleep, for its hover card (`TabPeek`).
-    @ObservationIgnored private(set) var look: NSImage?
+    /// The top of the page as it went to sleep, for its hover card (`TabPeek`),
+    /// as a PNG: the same picture in ~100 KB, where its pixels took ~700 KB
+    /// for each tab asleep. Made a picture again only when a card shows it.
+    @ObservationIgnored private var packedLook: Data?
+    var look: NSImage? { packedLook.flatMap(NSImage.init(data:)) }
     @ObservationIgnored private var observations: [NSObject] = []
     /// The page's top edge, as last sampled (`recolor`): by WebKit, or here.
     @ObservationIgnored private var topColor: NSColor?
@@ -335,15 +338,25 @@ final class Tab: Identifiable {
     /// into theater mode, lost it, and the arrow keys scrolled the page
     /// instead of setting the volume. So what had it, taken out and put back
     /// with nothing else given the keyboard meanwhile, is given it again.
-    private static let keepFocus = WKUserScript(source: """
+    /// The page's changes are watched only while something has the keyboard:
+    /// watched all the time, in every frame, each change a page made (a feed
+    /// filling, a chat) was looked at for nothing.
+    static let keepFocus = WKUserScript(source: """
         (() => {
             let focused = null;
-            addEventListener('focusin', event => { focused = event.composedPath()[0]; }, true);
-            // Let go of, not taken out: a click elsewhere, or the keyboard moved on.
-            addEventListener('focusout', event => { if (event.composedPath()[0].isConnected) focused = null; }, true);
-            new MutationObserver(() => {
+            const moves = new MutationObserver(() => {
                 if (focused?.isConnected && document.activeElement === document.body) focused.focus({ preventScroll: true });
-            }).observe(document, { childList: true, subtree: true });
+            });
+            addEventListener('focusin', event => {
+                focused = event.composedPath()[0];
+                moves.observe(document, { childList: true, subtree: true });
+            }, true);
+            // Let go of, not taken out: a click elsewhere, or the keyboard moved on.
+            addEventListener('focusout', event => {
+                if (!event.composedPath()[0].isConnected) return;
+                focused = null;
+                moves.disconnect();
+            }, true);
         })();
         """, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient)
 
@@ -442,11 +455,19 @@ final class Tab: Identifiable {
 
     /// Lets the page go, keeping what it takes to bring it back. Its process
     /// ends with it, and with that the memory, which is most of a tab's cost.
-    /// `look`, the page's top (`snapshot`), stays for its hover card: a few
-    /// hundred KB, of the hundreds of MB let go.
+    /// `look`, the page's top (`snapshot`), stays for its hover card: some
+    /// 100 KB, of the hundreds of MB let go.
     func sleep(keeping look: NSImage? = nil) {
         guard let page else { return }
-        self.look = look
+        // Packed off the main thread: a few ms each, and under memory
+        // pressure every tab out of sight sleeps at once.
+        packedLook = nil
+        if let pixels = look?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            Task {
+                let packed = await Task.detached(priority: .utility) { Self.png(pixels) }.value
+                if isAsleep { packedLook = packed }
+            }
+        }
         slept = (page.interactionState, page.pageZoom)
         observations = []
         topColor = nil
@@ -470,6 +491,12 @@ final class Tab: Identifiable {
         return try? await page.takeSnapshot(configuration: top)
     }
 
+    /// Lossless, so the card shows just what the page did, see-through
+    /// parts (a page not yet in) and all.
+    nonisolated static func png(_ image: CGImage) -> Data? {
+        NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+    }
+
     /// What the page's process takes, as Activity Monitor's Memory column
     /// counts it; nil while asleep, or before the page has a process.
     // WebKit SPI, as Bench uses: should it go, the card shows no memory.
@@ -485,7 +512,7 @@ final class Tab: Identifiable {
 
     @discardableResult
     private func wake(for target: URL? = nil) -> WKWebView {
-        look = nil
+        packedLook = nil
         let site = target ?? url
         madeFor = Extensions.host(of: site)
         let page = makePage(site.flatMap(Extensions.configuration(for:)) ?? Self.configuration(dataStore))
@@ -604,6 +631,11 @@ final class Tab: Identifiable {
     /// a news site's) long after its pages sleep or close. Half a minute on,
     /// as Chrome ends idle ones, they end; those of pages still open start
     /// again when needed, as service workers are made to.
+    /// WebKit can only end them all (it has no call for one site's, nor for
+    /// the idle ones but in its tests), so a page still open has its worker
+    /// start again at its next request: a short wait, once, for what would
+    /// otherwise keep hundreds of MB. Worth it after a sleep as after a
+    /// close: the page's process goes either way, its worker's wouldn't.
     // WebKit SPI: should it go, workers end when WebKit sees fit, as they did.
     static func endServiceWorkers() {
         endingWorkers?.cancel()

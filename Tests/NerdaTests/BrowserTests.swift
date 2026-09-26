@@ -1107,6 +1107,8 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     restored.restore(from: file)
     #expect(restored.tabs.map(\.isPinned) == [true, true, false, false])
     #expect(restored.tabs.map(\.title) == ["a.test", "c.test", "example.com", "b.test"])
+    // Pinned tabs wake as soon as the window is up: the main thread's next turn.
+    try await Task.sleep(for: .milliseconds(50))
     #expect(!restored.tabs[0].isAsleep && !restored.tabs[1].isAsleep)
     #expect(restored.tabs[3].isAsleep)
 
