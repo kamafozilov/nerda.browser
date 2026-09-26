@@ -651,7 +651,7 @@ final class Tab: Identifiable {
     /// the page itself names, fetched from inside the page, so it comes with
     /// the page's cookies past checks (Cloudflare's) that turn a bare request away.
     func pageDidLoad() {
-        guard let page, let site = Favicons.origin(of: url), Favicons.shared.images[site] == nil else { return }
+        guard let page, let site = Favicons.origin(of: url), Favicons.shared.icon(site).image == nil else { return }
         Task {
             let icon = try? await page.callAsyncJavaScript(Self.findIcon, contentWorld: .defaultClient) as? String
             await Favicons.shared.load(site, icon: icon.flatMap(URL.init(string:)), keep: !isPrivate)

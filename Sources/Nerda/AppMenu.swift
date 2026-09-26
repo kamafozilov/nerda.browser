@@ -384,7 +384,7 @@ extension AppMenu: NSMenuDelegate {
 
     /// A site's icon at a menu's size, once it has one.
     private static func icon(of url: URL) -> NSImage? {
-        guard let icon = Favicons.origin(of: url).flatMap({ Favicons.shared.images[$0] }) else { return nil }
+        guard let icon = Favicons.origin(of: url).flatMap({ Favicons.shared.icon($0).image }) else { return nil }
         return NSImage(size: NSSize(width: 16, height: 16), flipped: false) { icon.draw(in: $0); return true }
     }
 }
