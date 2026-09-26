@@ -2588,17 +2588,12 @@ enum ExtensionShims {
         // MARK: history — each page with its last visit, as Nerda keeps it
         case "history.search":
             let spec = first as? [String: Any] ?? [:]
-            let words = (spec["text"] as? String ?? "").lowercased().split(separator: " ").map(String.init)
+            let words = (spec["text"] as? String ?? "").split(separator: " ").map(String.init)
             let start = (spec["startTime"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
                 ?? Date().addingTimeInterval(-24 * 3600)
             let end = (spec["endTime"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) } ?? .distantFuture
             let limit = spec["maxResults"] as? Int ?? 100
-            return History.shared.visits.values
-                .filter { $0.last >= start && $0.last <= end }
-                .filter { page in words.allSatisfy { (page.title + " " + page.url.absoluteString).lowercased().contains($0) } }
-                .sorted { $0.last > $1.last }
-                .prefix(limit)
-                .map(visit)
+            return History.shared.pages(containing: words, from: start, through: end, limit: limit).map(visit)
         case "history.getVisits":
             let url = ((first as? [String: Any])?["url"] as? String).flatMap(URL.init(string:))
             return url.flatMap { History.shared.visits[$0] }.map { page in

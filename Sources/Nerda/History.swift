@@ -1,4 +1,5 @@
 import AppKit
+import os
 
 /// Every page visited, to suggest again as you type: once you have been to
 /// YouTube, "yo" means YouTube. Kept per address (how often, how lately, what
@@ -15,6 +16,9 @@ final class History {
     private static let limit = 20_000
     /// How quickly a visit counts for less: half as much two weeks on.
     private static let halfLife: TimeInterval = 14 * 24 * 60 * 60
+    /// How long after a change it is written: whatever else changes by then
+    /// goes in the same write, and a crash loses no more than that.
+    private static let saveDelay: Duration = .seconds(5)
 
     nonisolated struct Visit: Codable, Equatable, Sendable {
         let url: URL
@@ -27,10 +31,16 @@ final class History {
     @ObservationIgnored private(set) var file: URL?
     private(set) var visits: [URL: Visit] = [:]
     @ObservationIgnored private var pendingSave: Task<Void, Never>?
+    /// Changed since it was last written: switching apps with nothing new
+    /// writes nothing.
+    @ObservationIgnored private var dirty = false
+    /// What the file had, while it is read off the main thread at launch,
+    /// until it is taken in (`settle`).
+    @ObservationIgnored private var reading: OSAllocatedUnfairLock<Loaded?>?
 
     /// A page as what is typed is matched against it: its site, and its title
     /// and address with case and accents folded away, as bytes to look through.
-    private final class Entry {
+    nonisolated private final class Entry: Sendable {
         let visit: Visit
         let site: String?
         let text: [UInt8]
@@ -45,6 +55,13 @@ final class History {
         }
     }
 
+    /// Pages as they were read, each made into an entry, and those latest first.
+    nonisolated private struct Loaded: Sendable {
+        let visits: [URL: Visit]
+        let entries: [URL: Entry]
+        let index: [Entry]
+    }
+
     /// The last entries made, by address: the next index takes those whose
     /// title is the same, so only new and renamed pages are worked out again.
     @ObservationIgnored private var entries: [URL: Entry] = [:]
@@ -57,32 +74,60 @@ final class History {
         // Read, so views listing what it finds are told when pages change.
         _ = visits.isEmpty
         if let built { return built }
-        var next: [URL: Entry] = [:]
-        next.reserveCapacity(visits.count)
-        for visit in visits.values { next[visit.url] = Self.entry(for: visit, reusing: entries[visit.url]) }
-        entries = next
-        let index = next.values.sorted { $0.visit.last > $1.visit.last }
-        built = index
-        return index
+        let made = Self.indexed(visits, reusing: entries)
+        entries = made.entries
+        built = made.index
+        return made.index
     }
 
-    /// Makes the index ahead of the first key typed (at launch, once idle).
-    func prepare() { _ = index }
+    /// Each page as an entry, and all of them latest first.
+    nonisolated private static func indexed(_ visits: [URL: Visit], reusing old: [URL: Entry])
+        -> (entries: [URL: Entry], index: [Entry]) {
+        var entries: [URL: Entry] = [:]
+        entries.reserveCapacity(visits.count)
+        for visit in visits.values { entries[visit.url] = entry(for: visit, reusing: old[visit.url]) }
+        return (entries, entries.values.sorted { $0.visit.last > $1.visit.last })
+    }
 
     /// One page visited again, or renamed, in its place in the index.
     private func reindex(_ visit: Visit) {
         guard var index = built else { return }
         built = nil
         let old = entries[visit.url]
-        if let old, let at = index.firstIndex(where: { $0 === old }) { index.remove(at: at) }
         let entry = Self.entry(for: visit, reusing: old)
         entries[visit.url] = entry
-        index.insert(entry, at: index.firstIndex { $0.visit.last <= visit.last } ?? index.count)
+        if let old, let at = Self.place(of: old, in: index) {
+            // Only renamed: it stays where it is.
+            if old.visit.last == visit.last {
+                index[at] = entry
+                built = index
+                return
+            }
+            index.remove(at: at)
+        }
+        index.insert(entry, at: Self.start(of: visit.last, in: index))
         built = index
     }
 
+    /// Where a page is in the index: among those last visited when it was,
+    /// found by halving. Going through all 20,000 took ~1 ms, on every
+    /// change of a page's title.
+    nonisolated private static func place(of entry: Entry, in index: [Entry]) -> Int? {
+        index[start(of: entry.visit.last, in: index)...].firstIndex { $0 === entry }
+    }
+
+    /// Where the pages last visited at `date` or before begin in the index.
+    nonisolated private static func start(of date: Date, in index: [Entry]) -> Int {
+        var low = 0, high = index.count
+        while low < high {
+            let middle = (low + high) / 2
+            if index[middle].visit.last > date { low = middle + 1 } else { high = middle }
+        }
+        return low
+    }
+
     /// Its folded text is kept while its title is the same.
-    private static func entry(for visit: Visit, reusing old: Entry?) -> Entry {
+    nonisolated private static func entry(for visit: Visit, reusing old: Entry?) -> Entry {
         if let old, old.visit.title == visit.title {
             return old.visit == visit ? old : Entry(visit, site: old.site, text: old.text, isFront: old.isFront)
         }
@@ -95,16 +140,56 @@ final class History {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     }
 
-    func load(from file: URL) {
+    /// Reads what was saved, and makes the index to look through it, off the
+    /// main thread: with 20,000 pages, ~70 ms to read and as long to index. At
+    /// launch it doesn't wait: the window comes up meanwhile, and it is taken
+    /// in once read.
+    func load(from file: URL, waiting: Bool = true) {
         self.file = file
-        guard let data = try? Data(contentsOf: file) else { return }
+        let read = OSAllocatedUnfairLock<Loaded?>(initialState: nil)
+        reading = read
+        Self.writer.async(qos: .userInitiated, flags: .enforceQoS) {
+            read.withLock { $0 = Self.read(file) }
+            DispatchQueue.main.async { self.settle() }
+        }
+        if waiting { settle() }
+    }
+
+    nonisolated private static func read(_ file: URL) -> Loaded? {
+        guard let data = try? Data(contentsOf: file) else { return nil }
         guard let list = try? JSONDecoder().decode([Visit].self, from: data) else {
             // Set aside rather than overwritten: it may be from a newer version.
             try? data.write(to: file.deletingLastPathComponent().appending(path: "history-unreadable.json"))
-            return
+            return nil
         }
-        visits = Dictionary(list.map { ($0.url, $0) }) { first, _ in first }
-        built = nil
+        let visits = Dictionary(list.map { ($0.url, $0) }) { first, _ in first }
+        let made = indexed(visits, reusing: [:])
+        return Loaded(visits: visits, entries: made.entries, index: made.index)
+    }
+
+    /// Takes in what `load` read, waiting for the rest of it if need be:
+    /// before a save, which would write only this run's pages over it, and
+    /// before pages are taken out, which would come back with it. Pages
+    /// visited in the meantime are added to what was read.
+    func settle() {
+        guard let read = reading else { return }
+        reading = nil
+        Self.writer.sync {}
+        guard let loaded = read.withLock({ $0 }) else { return }
+        let meanwhile = visits.values
+        visits = loaded.visits
+        entries = loaded.entries
+        built = loaded.index
+        for new in meanwhile {
+            var visit = new
+            if let old = visits[new.url] {
+                visit.count += old.count
+                visit.last = max(old.last, new.last)
+                if new.title.isEmpty { visit.title = old.title }
+            }
+            visits[new.url] = visit
+            reindex(visit)
+        }
     }
 
     /// A page from the web was opened. Pages on disk, and the like, are not kept.
@@ -125,13 +210,20 @@ final class History {
         visit.title = title
         visits[url] = visit
         reindex(visit)
-        changed()
+        // Written with the next save, not a save of its own: some pages count
+        // in their title ("(3) Inbox", a timer), each tick a rewrite of it all.
+        dirty = true
     }
 
     /// One page taken out, from the history page.
     func remove(_ url: URL) {
+        settle()
         guard visits.removeValue(forKey: url) != nil else { return }
-        built = nil
+        if let old = entries.removeValue(forKey: url), var index = built {
+            built = nil
+            if let at = Self.place(of: old, in: index) { index.remove(at: at) }
+            built = index
+        }
         changed()
     }
 
@@ -139,15 +231,19 @@ final class History {
     // ponytail: only a page's last visit is kept, so one visited before and
     // again since goes whole. Keep every visit's date if that matters.
     func remove(since date: Date) {
+        settle()
         visits = visits.filter { $0.value.last < date }
         built = nil
-        save()
+        dirty = true
+        save(waiting: false)
     }
 
     func clear() {
+        settle()
         visits = [:]
         built = nil
-        save()
+        dirty = true
+        save(waiting: false)
     }
 
     /// The pages visited last, latest first.
@@ -168,32 +264,39 @@ final class History {
     }
 
     /// The sites you go to whose name starts with `text` ("yo" for
-    /// youtube.com), or with nothing typed, all of them, most used first. Each
-    /// as its front page, whichever pages of it were visited.
-    func sites(startingWith text: String, now: Date = .now) -> [Visit] {
+    /// youtube.com), or with nothing typed, all of them, most used first, the
+    /// first `limit` of them. Each as its front page, whichever pages of it
+    /// were visited.
+    func sites(startingWith text: String, limit: Int = .max, now: Date = .now) -> [Visit] {
         let typed = text.lowercased()
         let prefix = typed.hasPrefix("www.") ? String(typed.dropFirst(4)) : typed
-        var bySite: [String: [Entry]] = [:]
+        // Each site added up as its pages go by, each page scored once: a
+        // site you use has thousands. Its best page gives its address; its
+        // front page, the latest, its title.
+        var bySite: [String: (best: Visit, bestScore: Double, score: Double, count: Int, last: Date, front: String?)] = [:]
         for entry in index {
             guard let site = entry.site, site.hasPrefix(prefix) else { continue }
-            bySite[site, default: []].append(entry)
+            let score = score(entry.visit, now)
+            let front = entry.isFront ? entry.visit.title : nil
+            guard var found = bySite[site] else {
+                bySite[site] = (entry.visit, score, score, entry.visit.count, entry.visit.last, front)
+                continue
+            }
+            if score > found.bestScore { (found.best, found.bestScore) = (entry.visit, score) }
+            found.score += score
+            found.count += entry.visit.count
+            found.last = max(found.last, entry.visit.last)
+            found.front = found.front ?? front
+            bySite[site] = found
         }
-        return bySite.map { site, pages in
-            // Each page scored once: a site you use has thousands.
-            let scores = pages.map { score($0.visit, now) }
-            let best = pages[scores.indices.max { scores[$0] < scores[$1] }!].visit
+        return bySite.values.sorted { $0.score > $1.score }.prefix(limit).map { site in
             var root = URLComponents()
-            root.scheme = best.url.scheme
-            root.host = best.url.host()
-            root.port = best.url.port
+            root.scheme = site.best.url.scheme
+            root.host = site.best.url.host()
+            root.port = site.best.url.port
             root.path = "/"
-            let front = pages.first(where: \.isFront)?.visit
-            let visit = Visit(url: root.url ?? best.url, title: front?.title ?? "",
-                              count: pages.reduce(0) { $0 + $1.visit.count }, last: pages.map(\.visit.last).max()!)
-            return (visit, scores.reduce(0, +))
+            return Visit(url: root.url ?? site.best.url, title: site.front ?? "", count: site.count, last: site.last)
         }
-        .sorted { $0.1 > $1.1 }
-        .map(\.0)
     }
 
     /// Pages with every word of `text` starting a word of their title or
@@ -215,6 +318,22 @@ final class History {
             if best.count > limit { best.removeLast() }
         }
         return best.map(\.visit)
+    }
+
+    /// Pages with each of `words` anywhere in their title or address, case
+    /// and accents aside, last visited from `start` through `end`, latest
+    /// first, the first `limit` of them: for the history page's search, and
+    /// extensions'.
+    func pages(containing words: [String], from start: Date = .distantPast, through end: Date = .distantFuture,
+               limit: Int = .max) -> [Visit] {
+        let words = words.map { Array(Self.fold($0).utf8) }.filter { !$0.isEmpty }
+        let index = self.index
+        var found: [Visit] = []
+        for entry in index[Self.start(of: end, in: index)...] {
+            guard entry.visit.last >= start, found.count < limit else { break }
+            if words.allSatisfy({ Self.find($0, in: entry.text, anywhere: true) }) { found.append(entry.visit) }
+        }
+        return found
     }
 
     /// Whether `word` is in `text` (both folded) where a word of it starts,
@@ -249,16 +368,25 @@ final class History {
         Double(visit.count) * pow(0.5, max(0, now.timeIntervalSince(visit.last)) / Self.halfLife)
     }
 
-    /// Writes it now, and waits for it: for quitting, when there is no later.
-    func save() {
+    /// Writes what changed since it was last written, off the main thread:
+    /// encoding 20,000 pages takes tens of ms, a hitch in a page being
+    /// scrolled. Waiting for it, and any write before it, for quitting, when
+    /// there is no later.
+    func save(waiting: Bool = true) {
+        settle()
         pendingSave?.cancel()
+        pendingSave = nil
         guard let file else { return }
-        let kept = kept()
-        Self.writer.sync { Self.write(kept, to: file) }
+        if dirty {
+            dirty = false
+            trim()
+            let visits = visits
+            Self.writer.async { Self.write(Array(visits.values), to: file) }
+        }
+        if waiting { Self.writer.sync {} }
     }
 
-    /// Saves one at a time, in the order asked, off the main thread: encoding
-    /// 20,000 pages takes tens of ms, a hitch in a page being scrolled.
+    /// Reads and saves one at a time, in the order asked, off the main thread.
     nonisolated private static let writer = DispatchQueue(label: "dev.nerda.history", qos: .utility)
 
     nonisolated private static func write(_ visits: [Visit], to file: URL) {
@@ -270,29 +398,33 @@ final class History {
         }
     }
 
-    /// What is kept, dropping what is older than 90 days, and past the limit
-    /// the oldest. Sorted only when there is something to drop.
-    private func kept() -> [Visit] {
+    /// Drops what is older than 90 days, and past the limit the oldest: the
+    /// index's last pages, as it is latest first, so nothing is sorted again.
+    private func trim() {
         let cutoff = Date.now.addingTimeInterval(-Self.keptFor)
-        guard visits.count > Self.limit || visits.values.contains(where: { $0.last <= cutoff }) else {
-            return Array(visits.values)
-        }
-        let kept = Array(visits.values.filter { $0.last > cutoff }.sorted { $0.last > $1.last }.prefix(Self.limit))
-        visits = Dictionary(kept.map { ($0.url, $0) }) { first, _ in first }
+        var index = self.index
+        let kept = min(Self.start(of: cutoff, in: index), Self.limit)
+        guard kept < index.count else { return }
         built = nil
-        return kept
+        for entry in index[kept...] {
+            visits.removeValue(forKey: entry.visit.url)
+            entries.removeValue(forKey: entry.visit.url)
+        }
+        index.removeSubrange(kept...)
+        built = index
     }
 
-    /// Saved a moment from now, once for a burst of changes (a page loading
-    /// and then naming itself), without waiting for the write.
+    /// Saved a moment from now, once for whatever changes meanwhile (a page
+    /// loading and then naming itself), without waiting for the write. Not
+    /// put off by each change, so pages coming one after another can't keep
+    /// it from ever being written.
     private func changed() {
-        guard let file else { return }
-        pendingSave?.cancel()
+        dirty = true
+        guard file != nil, pendingSave == nil else { return }
         pendingSave = Task {
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(for: Self.saveDelay)
             guard !Task.isCancelled else { return }
-            let kept = kept()
-            Self.writer.async { Self.write(kept, to: file) }
+            save(waiting: false)
         }
     }
 }

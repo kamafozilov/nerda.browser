@@ -852,12 +852,10 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     let visit = { (url: String, title: String, hoursAgo: Double) in
         History.Visit(url: URL(string: url)!, title: title, count: 1, last: day.addingTimeInterval(-hoursAgo * 3600))
     }
-    let visits = [visit("https://a.com/", "Swift", 30), visit("https://b.com/", "News", 1), visit("https://c.com/", "Swift book", 2)]
+    let visits = [visit("https://b.com/", "News", 1), visit("https://c.com/", "Swift book", 2), visit("https://a.com/", "Swift", 30)]
 
-    let days = HistoryPage.days(of: visits, matching: "", calendar: calendar)
+    let days = HistoryPage.days(of: visits, calendar: calendar)
     #expect(days.map { $0.visits.map(\.title) } == [["News", "Swift book"], ["Swift"]])
-    #expect(HistoryPage.days(of: visits, matching: "swift", calendar: calendar).flatMap(\.visits).count == 2)
-    #expect(HistoryPage.days(of: visits, matching: "b.com", calendar: calendar).flatMap(\.visits).map(\.title) == ["News"])
 }
 
 /// The history page lays out one line at a time: each day's heading, then
