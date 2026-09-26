@@ -269,9 +269,10 @@ private let somewhere = URL(string: "https://example.com")!
     }
     try await Task.sleep(for: .milliseconds(500))
     autoreleasepool { withAnimation(.slide) { browser.close(browser.tabs[0].id) } }
-    try await Task.sleep(for: .seconds(1))
+    // Its page too, and with it the page's process: a moment later, as its
+    // last work (its icon asked of it) may still hold it.
+    for _ in 0..<50 where tab != nil || page != nil { try await Task.sleep(for: .milliseconds(100)) }
     #expect(tab == nil)
-    // Its page too, and with it the page's process.
     #expect(page == nil)
 }
 
@@ -293,7 +294,7 @@ private let somewhere = URL(string: "https://example.com")!
     }
     try await Task.sleep(for: .milliseconds(500))
     autoreleasepool { browser.tabs.first { $0.page === page }?.sleep() }
-    try await Task.sleep(for: .seconds(1))
+    for _ in 0..<50 where page != nil { try await Task.sleep(for: .milliseconds(100)) }
     #expect(page == nil)
 }
 
