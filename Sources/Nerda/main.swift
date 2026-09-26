@@ -97,9 +97,11 @@ struct BrowserView: View {
                 // Always there, slid off to the left when not wanted, rather than
                 // added and taken away, so it comes back as it was left (scrolled
                 // where it was) without being built again.
-                Sidebar(browser: browser, pinned: browser.sidebarOpen, downloadsShown: $downloadsShown,
+                Sidebar(browser: browser, pinned: browser.sidebarOpen, docked: docked, downloadsShown: $downloadsShown,
                         aiChatsShown: $aiChatsShown, menuShown: $menuShown, width: $sidebarWidth)
-                    .onHover { overPeek = $0 }
+                    // Only out over the page does it matter: pinned, the pointer
+                    // coming and going would have the whole window worked out again.
+                    .onHover { over in if peeking || overPeek { overPeek = over } }
                     // Far enough that its shadow goes too.
                     .offset(x: sidebarShown ? 0 : -(sidebarWidth + 32))
                     .allowsHitTesting(sidebarShown)

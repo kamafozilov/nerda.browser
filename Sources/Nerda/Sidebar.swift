@@ -13,6 +13,8 @@ struct Sidebar: View {
     let browser: Browser
     /// Beside the page (true), or floating over it (false).
     let pinned: Bool
+    /// The page laid out beside it, done sliding into place (`BrowserView.docked`).
+    var docked = false
     @Binding var downloadsShown: Bool
     @Binding var aiChatsShown: Bool
     /// The menu in the bottom corner (see `SidebarMenu`), drawn over the whole window.
@@ -51,7 +53,7 @@ struct Sidebar: View {
     @State private var bookmarksHeight: CGFloat = 0
     @State private var layout = Layout()
     /// The tab the pointer is on, and the one whose card shows (`TabPeek`).
-    @State private var hovered: Tab.ID?
+    @State private var hovered = Hovered()
     @State private var peeked: Peek?
 
     /// A tab, tile or bookmark being dragged.
@@ -161,7 +163,7 @@ struct Sidebar: View {
                             // A sleeping tab's site is connected to on the way to a click
                             // on it. By its id, as the buttons hold it.
                             .onHover { over in
-                                if over { hovered = id } else if hovered == id { hovered = nil }
+                                if over { hovered.id = id } else if hovered.id == id { hovered.id = nil }
                                 guard over, let tab = browser.tabs.first(where: { $0.id == id }), tab.isAsleep,
                                       let site = tab.site else { return }
                                 Tab.preconnect(to: site)
@@ -278,7 +280,7 @@ struct Sidebar: View {
         }
         // In and out, faded; from one tab's card to the next, at once.
         .animation(.easeOut(duration: 0.12), value: peeked == nil)
-        .peeking(browser.tabs.first { $0.id == hovered }, $peeked, selected: browser.selectedID)
+        .background { PeekWatch(browser: browser, hovered: hovered, peeked: $peeked) }
     }
 
     private var pins: [Tab] { Array(browser.tabs.prefix { $0.isPinned }) }
@@ -412,13 +414,14 @@ struct Sidebar: View {
         }
         if gap == shown { items.append(nil) }
         let byID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+        let open = browser.openBookmarks
         return VStack(spacing: 0) {
             if !items.isEmpty {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(items, id: \.self) { id in
                             if let id, let row = byID[id] {
-                                bookmarkRow(row)
+                                bookmarkRow(row, open: open)
                             } else {
                                 Color.clear.frame(height: Self.rowHeight + Self.rowGap)
                             }
@@ -468,12 +471,12 @@ struct Sidebar: View {
     /// once clicked, closed by its button, and then only kept. A folder,
     /// opened by a click, and named by Rename, not by a double-click, which
     /// opens and closes it.
-    private func bookmarkRow(_ row: Bookmarks.Row) -> some View {
+    private func bookmarkRow(_ row: Bookmarks.Row, open: OpenBookmarks) -> some View {
         // By their ids alone, as the tabs' rows.
         let id = row.id, item = row.item
-        let tab = browser.tab(of: id)
+        let tab = open.tabs[id]
         let tabID = tab?.id
-        let folderOpen = item.isFolder && browser.hasTabs(in: id)
+        let folderOpen = item.isFolder && open.folders.contains(id)
         return SidebarRow(
             icon: item.isFolder ? "folder" : "globe",
             site: item.isFolder ? nil : tab?.site ?? item.url,
@@ -505,23 +508,23 @@ struct Sidebar: View {
         .frame(height: dragged?.id == id ? 0 : nil, alignment: .top)
         .opacity(dragged?.id == id ? 0 : 1)
         .simultaneousGesture(bookmarkDrag(id))
-        .contextMenu { bookmarkMenu(row) }
+        .contextMenu { bookmarkMenu(row, open: open) }
     }
 
     @ViewBuilder
-    private func bookmarkMenu(_ row: Bookmarks.Row) -> some View {
+    private func bookmarkMenu(_ row: Bookmarks.Row, open: OpenBookmarks) -> some View {
         let id = row.id
         if row.item.isFolder {
             Button("New Folder") { newFolder(in: id) }
             Button("Rename") { renaming = id }
-            if browser.hasTabs(in: id) {
+            if open.folders.contains(id) {
                 Button("Close Tabs in Folder") { withAnimation(.slide) { browser.closeTabs(in: id) } }
             }
             Divider()
             Button("Delete Folder") { withAnimation(.slide) { browser.removeBookmark(id) } }
         } else if let url = row.item.url {
             // Its tab gone elsewhere since it was opened: back to the page kept.
-            if let tab = browser.tab(of: id), tab.site != url {
+            if let tab = open.tabs[id], tab.site != url {
                 let tabID = tab.id
                 Button("Back to Bookmarked Page") { browser.tabs.first { $0.id == tabID }?.go(to: url) }
             }
@@ -667,7 +670,10 @@ struct Sidebar: View {
     /// same sliding as at rest. Pinned, it is one with the window's glass
     /// around the page; floating, an edge and a shadow lift it off the page.
     private var background: some View {
-        SidebarGlass(incognito: browser.isPrivate)
+        // Pinned, with the page beside it, the window's glass under it shows
+        // instead: the same glass, without blurring what is behind the window
+        // twice over. Not while the page slides aside, still under it.
+        SidebarGlass(incognito: browser.isPrivate, clear: pinned && docked)
             .overlay(alignment: .trailing) {
                 if !pinned { Rectangle().fill(Palette.hairline).frame(width: 1) }
             }
@@ -752,6 +758,8 @@ struct DevBadge: View {
 /// incognito window, a plain dark grey instead.
 struct SidebarGlass: View {
     var incognito = false
+    /// Hidden, for the window's own glass under it to show.
+    var clear = false
 
     @AppStorage(Transparency.key) private var transparency = Transparency.transparent
 
@@ -759,13 +767,17 @@ struct SidebarGlass: View {
         if incognito {
             Palette.incognito
         } else {
-            Glass().overlay { if transparency == .tinted { Palette.tint } }
+            // Hidden and shown at once, never faded: the sidebar slides out
+            // over the page with its glass already on.
+            Glass(hidden: clear).overlay { if transparency == .tinted, !clear { Palette.tint.transition(.identity) } }
         }
     }
 }
 
 /// SwiftUI's own materials only blur what is in the window.
 private struct Glass: NSViewRepresentable {
+    var hidden = false
+
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = .sidebar
@@ -774,7 +786,9 @@ private struct Glass: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.isHidden = hidden
+    }
 }
 
 /// The sidebar's right edge: dragged, it sizes the sidebar within
