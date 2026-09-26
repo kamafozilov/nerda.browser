@@ -24,6 +24,8 @@ enum ExtensionShims {
     /// The name native messages to the browser itself go to.
     static let application = "nerda"
     nonisolated static let file = "nerda-shim.js"
+    /// The part of it a content script needs, for its entries in the manifest.
+    nonisolated static let contentFile = "nerda-content.js"
     /// The first line of a worker that already carries the shim.
     nonisolated static let marker = "/* Nerda: Chrome APIs WebKit lacks, filled in (ExtensionShims.swift) */"
     nonisolated static let ender = "/* Nerda: end of shim */"
@@ -42,7 +44,7 @@ enum ExtensionShims {
     #endif
 
     nonisolated static let version: String = {
-        SHA256.hash(data: Data((script + verbose).utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: Data((script + contentScript + verbose).utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
     }()
 
     /// `fresh`: a package just unpacked or copied in. What only Nerda writes
@@ -63,6 +65,7 @@ enum ExtensionShims {
 
         let script = shim(for: folder)
         try script.write(to: folder.appendingPathComponent(file), atomically: true, encoding: .utf8)
+        try contentScript.write(to: folder.appendingPathComponent(contentFile), atomically: true, encoding: .utf8)
 
         // Native messaging is how the shim reaches the browser; user scripts
         // are carried out through WebKit's registered content scripts, which
@@ -116,12 +119,16 @@ enum ExtensionShims {
             manifest["background"] = background
         }
 
-        // Content scripts too: there only Chrome's behaviour is mended.
+        // Content scripts too: there only Chrome's behaviour is mended, by
+        // the part of the shim that does it. Not in the page's own world
+        // (MAIN), which has no extension APIs to mend. A manifest prepared
+        // before gave every entry the whole shim; that goes.
         if let entries = manifest["content_scripts"] as? [[String: Any]] {
             manifest["content_scripts"] = entries.map { entry -> [String: Any] in
                 var entry = entry
                 if var js = entry["js"] as? [String] {
-                    if !js.contains(file) { js.insert(file, at: 0) }
+                    js.removeAll { $0 == file || $0 == contentFile }
+                    if (entry["world"] as? String) != "MAIN" { js.insert(contentFile, at: 0) }
                     entry["js"] = js
                 }
                 return entry
@@ -164,18 +171,23 @@ enum ExtensionShims {
         return path
     }
 
-    /// The shim as this extension gets it: with the events its code mentions
-    /// — `chrome.tabs.onUpdated`, `e.runtime.onInstalled` — so its worker
-    /// can take their listeners late (see the end of the script).
+    /// The shim as this extension gets it: with the events its background
+    /// mentions — `chrome.tabs.onUpdated`, `e.runtime.onInstalled` — so its
+    /// worker can take their listeners late (see the end of the script).
+    /// Only the background's: the worker listens for each of them from the
+    /// start, and one its popup or content scripts use would wake it for
+    /// nothing (tabs.onUpdated, several times a page load).
     nonisolated static func shim(for folder: URL) -> String {
         var found = Set<String>()
         let pattern = try! NSRegularExpression(pattern: #"\.([a-zA-Z]+)\.(on[A-Z][A-Za-z]+)\b"#)
-        let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: nil)
-        while let url = walker?.nextObject() as? URL {
-            guard url.pathExtension == "js", url.lastPathComponent != file,
-                  var text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-            // Not the shim's own words, in a worker that already carries it.
-            if text.hasPrefix(marker), let end = text.range(of: ender) { text = String(text[end.upperBound...]) }
+        let manifest = (try? JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("manifest.json")))) as? [String: Any]
+        let everyScript = { () -> [URL] in
+            let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: nil)
+            return (walker?.allObjects as? [URL] ?? []).filter { $0.pathExtension == "js" }
+        }
+        for url in backgroundScripts(of: folder, manifest: manifest ?? [:]) ?? everyScript() {
+            guard url.lastPathComponent != file, url.lastPathComponent != contentFile,
+                  let text = source(of: url) else { continue }
             let range = NSRange(text.startIndex..., in: text)
             for match in pattern.matches(in: text, range: range) {
                 guard let a = Range(match.range(at: 1), in: text), let b = Range(match.range(at: 2), in: text) else { continue }
@@ -195,15 +207,106 @@ enum ExtensionShims {
             scripts.append((empty ? "-" : "") + path)
         }
         let shipped = (try? JSONSerialization.data(withJSONObject: scripts.sorted())).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        return script.replacingOccurrences(of: "__NERDA_EVENTS__", with: list)
+        return compacted.replacingOccurrences(of: "__NERDA_EVENTS__", with: list)
             .replacingOccurrences(of: "__NERDA_SCRIPTS__", with: shipped)
             .replacingOccurrences(of: "__NERDA_CHROME__", with: Crx.chromeVersion)
             .replacingOccurrences(of: "__NERDA_VERBOSE__", with: verbose)
     }
 
+    /// A copy as it goes into the extension: without the comments and the
+    /// indentation, which are for whoever reads this file. Every page and
+    /// frame a script runs in parses it, and a single character outside
+    /// ASCII (a dash in a comment) has WebKit keep the whole source at two
+    /// bytes a character. Line by line, as the shim has no string, template
+    /// or comment that runs over a line, nor code after a comment's `//`.
+    nonisolated static func compact(_ source: String) -> String {
+        source.split(separator: "\n").lazy
+            .map { $0.drop { $0 == " " } }
+            .filter { !$0.isEmpty && !$0.hasPrefix("//") }
+            .joined(separator: "\n") + "\n"
+    }
+
+    nonisolated static let compacted = compact(script)
+
+    /// What a content script gets, before its extension's own: the start of
+    /// the shim, up to where it gives Chrome's behaviour to a content script.
+    /// The rest (APIs Chrome keeps from content scripts, the worker's and the
+    /// pages' own mending) would only be parsed in every page and frame a
+    /// content script runs in, ads included, to be skipped.
+    nonisolated static let contentScript = compact(opening + "\n})();")
+
+    /// A script's own code: in a worker that already carries the shim, not
+    /// the shim's words.
+    nonisolated static func source(of url: URL) -> String? {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        if text.hasPrefix(marker), let end = text.range(of: ender) { return String(text[end.upperBound...]) }
+        return text
+    }
+
+    /// The scripts an extension's background runs, its worker's or its
+    /// background page's, and all they import. Nil when that can't be read
+    /// from the code: an import worked out as it runs (`importScripts(name)`,
+    /// `import(name)`), or one of a file that isn't there. Then every script
+    /// counts, as one of them may be it.
+    nonisolated static func backgroundScripts(of folder: URL, manifest: [String: Any]) -> [URL]? {
+        guard let background = manifest["background"] as? [String: Any] else { return [] }
+        func regex(_ pattern: String) -> NSRegularExpression { try! NSRegularExpression(pattern: pattern) }
+        func strings(_ pattern: NSRegularExpression, in text: String) -> [String] {
+            pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { Range($0.range(at: 1), in: text).map { String(text[$0]) } }
+        }
+        // A name as the code gives it, from the file that names it: from the
+        // folder's top with a leading slash, else beside that file.
+        func resolve(_ name: String, from base: String) -> URL? {
+            let path = name.prefix { $0 != "?" && $0 != "#" }
+            if path.contains(":") { return nil }
+            return inside(path.hasPrefix("/") ? String(path) : base + String(path), of: folder)
+        }
+        func directory(of url: URL) -> String {
+            String(url.deletingLastPathComponent().standardizedFileURL.path.dropFirst(folder.standardizedFileURL.path.count)) + "/"
+        }
+        var queue: [URL] = []
+        for name in [background["service_worker"] as? String].compactMap({ $0 }) + (background["scripts"] as? [String] ?? []) {
+            guard let url = resolve(name, from: "/") else { return nil }
+            queue.append(url)
+        }
+        if let page = background["page"] as? String {
+            guard let url = resolve(page, from: "/"), let html = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+            for name in strings(regex(#"<script[^>]*\ssrc\s*=\s*["']([^"']+)["']"#), in: html) {
+                guard let script = resolve(name, from: directory(of: url)) else { return nil }
+                queue.append(script)
+            }
+        }
+        // A worker's importScripts, of names written out and nothing else;
+        // a module's imports, static and written out.
+        let quoted = #"\s*(?:"[^"\n]*"|'[^'\n]*')\s*"#
+        let imports = regex(#"\bimportScripts\b(?!\s*\((?:"# + quoted + #",)*(?:"# + quoted + #",?)?\))"#)
+        let dynamic = regex(#"\bimport\s*\((?!"# + quoted + #"\))"#)
+        let listed = regex(#"\bimportScripts\s*\(([^)]*)\)"#)
+        let literal = regex(#"["']([^"'\n]+)["']"#)
+        let modules = regex(#"(?:\bfrom|\bimport)\s*["']([^"'\n]+)["']|\bimport\s*\(\s*["']([^"'\n]+)["']\s*\)"#)
+        let worker = queue.first
+        var seen = Set<URL>()
+        while let url = queue.popLast() {
+            guard seen.insert(url).inserted, url.lastPathComponent != file else { continue }
+            guard let text = source(of: url) else { return nil }
+            let whole = NSRange(text.startIndex..., in: text)
+            if imports.firstMatch(in: text, range: whole) != nil || dynamic.firstMatch(in: text, range: whole) != nil { return nil }
+            // importScripts goes from the worker's own address, whoever calls it.
+            let named = strings(listed, in: text).flatMap { strings(literal, in: $0) }.map { (name: $0, base: directory(of: worker ?? url)) }
+                + modules.matches(in: text, range: whole).compactMap { match in
+                    (Range(match.range(at: 1), in: text) ?? Range(match.range(at: 2), in: text)).map { (name: String(text[$0]), base: directory(of: url)) }
+                }
+            for (name, base) in named {
+                guard let next = resolve(name, from: base), FileManager.default.fileExists(atPath: next.path) else { return nil }
+                queue.append(next)
+            }
+        }
+        return Array(seen)
+    }
+
     /// Defines only what is missing, so the day WebKit implements an API,
     /// WebKit's is the one used.
-    nonisolated static let script = #"""
+    nonisolated static let opening = #"""
     (() => {
       const root = globalThis;
       // Taken now, not looked up at each use: a sandbox that later locks
@@ -339,6 +442,21 @@ enum ExtensionShims {
         }
         for (const sub of ["local", "sync", "session", "managed"]) { try { if (ns[sub] && typeof ns[sub] === "object") kept.add(ns[sub]); } catch (e) {} }
       }
+      if (runtime) {
+        const names = new Set();
+        for (let o = runtime; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) Object.getOwnPropertyNames(o).forEach((k) => names.add(k));
+        for (const name of names) {
+          if (name === "constructor" || /^on[A-Z]/.test(name)) continue;
+          let f; try { f = runtime[name]; } catch (e) { continue; }
+          if (typeof f === "function") put(runtime, name, f.bind(runtime));
+        }
+      }
+      // What a content script gets ends here: the rest is for the
+      // extension's own pages and worker (see `contentScript`).
+    """#
+
+    /// The whole shim, for the worker and the extension's own pages.
+    nonisolated static let script = opening + "\n" + #"""
       const withLastError = (error, callback) => {
         put(runtime, "lastError", { message: String(error && error.message || error) });
         try { callback(); } finally { try { delete runtime.lastError; } catch (e) {} }
@@ -651,7 +769,22 @@ enum ExtensionShims {
       // WebKit doesn't bring every message to every page. Not waited for
       // until they say something about one they heard.
       const deaf = new Set();
-      const keyOf = (message) => { try { const k = JSON.stringify(message); return k && k.length < 4000 ? k : null; } catch (e) { return null; } };
+      // A message is known by what it says, when that is short. Counted as
+      // it is written out, by what each part takes at the least: a big one
+      // (a screenshot, a page's text) is let go at its first long string,
+      // not written out whole to be thrown away.
+      const keyOf = (message) => {
+        let left = 4000;
+        try {
+          const k = JSON.stringify(message, function (key, value) {
+            if (value === undefined || typeof value === "function" || typeof value === "symbol") return value;
+            left -= (Array.isArray(this) ? 0 : key.length) + (typeof value === "string" ? value.length : 1);
+            if (left < 0) throw new RangeError("long");
+            return value;
+          });
+          return k && k.length < 4000 ? k : null;
+        } catch (e) { return null; }
+      };
       // A page at the address of the extension's popup hears nothing the
       // worker sends to all its pages: WebKit keeps those for a popup of its
       // own, which Nerda's isn't (see ExtensionPopup). Dark Reader's popup
@@ -859,15 +992,6 @@ enum ExtensionShims {
         if (background) { attached = true; add(dispatch); }
         if (told) relayTo = dispatch;
       };
-      if (runtime) {
-        const names = new Set();
-        for (let o = runtime; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) Object.getOwnPropertyNames(o).forEach((k) => names.add(k));
-        for (const name of names) {
-          if (name === "constructor" || /^on[A-Z]/.test(name)) continue;
-          let f; try { f = runtime[name]; } catch (e) { continue; }
-          if (typeof f === "function") put(runtime, name, f.bind(runtime));
-        }
-      }
       if (inContent) return;
 
       // In a website's frame, everything WebKit keeps to the extension's own
@@ -1496,7 +1620,7 @@ enum ExtensionShims {
               if (!at || !Array.isArray(opts.addRules) || left <= 0) throw e;
               const index = Number(at[1]);
               const rule = opts.addRules[index];
-              try { native("debug.error", ["declarativeNetRequest: rule " + (rule && rule.id) + " left out — " + e.message]).catch(() => {}); } catch (x) {}
+              try { native("debug.error", ["declarativeNetRequest: rule " + (rule && rule.id) + " left out \u2014 " + e.message]).catch(() => {}); } catch (x) {}
               return attempt({ ...opts, addRules: opts.addRules.filter((_, i) => i !== index) }, left - 1);
             }
           };
@@ -2397,7 +2521,8 @@ enum ExtensionShims {
           const ns = chrome && chrome[space];
           const original = ns && ns[method];
           if (typeof original !== "function") return;
-          held.push(ns); // WebKit's namespace objects are dropped when nothing holds them, and what was set with them.
+          // WebKit's namespace objects are dropped when nothing holds them, and what was set with them.
+          held.push(ns);
           define(ns, method, function (options, ...rest) {
             const list = options && urls(options);
             if (!list || !list.some((u) => typeof u === "string" && parse(u))) return original.call(this, options, ...rest);
@@ -2421,7 +2546,7 @@ enum ExtensionShims {
       if (root.addEventListener) {
         const tell = (text) => { try { native("debug.error", [String(text).slice(0, 2000)]).catch(() => {}); } catch (e) {} };
         root.addEventListener("error", (e) => tell((e.message || "error") + " @ " + String(e.filename || "").split("/").slice(3).join("/") + ":" + e.lineno));
-        root.addEventListener("unhandledrejection", (e) => tell("unhandled: " + (e.reason && ((e.reason.message || "") + " — " + (e.reason.stack || "")) || e.reason)));
+        root.addEventListener("unhandledrejection", (e) => tell("unhandled: " + (e.reason && ((e.reason.message || "") + " \u2014 " + (e.reason.stack || "")) || e.reason)));
         // In a test run, what the extension says went wrong, too.
         if (__NERDA_VERBOSE__ && root.console) {
           let told = 0;
@@ -2430,7 +2555,7 @@ enum ExtensionShims {
             console[level] = (...args) => {
               original(...args);
               if (told++ < 60) tell("console." + level + ": " + args.map((a) => {
-                if (a instanceof Error) return a.message + " — " + (a.stack || "");
+                if (a instanceof Error) return a.message + " \u2014 " + (a.stack || "");
                 try { return typeof a === "string" ? a : JSON.stringify(a); } catch (e) { return String(a); }
               }).join(" "));
             };

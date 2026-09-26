@@ -12,6 +12,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - A long history no longer slows Nerda down: switching to another app doesn't stall while it is saved, the window comes up without waiting for it to be read, and History (⌘Y), its search and the address bar's suggestions keep up as you type, where with thousands of pages they paused.
 - Responsive Design Mode: the device, its size and Rotate sit in the middle of the bar, over the page. Pull the page's right or bottom edge, or the corner between, to make it any size. The size fields select all of themselves when clicked, step by 1 with ↑ and ↓ (10 with Shift), and put back the old number with Escape. A hairline shows where a dark page ends.
 - Developer Mode no longer frames the page in amber and black tape. A local page is still marked by its amber port in the address bar, and in the sidebar's list of tabs by its amber edge.
+- Pages load with less delay and memory when a Chrome extension works on them, as Dark Reader or a password manager does: each page, and each frame in it, now takes in a small part of what Nerda adds to the extension instead of all of it.
 
 ### Fixed
 
