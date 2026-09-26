@@ -1,10 +1,11 @@
 """The pull request's Screenshots check (.github/workflows/screenshots.yml).
 
-Pictures on the screenshots branch for the pull request's branch (put there
-by ./screenshots.sh, or by .githooks/pre-push as the branch is pushed) go
-into the body's Screenshots section, unless they are in it already. Without
-any, the section needs a picture of its own or the words "Nothing on screen
-changes."; otherwise the check fails. docs/pull-requests.md has the rules.
+Pictures on refs/screenshots/<the pull request's branch> (put there by
+./screenshots.sh, or by .githooks/pre-push as the branch is pushed) go into
+the body's Screenshots section, unless they are in it already; pictures sent
+again have a new address, and replace the old ones. Without any, the section
+needs a picture of its own or the words "Nothing on screen changes.";
+otherwise the check fails. docs/pull-requests.md has the rules.
 """
 import os
 import re
@@ -15,7 +16,11 @@ import urllib.parse
 env = os.environ
 head, branch = env["HEAD_REPO"], env["BRANCH"]
 body = (env.get("BODY") or "").replace("\r\n", "\n")
-raw = f"https://raw.githubusercontent.com/{head}/screenshots/{branch}/"
+
+ref = subprocess.run(["gh", "api", f"repos/{head}/git/ref/screenshots/{urllib.parse.quote(branch)}",
+                      "--jq", ".object.sha"], capture_output=True, text=True)
+commit = ref.stdout.strip() if ref.returncode == 0 else None
+raw = f"https://raw.githubusercontent.com/{head}/{commit}/"
 
 
 def fail(message):
@@ -24,8 +29,9 @@ def fail(message):
 
 
 def uploaded(name):
-    path = urllib.parse.quote(f"{branch}/{name}")
-    found = subprocess.run(["gh", "api", f"repos/{head}/contents/{path}?ref=screenshots", "--silent"],
+    if not commit:
+        return False
+    found = subprocess.run(["gh", "api", f"repos/{head}/contents/{name}?ref={commit}", "--silent"],
                            capture_output=True)
     return found.returncode == 0
 

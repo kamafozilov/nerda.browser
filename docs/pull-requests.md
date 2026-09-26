@@ -51,7 +51,7 @@ The change isn't finished until they are in `build/`; from there, they reach the
 - **Pushing the branch** uploads them: `.githooks/pre-push` runs `./screenshots.sh build/before.png build/after.png` (whichever are there) before the branch goes, whoever pushes it: T3 Code's buttons, `gh pr create` or `git push`. It is on once per clone: `git config core.hooksPath .githooks`.
 - **The Screenshots check** (`.github/workflows/screenshots.yml`) runs on every pull request as it opens, is edited or gets new commits. It puts the uploaded pictures into the Screenshots section, whatever was written there, and fails a pull request that has none and doesn't say "Nothing on screen changes." A picture dragged into the body on GitHub counts too.
 
-`./screenshots.sh` keeps them on the `screenshots` branch, in a folder named after your branch, so `main` never carries pictures; that branch is never merged. Sending a file again replaces it, though GitHub may show the old one for a few minutes; sending it unchanged does nothing. Run it by hand for pictures taken after the last push, then push again or edit the body, and the check puts them in. From a fork, it uses your fork.
+`./screenshots.sh` keeps them on `refs/screenshots/<your branch>`, a ref that isn't a branch: GitHub lists no branch and offers no pull request for it, and `main` never carries pictures. They are shown by the address of their commit, so a picture sent again has a new address, and the check swaps it in; sending it unchanged does nothing. Run it by hand for pictures taken after the last push, then push again or edit the body, and the check puts them in. From a fork, it uses your fork.
 
 ## Opening it
 
