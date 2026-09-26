@@ -852,12 +852,10 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     let visit = { (url: String, title: String, hoursAgo: Double) in
         History.Visit(url: URL(string: url)!, title: title, count: 1, last: day.addingTimeInterval(-hoursAgo * 3600))
     }
-    let visits = [visit("https://a.com/", "Swift", 30), visit("https://b.com/", "News", 1), visit("https://c.com/", "Swift book", 2)]
+    let visits = [visit("https://b.com/", "News", 1), visit("https://c.com/", "Swift book", 2), visit("https://a.com/", "Swift", 30)]
 
-    let days = HistoryPage.days(of: visits, matching: "", calendar: calendar)
+    let days = HistoryPage.days(of: visits, calendar: calendar)
     #expect(days.map { $0.visits.map(\.title) } == [["News", "Swift book"], ["Swift"]])
-    #expect(HistoryPage.days(of: visits, matching: "swift", calendar: calendar).flatMap(\.visits).count == 2)
-    #expect(HistoryPage.days(of: visits, matching: "b.com", calendar: calendar).flatMap(\.visits).map(\.title) == ["News"])
 }
 
 /// The history page lays out one line at a time: each day's heading, then
@@ -1107,6 +1105,8 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     restored.restore(from: file)
     #expect(restored.tabs.map(\.isPinned) == [true, true, false, false])
     #expect(restored.tabs.map(\.title) == ["a.test", "c.test", "example.com", "b.test"])
+    // Pinned tabs wake as soon as the window is up: the main thread's next turn.
+    try await Task.sleep(for: .milliseconds(50))
     #expect(!restored.tabs[0].isAsleep && !restored.tabs[1].isAsleep)
     #expect(restored.tabs[3].isAsleep)
 
@@ -1188,19 +1188,19 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     let before = Favicons()
     before.folder = folder.appending(path: "Favicons")
     await before.load(site, icon: icon)
-    #expect(before.images[site] != nil)
+    #expect(before.icon(site).image != nil)
 
     let after = Favicons()
     after.folder = before.folder
     await after.load(site)
-    #expect(after.images[site] != nil)
-    #expect(after.tints[site]?.colors.count == 1)
+    #expect(after.icon(site).image != nil)
+    #expect(after.icon(site).tint?.colors.count == 1)
 
     // At launch, read at once for the tabs coming back, before any frame.
     let launch = Favicons()
     launch.folder = before.folder
     launch.preload([URL(string: site + "/some/page")!])
-    #expect(launch.images[site] != nil)
+    #expect(launch.icon(site).image != nil)
 }
 
 /// A pinned tile wears its icon's colours: each hue in it, or, for a dark

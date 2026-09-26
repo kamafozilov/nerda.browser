@@ -97,9 +97,11 @@ struct BrowserView: View {
                 // Always there, slid off to the left when not wanted, rather than
                 // added and taken away, so it comes back as it was left (scrolled
                 // where it was) without being built again.
-                Sidebar(browser: browser, pinned: browser.sidebarOpen, downloadsShown: $downloadsShown,
+                Sidebar(browser: browser, pinned: browser.sidebarOpen, docked: docked, downloadsShown: $downloadsShown,
                         aiChatsShown: $aiChatsShown, menuShown: $menuShown, width: $sidebarWidth)
-                    .onHover { overPeek = $0 }
+                    // Only out over the page does it matter: pinned, the pointer
+                    // coming and going would have the whole window worked out again.
+                    .onHover { over in if peeking || overPeek { overPeek = over } }
                     // Far enough that its shadow goes too.
                     .offset(x: sidebarShown ? 0 : -(sidebarWidth + 32))
                     .allowsHitTesting(sidebarShown)
@@ -684,7 +686,8 @@ SpellCheck.registerDefault()
 Theme.apply()
 
 let browser = Browser()
-History.shared.load(from: History.file)
+// Read, and indexed for typing in the address bar, while the window comes up.
+History.shared.load(from: History.file, waiting: false)
 // Before the tabs: those of bookmarks are told by them.
 Bookmarks.shared.load(from: Bookmarks.file)
 Favicons.shared.folder = Favicons.folder
@@ -692,12 +695,8 @@ browser.restore(from: Session.file)
 Favicons.shared.preload(browser.tabs.compactMap(\.site))
 // Ready before the first new tab, so it opens with its picture already there.
 Backdrop.shared.load()
-// Once the window is up: a page's process ready for the first page, and what
-// typing in the address bar looks through.
-DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-    Tab.warmUp()
-    History.shared.prepare()
-}
+// Once the window is up: a page's process ready for the first page.
+DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Tab.warmUp() }
 let menu = AppMenu(browser: browser)
 menu.install()
 if Edition.updates { Updater.shared.start() }

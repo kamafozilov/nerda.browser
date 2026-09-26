@@ -315,7 +315,7 @@ private struct LoadLine: View {
     }
 
     private func colors(of site: URL?) -> [Color] {
-        let tint = Favicons.origin(of: site).flatMap { Favicons.shared.tints[$0] }
+        let tint = Favicons.origin(of: site).flatMap { Favicons.shared.icon($0).tint }
         guard let tint, !tint.isGrey else { return [Palette.ink] }
         return tint.colors.map { Color(nsColor: $0) }
     }

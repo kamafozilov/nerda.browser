@@ -142,10 +142,15 @@ final class Extensions: NSObject {
 
     // MARK: - starting
 
+    /// Whether `start` has run. Until then the tabs have no one to tell of
+    /// them, and telling would make `shared` before the window is up.
+    static private(set) var started = false
+
     /// The regular window's browser, once its window is up: loading an
     /// extension takes the main thread for tens of milliseconds, and the
     /// first frame shouldn't wait for it.
     func start(for browser: Browser) {
+        Self.started = true
         self.browser = browser
         controller.didOpenWindow(window)
         follow(browser)
@@ -174,25 +179,41 @@ final class Extensions: NSObject {
     /// In the order they are on screen.
     var visibleTabs: [Tab] { browser?.inTurn ?? [] }
 
+    /// Where each tab is in `visibleTabs`. WebKit asks it of every tab at
+    /// each tabs.query and each tab's update, and working the order out
+    /// walks every bookmark; so it is worked out once, and kept to the end
+    /// of the turn or until the tabs change.
+    @ObservationIgnored private var places: [Tab.ID: Int]?
+
+    func place(of tab: Tab) -> Int? {
+        if places == nil {
+            places = Dictionary(visibleTabs.enumerated().map { ($1.id, $0) }) { first, _ in first }
+            DispatchQueue.main.async { self.places = nil }
+        }
+        return places?[tab.id]
+    }
+
     var activeAdapter: ExtensionTab? { browser?.selected.map(adapter(for:)) }
 
     /// The tabs changed: opened, closed or moved. Browser tells.
     func follow(_ browser: Browser) {
         guard browser === self.browser else { return }
         ExtensionAuth.tabsChanged(browser.tabs)
+        places = nil
         let now = visibleTabs
         let ids = now.map(\.id)
-        for id in order where !ids.contains(id) {
+        let current = Set(ids), before = Set(order)
+        for id in order where !current.contains(id) {
             if let adapter = adapters[id] { controller.didCloseTab(adapter, windowIsClosing: false) }
             adapters[id] = nil
         }
-        for tab in now where !order.contains(tab.id) {
+        for tab in now where !before.contains(tab.id) {
             controller.didOpenTab(adapter(for: tab))
         }
         // Moves: anything whose place changed among the ones that stayed.
-        let stayed = order.filter { ids.contains($0) }
-        let after = ids.filter { stayed.contains($0) }
-        for (index, id) in stayed.enumerated() where after.firstIndex(of: id) != index {
+        let stayed = order.filter(current.contains)
+        let after = ids.filter(before.contains)
+        for (index, id) in stayed.enumerated() where after[index] != id {
             if let adapter = adapters[id] { controller.didMoveTab(adapter, from: index, in: window) }
         }
         order = ids
@@ -206,10 +227,26 @@ final class Extensions: NSObject {
         actionsChanged += 1
     }
 
-    /// A tab's title, address or loading changed. Tab tells.
+    /// A tab's title, address or loading changed. Tab tells. WebKit sets
+    /// them one after another as a page starts and ends, and each told on
+    /// its own is an onUpdated of its own, with the whole tab described
+    /// for every extension; so what changes in one turn is told once, as
+    /// Chrome tells a new address and "loading" together.
     func changed(_ tab: Tab, _ properties: WKWebExtension.TabChangedProperties) {
-        guard let adapter = adapters[tab.id] else { return }
-        controller.didChangeTabProperties(properties, for: adapter)
+        guard adapters[tab.id] != nil else { return }
+        if untold.isEmpty { DispatchQueue.main.async { self.tellChanges() } }
+        untold[tab.id, default: []].formUnion(properties)
+    }
+
+    @ObservationIgnored private var untold: [Tab.ID: WKWebExtension.TabChangedProperties] = [:]
+
+    private func tellChanges() {
+        let changes = untold
+        untold = [:]
+        places = nil
+        for (id, properties) in changes {
+            if let adapter = adapters[id] { controller.didChangeTabProperties(properties, for: adapter) }
+        }
     }
 
     // MARK: - loading
@@ -289,9 +326,11 @@ final class Extensions: NSObject {
             defer { busy = nil }
             do {
                 let crx = try await Crx.fetch(id)
-                let zip = try Crx.verifiedZip(crx, id: id)
                 let staged = Self.folder.appending(path: ".staging-\(id)", directoryHint: .isDirectory)
+                // Checked where it is unpacked, off the main thread: the
+                // check copies and hashes the whole package.
                 try await Task.detached(priority: .userInitiated) {
+                    let zip = try Crx.verifiedZip(crx, id: id)
                     try Crx.unpack(zip, into: staged)
                     try ExtensionShims.prepare(staged, fresh: true)
                 }.value
@@ -623,9 +662,10 @@ final class Extensions: NSObject {
         ]
         guard let url = parts.url, let version = await Self.newerVersion(at: url, than: item.version) else { return }
         do {
-            let zip = try Crx.verifiedZip(try await Crx.fetch(item.id), id: item.id)
+            let crx = try await Crx.fetch(item.id)
             let staged = Self.folder.appending(path: ".staging-\(item.id)", directoryHint: .isDirectory)
             try await Task.detached(priority: .utility) {
+                let zip = try Crx.verifiedZip(crx, id: item.id)
                 try Crx.unpack(zip, into: staged)
                 try ExtensionShims.prepare(staged, fresh: true)
             }.value
@@ -1053,7 +1093,7 @@ final class ExtensionTab: NSObject, WKWebExtensionTab {
 
     func indexInWindow(for context: WKWebExtensionContext) -> Int {
         guard let tab else { return NSNotFound }
-        return owner.visibleTabs.firstIndex { $0 === tab } ?? NSNotFound
+        return owner.place(of: tab) ?? NSNotFound
     }
 
     func webView(for context: WKWebExtensionContext) -> WKWebView? { tab?.page }

@@ -40,7 +40,7 @@ struct TabStrip: View {
     @State private var pointer = Pointer()
     @State private var layout = Layout()
     /// The tab the pointer is on, and the one whose card shows (`TabPeek`).
-    @State private var hovered: Tab.ID?
+    @State private var hovered = Hovered()
     @State private var peeked: Peek?
     @Environment(\.colorScheme) private var scheme
 
@@ -130,7 +130,7 @@ struct TabStrip: View {
         }
         // In and out, faded; from one tab's card to the next, at once.
         .animation(.easeOut(duration: 0.12), value: peeked == nil)
-        .peeking(browser.tabs.first { $0.id == hovered }, $peeked, selected: browser.selectedID)
+        .background { PeekWatch(browser: browser, hovered: hovered, peeked: $peeked) }
     }
 
     /// What is being dragged, while it is still open.
@@ -240,7 +240,7 @@ struct TabStrip: View {
             .zIndex(selected ? 1 : 0)
             // A sleeping tab's site is connected to on the way to a click on it.
             .onHover { over in
-                if over { hovered = id } else if hovered == id { hovered = nil }
+                if over { hovered.id = id } else if hovered.id == id { hovered.id = nil }
                 guard over, let tab = browser.tabs.first(where: { $0.id == id }), tab.isAsleep,
                       let site = tab.site else { return }
                 Tab.preconnect(to: site)
@@ -542,7 +542,7 @@ private struct PinnedIcon: View {
 
     var body: some View {
         Button(action: action) {
-            TabIcon(site: site, loading: loading && Favicons.origin(of: site).flatMap { Favicons.shared.images[$0] } == nil,
+            TabIcon(site: site, loading: loading && Favicons.origin(of: site).flatMap { Favicons.shared.icon($0).image } == nil,
                     size: 16)
                 .frame(width: TabStrip.icon, height: 26)
                 .background(shape.fill(selected ? Palette.wash : hovering ? Palette.hover : .clear))

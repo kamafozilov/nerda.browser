@@ -139,7 +139,8 @@ struct SettingsView: View {
             .scrollIndicators(.never)
             .scrollBounceBehavior(.basedOnSize)
             // An open list stays where its button was: it goes when that moves.
-            .onScrollGeometryChange(for: CGFloat.self, of: \.contentOffset.y) { _, _ in dropdown = nil }
+            // Only then: set on every frame of a scroll, the page would be laid out again each time.
+            .onScrollGeometryChange(for: CGFloat.self, of: \.contentOffset.y) { _, _ in if dropdown != nil { dropdown = nil } }
             .background(Palette.card, in: RoundedRectangle(cornerRadius: BrowserView.cornerRadius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: BrowserView.cornerRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08)))

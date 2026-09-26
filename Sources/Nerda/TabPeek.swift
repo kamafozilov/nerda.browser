@@ -112,13 +112,34 @@ struct PeekPlacement: Layout {
     }
 }
 
+/// The tab the pointer is on, in the sidebar or across the top. Out of their
+/// sight: only `PeekWatch` reads it, so the pointer going from tab to tab
+/// has that alone worked out again, not every tab's row.
+@Observable
+final class Hovered {
+    var id: Tab.ID?
+}
+
+/// Keeps the card to the tab under the pointer (see `peeking`), drawing nothing.
+struct PeekWatch: View {
+    let browser: Browser
+    let hovered: Hovered
+    @Binding var peeked: Peek?
+
+    var body: some View {
+        Color.clear.peeking(browser.tabs.first { $0.id == hovered.id }, $peeked, selected: browser.selectedID)
+    }
+}
+
 extension View {
     /// The tab under the pointer (`hovered`) as the one whose card shows
     /// (`peeked`): the first once the pointer has rested on it 0.7 s,
     /// as a tooltip; while one shows, the next at once. Off the tabs
     /// for a moment (the gap between two), the card stays. A menu opening
     /// (the tab's, right-clicked) puts it away, until the pointer moves on.
-    /// The picture is taken during the wait, so the card shows whole.
+    /// The picture is taken in the last part of the wait, so the card shows
+    /// whole: not as the pointer passes by, or sweeping it down the sidebar
+    /// would have every page it crossed drawn for nothing.
     func peeking(_ hovered: Tab?, _ peeked: Binding<Peek?>, selected: Tab.ID?) -> some View {
         onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) { _ in
             peeked.wrappedValue = nil
@@ -129,9 +150,14 @@ extension View {
                 if !Task.isCancelled { peeked.wrappedValue = nil }
                 return
             }
+            let waits = peeked.wrappedValue == nil
+            if waits {
+                try? await Task.sleep(for: .milliseconds(500))
+                if Task.isCancelled { return }
+            }
             async let look = TabPeek.look(of: hovered, selected: hovered.id == selected)
-            if peeked.wrappedValue == nil {
-                try? await Task.sleep(for: .milliseconds(700))
+            if waits {
+                try? await Task.sleep(for: .milliseconds(200))
                 if Task.isCancelled { return }
             }
             let shot = await look

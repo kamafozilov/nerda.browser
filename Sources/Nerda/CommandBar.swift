@@ -38,6 +38,7 @@ struct CommandBar: View {
     @State private var pointer = NSEvent.mouseLocation
     /// The search engine's guesses at what is being typed, for the text they were asked for.
     @State private var searches: [String] = []
+    @State private var found = Found()
     @FocusState private var focused: Bool
     /// Where the address's field and its list are, in the window, for a
     /// click anywhere else to put them away.
@@ -65,7 +66,7 @@ struct CommandBar: View {
     /// last, latest first. Typing, what it means (a search, or an address), the sites and
     /// pages you've been to that match it, and the search engine's guesses.
     static func suggestions(for query: String, guesses searches: [String], history: History,
-                            tabs: [Tab] = []) -> [Suggestion] {
+                            tabs: [Tab] = [], found: Found = Found()) -> [Suggestion] {
         let text = query.trimmingCharacters(in: .whitespaces)
         let open = tabs
             .filter { tab in
@@ -79,7 +80,30 @@ struct CommandBar: View {
             return Array(Self.unique(open + history.recentSites(6).map(Self.suggestion))
                 .prefix(Self.maxRows))
         }
+        var rows = found.rows(for: text) { Self.typed(text, url: url, history: history) }
+        rows += searches
+            .filter { $0.caseInsensitiveCompare(text) != .orderedSame }
+            .compactMap { guess in Address.search(guess).map { Suggestion(title: guess, detail: "", url: $0, isSearch: true) } }
+        return Array(Self.unique(open.prefix(4) + rows).prefix(Self.maxRows))
+    }
 
+    /// History's rows for what was typed last, kept while it stays the same:
+    /// the list is drawn again for each of the search engine's guesses, each
+    /// arrow key and each row the pointer passes, and looking through 20,000
+    /// pages each time made those as slow as a key.
+    final class Found {
+        private var text: String?
+        private var rows: [Suggestion] = []
+
+        func rows(for text: String, _ find: () -> [Suggestion]) -> [Suggestion] {
+            if text != self.text { (self.text, rows) = (text, find()) }
+            return rows
+        }
+    }
+
+    /// What is typed and what it means, with the sites and pages you've been
+    /// to that match it.
+    private static func typed(_ text: String, url: URL, history: History) -> [Suggestion] {
         let isSearch = url == Address.search(text)
         let typed = Suggestion(title: text, detail: isSearch ? "Search \(SearchEngine.current.name)" : "Open",
                                url: url, isSearch: isSearch)
@@ -89,7 +113,7 @@ struct CommandBar: View {
         // the one row.
         var rows = [typed]
         var pagesShown = 4
-        if !text.contains(" "), let site = history.sites(startingWith: text).first {
+        if !text.contains(" "), let site = history.sites(startingWith: text, limit: 1).first {
             let sameSite = History.site(of: url) == History.site(of: site.url) && (url.path().isEmpty || url.path() == "/")
             rows = sameSite ? [Self.suggestion(site)] : [Self.suggestion(site), typed]
             pagesShown = 3
@@ -97,10 +121,7 @@ struct CommandBar: View {
         let lead = rows.map(\.url)
         rows += history.pages(matching: text, limit: pagesShown + lead.count)
             .filter { !lead.contains($0.url) }.prefix(pagesShown).map(Self.suggestion)
-        rows += searches
-            .filter { $0.caseInsensitiveCompare(text) != .orderedSame }
-            .compactMap { guess in Address.search(guess).map { Suggestion(title: guess, detail: "", url: $0, isSearch: true) } }
-        return Array(Self.unique(open.prefix(4) + rows).prefix(Self.maxRows))
+        return rows
     }
 
     private static func suggestion(_ visit: History.Visit) -> Suggestion {
@@ -132,7 +153,8 @@ struct CommandBar: View {
         // then Enter just goes there again.
         let untouched = !text.isEmpty && query == text
         let blank = place == .newTab && query.trimmingCharacters(in: .whitespaces).isEmpty
-        let rows = untouched || blank ? [] : Self.suggestions(for: query, guesses: searches, history: history, tabs: tabs)
+        let rows = untouched || blank ? []
+            : Self.suggestions(for: query, guesses: searches, history: history, tabs: tabs, found: found)
 
         Group {
             if inline {
@@ -333,9 +355,10 @@ extension View {
     @ViewBuilder func glassPanel(cornerRadius: CGFloat, tint: Double = 0.75, lifted: Bool = true) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         if #available(macOS 26, *) {
-            glassEffect(.regular.tint(Palette.ground.opacity(tint)), in: shape)
+            let panel = glassEffect(.regular.tint(Palette.ground.opacity(tint)), in: shape)
                 .overlay(shape.strokeBorder(Color.primary.opacity(lifted ? 0.14 : 0)))
-                .shadow(color: .black.opacity(lifted ? 0.35 : 0), radius: 24, y: 10)
+            // Not lifted, no shadow at all, rather than a clear one left on its layer.
+            if lifted { panel.shadow(color: .black.opacity(0.35), radius: 24, y: 10) } else { panel }
         } else {
             background(.thickMaterial, in: shape)
                 .overlay(shape.strokeBorder(.quaternary))

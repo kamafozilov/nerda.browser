@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Observation
 import WebKit
@@ -54,9 +55,10 @@ final class Blocker {
     private var started = false
     private var settled = false
     private var waiting: [CheckedContinuation<Void, Never>] = []
-    private var timer: Timer?
+    private var schedule: NSBackgroundActivityScheduler?
 
-    /// Takes the rules compiled last time, then fetches the lists if they are due.
+    /// Takes the rules compiled last time, then fetches the lists: at once
+    /// when there are none, otherwise in the background once they are due.
     func start() {
         // Only as Nerda: run from tests, the helper would be the test runner again.
         guard !started, Bundle.main.bundleIdentifier?.hasPrefix("dev.nerda.browser") == true else { return }
@@ -68,19 +70,27 @@ final class Blocker {
             } else if let old = try? await WKContentRuleListStore.default().contentRuleList(forIdentifier: Self.previous) {
                 use([old])
             }
-            if rules.isEmpty || isDue { await refresh(fetch: true) }
+            // Only a first run waits for the lists. One that is merely due is
+            // left to the schedule below, so it never competes with a launch.
+            if rules.isEmpty { await refresh(fetch: true) }
             settled = true
             waiting.forEach { $0.resume() }
             waiting = []
         }
-        // A Mac left on for days still gets new lists.
-        timer = Timer.scheduledTimer(withTimeInterval: 6 * 60 * 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.isDue else { return }
-                Task { await self.refresh(fetch: true) }
+        // Due lists are fetched when macOS finds the Mac has time to spare:
+        // first 15 to 45 minutes after launch, then about every half hour, so
+        // a Mac left on for days still gets new lists.
+        let schedule = NSBackgroundActivityScheduler(identifier: (Bundle.main.bundleIdentifier ?? "") + ".blocklist")
+        schedule.repeats = true
+        schedule.interval = 30 * 60
+        schedule.qualityOfService = .utility
+        schedule.schedule { [weak self] done in
+            Task { @MainActor in
+                if let self, self.isDue { await self.refresh(fetch: true) }
+                done(.finished)
             }
         }
-        timer?.tolerance = 60 * 60
+        self.schedule = schedule
     }
 
     /// A page's controller: it blocks with the rules from now on, and each list after.
@@ -170,7 +180,7 @@ final class Blocker {
         }
         guard status == 0 || status == Self.someMissing else { return failed = true }
         failed = status != 0
-        // A list never had isn't fetched: stay due, so the timer tries again.
+        // A list never had isn't fetched: stay due, so the schedule tries again.
         if fetch, status == 0 {
             updated = .now
             UserDefaults.standard.set(Date.now, forKey: Self.fetchedKey)
@@ -226,24 +236,21 @@ final class Blocker {
             var text = ""
             var missing = false
             for url in urls {
-                let cached = FilterList(title: "", url: url).cached
-                var list = fetch ? nil : try? String(contentsOf: cached, encoding: .utf8)
-                if list == nil {
-                    if let (data, response) = try? await session.data(from: url),
-                       (response as? HTTPURLResponse)?.statusCode == 200,
-                       let fetched = ContentRules.downloadedList(data) {
-                        try? FileManager.default.createDirectory(at: FilterList.folder, withIntermediateDirectories: true)
-                        try? fetched.write(to: cached, atomically: true, encoding: .utf8)
-                        list = fetched
-                    } else {
-                        NSLog("Nerda: couldn't fetch a valid block list from %@", url.absoluteString)
-                        list = try? String(contentsOf: cached, encoding: .utf8)
-                    }
-                }
+                let list = await list(from: url, keptIn: FilterList(title: "", url: url).cached, fetch: fetch, session: session)
                 if let list { text += list + "\n" } else { missing = true }
             }
-            guard let parts = ContentRules.encode(text, partsOf: ContentRules.partLimit),
-                  let store = WKContentRuleListStore.default() else { exit(1) }
+            guard let store = WKContentRuleListStore.default() else { exit(1) }
+            // The same lists, turned into rules by this same build, are compiled
+            // already (lists unchanged, or none could be fetched): the ~6 s and
+            // ~700 MB of doing it again are skipped. Removed before compiling,
+            // so a compilation cut short is never taken as done.
+            let digest = compiledDigest(of: text)
+            if (try? Data(contentsOf: compiledDigestFile)) == digest,
+               await store.availableIdentifiers()?.contains(prefix + "0") == true {
+                exit(missing ? someMissing : 0)
+            }
+            try? FileManager.default.removeItem(at: compiledDigestFile)
+            guard let parts = ContentRules.encode(text, partsOf: ContentRules.partLimit) else { exit(1) }
             do {
                 // ponytail: a part failing midway leaves the new parts before it
                 // with the old after it, until the next refresh. Compile under a
@@ -255,6 +262,7 @@ final class Blocker {
                     || identifier.hasPrefix(prefix) && Int(identifier.dropFirst(prefix.count)).map({ $0 >= parts.count }) ?? false {
                     try? await store.removeContentRuleList(forIdentifier: identifier)
                 }
+                try? digest.write(to: compiledDigestFile)
                 exit(missing ? someMissing : 0)
             } catch {
                 NSLog("Nerda: couldn't compile the block list: \(error)")
@@ -264,6 +272,49 @@ final class Blocker {
         // WebKit starts only on the main thread, which dispatchMain() would let go of.
         RunLoop.main.run()
         exit(1)
+    }
+
+    /// A list as fetched now (`fetch`, or when there is no copy yet), or as
+    /// kept in `cached` when it is unchanged or can't be had.
+    nonisolated static func list(from url: URL, keptIn cached: URL, fetch: Bool, session: URLSession) async -> String? {
+        // What the server called this copy, sent back so that a list
+        // unchanged since is answered in a few bytes (304), not sent again.
+        let validators = cached.appendingPathExtension("validators")
+        let kept = try? String(contentsOf: cached, encoding: .utf8)
+        guard fetch || kept == nil else { return kept }
+        var request = URLRequest(url: url)
+        if kept != nil, let saved = try? Data(contentsOf: validators),
+           let headers = try? JSONDecoder().decode([String: String].self, from: saved) {
+            for (field, value) in headers { request.setValue(value, forHTTPHeaderField: field) }
+        }
+        let (data, response) = (try? await session.data(for: request)) ?? (Data(), URLResponse())
+        if let kept, (response as? HTTPURLResponse)?.statusCode == 304 { return kept }
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let fetched = ContentRules.downloadedList(data) else {
+            NSLog("Nerda: couldn't fetch a valid block list from %@", url.absoluteString)
+            return kept
+        }
+        try? FileManager.default.createDirectory(at: cached.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // Validators only ever describe the copy on disk.
+        try? FileManager.default.removeItem(at: validators)
+        if (try? fetched.write(to: cached, atomically: true, encoding: .utf8)) != nil {
+            var headers: [String: String] = [:]
+            headers["If-None-Match"] = http.value(forHTTPHeaderField: "ETag")
+            headers["If-Modified-Since"] = http.value(forHTTPHeaderField: "Last-Modified")
+            try? JSONEncoder().encode(headers).write(to: validators)
+        }
+        return fetched
+    }
+
+    /// Where the digest of what was compiled last is kept.
+    nonisolated private static let compiledDigestFile = FilterList.folder.appending(path: "Compiled lists")
+
+    /// The lists' text as compiled by this build: the executable's date
+    /// stands for its converter, so a new Nerda turns unchanged lists into
+    /// rules again, its own way.
+    nonisolated static func compiledDigest(of text: String, by executable: URL? = Bundle.main.executableURL) -> Data {
+        let built = (try? executable?.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .now
+        return Data(SHA256.hash(data: Data((text + "\n\(built.timeIntervalSinceReferenceDate)").utf8)))
     }
 
     func use(_ lists: [WKContentRuleList]) {
