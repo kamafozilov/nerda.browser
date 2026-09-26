@@ -236,6 +236,7 @@ final class History {
         built = nil
         dirty = true
         save(waiting: false)
+        if file != nil { Favicons.shared.forgetUnvisited() }
     }
 
     func clear() {
@@ -244,6 +245,7 @@ final class History {
         built = nil
         dirty = true
         save(waiting: false)
+        if file != nil { Favicons.shared.forgetUnvisited() }
     }
 
     /// The pages visited last, latest first.

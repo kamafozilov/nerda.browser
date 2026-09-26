@@ -134,6 +134,27 @@ final class Favicons {
         inFlight[site] = nil
     }
 
+    /// Takes off disk the icons of sites no longer in history, bookmarks or
+    /// an open tab: once history is deleted, the folder would otherwise
+    /// still list the sites visited.
+    func forgetUnvisited() {
+        guard folder != nil else { return }
+        var kept = Set(History.shared.visits.keys.compactMap(Self.origin(of:)))
+        kept.formUnion(Bookmarks.shared.all.compactMap { Self.origin(of: $0.item.url) })
+        for case let window as BrowserWindow in NSApplication.shared.windows {
+            kept.formUnion(window.browser.tabs.compactMap { Self.origin(of: $0.site) })
+        }
+        forget(keeping: kept)
+    }
+
+    /// Takes off disk every site's icon but these sites'.
+    func forget(keeping sites: Set<String>) {
+        guard let folder, let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path(percentEncoded: false)) else { return }
+        for name in names where !sites.contains(name.removingPercentEncoding ?? name) {
+            try? FileManager.default.removeItem(at: folder.appending(path: name))
+        }
+    }
+
     /// Fetches without keeping a second copy in a URL cache: the icon is kept
     /// here, and on disk, already.
     private static let session = URLSession(configuration: {
