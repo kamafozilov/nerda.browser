@@ -76,16 +76,17 @@ grep -q "^TeamIdentifier=$TEAM$" <<< "$SIGNED" || fail "$APP isn't signed by tea
 grep -q "flags=.*runtime" <<< "$SIGNED" || fail "$APP isn't signed with the hardened runtime"
 
 # Sends a file to Apple and waits for the verdict; the log says why when it
-# isn't Accepted.
+# isn't Accepted. Apple answers in minutes or leaves it In Progress for days,
+# so after 30 minutes it stops, before anything is committed or published.
 notarize() {
   [ "$NOTARIZE" = 0 ] && { echo "not notarized: $1"; return; }
   local result id status
-  result="$(xcrun notarytool submit "$1" --keychain-profile "$PROFILE" --wait --output-format json)" || true
+  result="$(xcrun notarytool submit "$1" --keychain-profile "$PROFILE" --wait --timeout 30m --output-format json)" || true
   id="$(plutil -extract id raw - <<< "$result" 2>/dev/null || true)"
   status="$(plutil -extract status raw - <<< "$result" 2>/dev/null || true)"
   if [ "$status" != Accepted ]; then
-    [ -n "$id" ] && xcrun notarytool log "$id" --keychain-profile "$PROFILE" >&2
-    fail "Apple didn't notarize $1: ${status:-no answer}"
+    [ -n "$id" ] && { xcrun notarytool log "$id" --keychain-profile "$PROFILE" >&2 || true; }
+    fail "Apple didn't notarize $1: ${status:-no answer}; NERDA_NOTARIZE=0 ./release.sh publishes without it"
   fi
   echo "notarized: $1 ($id)"
 }
@@ -94,11 +95,10 @@ ZIP="build/Nerda.zip"
 DMG="build/Nerda.dmg"
 rm -f "$ZIP" "$DMG"
 # The disk image: the app beside a shortcut to Applications, to drag it onto.
-# Only it goes to Apple (every ZIP sent was left In Progress; the disk image
-# came back Accepted): its ticket covers the app inside by the app's cdhash,
-# so the same ticket is stapled to the app, and the ZIP the updater fetches is
-# made from the stapled app. The copy inside the image has no ticket of its
-# own, so its first launch asks Apple online.
+# Only it goes to Apple, one wait instead of two: its ticket covers the app
+# inside by the app's cdhash, so the same ticket is stapled to the app, and
+# the ZIP the updater fetches is made from the stapled app. The copy inside
+# the image has no ticket of its own, so its first launch asks Apple online.
 STAGE="$(mktemp -d)"
 ditto "$APP" "$STAGE/Nerda.app"
 ln -s /Applications "$STAGE/Applications"

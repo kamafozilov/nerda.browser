@@ -84,7 +84,7 @@ Every release is signed by that one team. An installed Nerda only takes an updat
 1. Try what's on `main` in Nerda Dev, and check that `## [Unreleased]` says everything a user would notice.
 2. Push `main`, then run `./release.sh`. It shows the version and the notes and asks before doing anything. Then it:
    - builds `build/Nerda.app` with that version for Apple silicon and Intel, signed with Developer ID, the hardened runtime and `Nerda.entitlements` (camera and microphone for pages);
-   - puts the app in `build/Nerda.dmg` (to install from), signs the disk image, has Apple notarize it (only the disk image: Apple left every ZIP submission In Progress) and staples the ticket to the disk image and to the app;
+   - puts the app in `build/Nerda.dmg` (to install from), signs the disk image, has Apple notarize it (only the disk image: its ticket covers the app inside too) and staples the ticket to the disk image and to the app;
    - packs the stapled app as `build/Nerda.zip` (for the updater);
    - checks both tickets and Gatekeeper's verdict on both, and stops before anything is committed if one fails;
    - turns `[Unreleased]` into `[0.0.x] - date` under a new, empty `[Unreleased]`, and updates the compare links at the bottom;
