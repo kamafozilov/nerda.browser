@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Developer Mode no longer frames the page in amber and black tape. A local page is still marked by its amber port in the address bar, and in the sidebar's list of tabs by its amber edge.
+
 ## [0.0.8] - 2026-09-26
 
 ### Added
