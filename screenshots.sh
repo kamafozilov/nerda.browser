@@ -33,8 +33,12 @@ fi
 for f; do
   git update-index --add --cacheinfo "100644,$(git hash-object -w "$f"),$BRANCH/$(basename "$f")"
 done
-COMMIT="$(git commit-tree "$(git write-tree)" $PARENT -m "chore(screenshots): $BRANCH")"
-git push -q origin "$COMMIT:refs/heads/screenshots"
+TREE="$(git write-tree)"
+# Sent again unchanged (every push, from the pre-push hook): nothing to commit.
+if [ -z "$PARENT" ] || [ "$TREE" != "$(git rev-parse FETCH_HEAD^{tree})" ]; then
+  COMMIT="$(git commit-tree "$TREE" $PARENT -m "chore(screenshots): $BRANCH")"
+  git push -q --no-verify origin "$COMMIT:refs/heads/screenshots"
+fi
 
 URL="https://raw.githubusercontent.com/$REPO/screenshots/$BRANCH"
 for f; do

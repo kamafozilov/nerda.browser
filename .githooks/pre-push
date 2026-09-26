@@ -1,0 +1,22 @@
+#!/bin/bash
+# When the branch in use goes to GitHub, the pictures its change was shown
+# with go too: build/before.png and build/after.png, taken in the test VM.
+# They land on the screenshots branch (./screenshots.sh) before the branch
+# does, so the pull request's Screenshots check finds them and puts them in
+# its body. A failed upload never stops the push; the check says it's missing.
+#
+# On once per clone: git config core.hooksPath .githooks
+cd "$(git rev-parse --show-toplevel)" || exit 0
+BRANCH="$(git branch --show-current)"
+shots=()
+for f in build/before.png build/after.png; do [ -f "$f" ] && shots+=("$f"); done
+[ -n "$BRANCH" ] && [ ${#shots[@]} -gt 0 ] || exit 0
+pushed=
+while read -r _ sha ref _; do
+  # The branch in use, not deleted; never the screenshots' own push.
+  [ "$ref" = "refs/heads/$BRANCH" ] && [ "${sha//0/}" != "" ] && pushed=1
+done
+[ -n "$pushed" ] || exit 0
+./screenshots.sh "${shots[@]}" >/dev/null \
+  || echo "pre-push: the screenshots didn't upload; try ./screenshots.sh ${shots[*]}" >&2
+exit 0
