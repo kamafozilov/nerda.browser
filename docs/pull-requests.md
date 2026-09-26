@@ -52,8 +52,8 @@ build/screenshots/3-extensions-menu.after.png
 
 The name becomes the caption above it ("Store page", "Extensions menu").
 
-1. For something that changes, before touching the code: open Nerda Dev behind the window in use, bring it to the state that shows it, and picture its window into `build/screenshots/3-extensions-menu.before.png`. Forgot? `git worktree add /tmp/nerda-base main`, the same steps from there, then `git worktree remove /tmp/nerda-base`.
-2. After the change: `./watch.sh once`, the same steps, each picture into `build/screenshots/`.
+1. For something that changes, before touching the code: `./build.sh test`, open Nerda Test behind the window in use, bring it to the state that shows it with cua-driver, and picture its window (`get_window_state` with `screenshot_out_file`, see [AGENTS.md](../AGENTS.md)) into `build/screenshots/3-extensions-menu.before.png`. Forgot? `git worktree add /tmp/nerda-base main`, the same steps from there, then `git worktree remove /tmp/nerda-base`.
+2. After the change: `./build.sh test` again, the same steps, each picture into `build/screenshots/`.
 3. Crop each to the part that matters, with enough around it to see where it is: `sips -c HEIGHT WIDTH --cropOffset Y X build/screenshots/…`. Crop a before and its after alike.
 
 Once in `build/screenshots/`, they reach the pull request on their own:
