@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-09-26
+
 ### Added
 
 - Settings › Release Notes lists what every version of Nerda brought, newest first, with the day it came out; Release notes under About Nerda in General opens it too.
@@ -131,7 +133,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.5...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.2...v0.0.3
