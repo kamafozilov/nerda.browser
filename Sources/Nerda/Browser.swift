@@ -9,13 +9,16 @@ final class Browser: NSObject {
     private(set) var tabs: [Tab] = [] {
         // However a tab goes, its page goes quiet now, not once the last
         // reference to it is let go, which something may yet hold on to.
+        // By identity, in a set: with hundreds of tabs, looking each one up in
+        // the list took longer than the change itself.
         didSet {
-            for tab in oldValue where !tabs.contains(where: { $0 === tab }) {
-                tab.silence()
-                recent.removeAll { $0 === tab }
-            }
+            let open = Set(tabs.map(ObjectIdentifier.init))
+            for tab in oldValue where !open.contains(ObjectIdentifier(tab)) { tab.silence() }
+            recent.removeAll { !open.contains(ObjectIdentifier($0)) }
             sessionChanged()
-            Extensions.shared.follow(self)
+            // Only once they have started, after the window: made any sooner
+            // for this, they would hold up the window.
+            if Extensions.started { Extensions.shared.follow(self) }
         }
     }
     /// The open tabs in the order they were on screen, the one on screen
@@ -36,7 +39,7 @@ final class Browser: NSObject {
                 tabs.first { $0.id == oldValue }?.page?.evaluateJavaScript(PictureInPicture.enter)
                 selected?.page?.evaluateJavaScript(PictureInPicture.exit)
             }
-            if selectedID != oldValue { Extensions.shared.activated(self, from: oldValue) }
+            if selectedID != oldValue, Extensions.started { Extensions.shared.activated(self, from: oldValue) }
             sessionChanged()
         }
     }
@@ -93,7 +96,7 @@ final class Browser: NSObject {
     /// to this run, as in tests, and while the window is closed.
     @ObservationIgnored var sessionFile: URL?
     @ObservationIgnored var pendingSave: Task<Void, Never>?
-    @ObservationIgnored var savedSession: Data?
+    @ObservationIgnored var savedSession: Session?
     @ObservationIgnored private var sessionTimer: Timer?
     /// The window it is shown in, which closing its last tab closes; none in tests.
     @ObservationIgnored weak var window: NSWindow?
@@ -117,9 +120,10 @@ final class Browser: NSObject {
         }
         sleepTimer?.tolerance = 15
         // What changes without telling (scrolling, a page changing its own
-        // address) is saved every few seconds, and only if it did change.
+        // address) is saved every few seconds, and only if it did change. Not
+        // while another app is in front: it was saved as Nerda went behind.
         sessionTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.saveSession() }
+            MainActor.assumeIsolated { if NSApp?.isActive == true { self?.saveSession(waiting: false) } }
         }
         sessionTimer?.tolerance = 3
         // When the Mac runs short of memory, every tab out of sight sleeps at once.
@@ -169,6 +173,17 @@ final class Browser: NSObject {
         tab.delegate = self
         tabs.insert(tab, at: tab.isPinned ? 0 : last ? tabs.count : pinnedCount)
         if !inBackground { selectedID = tab.id }
+    }
+
+    /// Several behind the one on screen, above the rest, in their own order,
+    /// in one change: one by one, restoring hundreds of tabs took seconds.
+    func add(_ new: [Tab]) {
+        for tab in new {
+            tab.dataStore = dataStore
+            tab.delegate = self
+        }
+        let pins = pinnedCount
+        tabs = new.filter(\.isPinned) + tabs.prefix(pins) + new.filter { !$0.isPinned } + tabs.dropFirst(pins)
     }
 
     var pinnedCount: Int { tabs.prefix { $0.isPinned }.count }
@@ -399,11 +414,19 @@ extension Browser: WKUIDelegate {
     /// tab forward: an alert would otherwise take you away from the tab you
     /// are on, to whatever the page wanted to show. nil if the tab goes, or
     /// sleeps, meanwhile.
-    // ponytail: looked at five times a second, only while a tab out of sight has something to ask.
+    /// Looked at again each time the tab on screen, the lock or the tabs
+    /// change, rather than every moment. A tab that sleeps meanwhile is let go
+    /// of at the next of those, as sleeping changes none of them.
     private func window(showing webView: WKWebView) async -> NSWindow? {
         guard let tab = tab(for: webView) else { return nil }
         while tab.id != selectedID || locked {
-            try? await Task.sleep(for: .milliseconds(200))
+            await withCheckedContinuation { changed in
+                withObservationTracking {
+                    _ = (selectedID, locked, tabs)
+                } onChange: {
+                    changed.resume()
+                }
+            }
             guard tab.page === webView, tabs.contains(where: { $0 === tab }) else { return nil }
         }
         return webView.window ?? window
@@ -515,12 +538,13 @@ extension Browser: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         retried = nil
-        tab(for: webView)?.pageDidCommit()
-        tab(for: webView)?.failure = nil
-        tab(for: webView)?.recordVisit()
-        if let tab = tab(for: webView) { hideChoices(on: tab) }
+        guard let tab = tab(for: webView) else { return }
+        tab.pageDidCommit()
+        tab.failure = nil
+        tab.recordVisit()
+        hideChoices(on: tab)
         // A new document has nothing on show.
-        if let tab = tab(for: webView), fullscreenTab == tab.id { fullscreenTab = nil }
+        if fullscreenTab == tab.id { fullscreenTab = nil }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

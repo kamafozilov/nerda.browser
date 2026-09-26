@@ -142,10 +142,15 @@ final class Extensions: NSObject {
 
     // MARK: - starting
 
+    /// Whether `start` has run. Until then the tabs have no one to tell of
+    /// them, and telling would make `shared` before the window is up.
+    static private(set) var started = false
+
     /// The regular window's browser, once its window is up: loading an
     /// extension takes the main thread for tens of milliseconds, and the
     /// first frame shouldn't wait for it.
     func start(for browser: Browser) {
+        Self.started = true
         self.browser = browser
         controller.didOpenWindow(window)
         follow(browser)
