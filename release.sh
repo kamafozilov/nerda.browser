@@ -93,17 +93,12 @@ notarize() {
 ZIP="build/Nerda.zip"
 DMG="build/Nerda.dmg"
 rm -f "$ZIP" "$DMG"
-# The app first, its ticket stapled in, so it opens offline too; the ZIP the
-# updater fetches is made again from the stapled app.
-ditto -c -k --keepParent "$APP" "$ZIP"
-notarize "$ZIP"
-if [ "$NOTARIZE" != 0 ]; then
-  xcrun stapler staple -q "$APP"
-  rm "$ZIP"
-  ditto -c -k --keepParent "$APP" "$ZIP"
-fi
-# The disk image: the stapled app beside a shortcut to Applications, to drag
-# it onto; signed, notarized and stapled itself.
+# The disk image: the app beside a shortcut to Applications, to drag it onto.
+# Only it goes to Apple (every ZIP sent was left In Progress; the disk image
+# came back Accepted): its ticket covers the app inside by the app's cdhash,
+# so the same ticket is stapled to the app, and the ZIP the updater fetches is
+# made from the stapled app. The copy inside the image has no ticket of its
+# own, so its first launch asks Apple online.
 STAGE="$(mktemp -d)"
 ditto "$APP" "$STAGE/Nerda.app"
 ln -s /Applications "$STAGE/Applications"
@@ -113,11 +108,13 @@ codesign --timestamp --sign "$IDENTITY" "$DMG"
 notarize "$DMG"
 if [ "$NOTARIZE" != 0 ]; then
   xcrun stapler staple -q "$DMG"
+  xcrun stapler staple -q "$APP"
   # What a Mac that downloaded them checks: both tickets, and Gatekeeper's verdict.
   xcrun stapler validate -q "$APP" && xcrun stapler validate -q "$DMG" || fail "a ticket isn't stapled"
   spctl --assess --type execute "$APP" || fail "Gatekeeper refuses $APP"
   spctl --assess --type open --context context:primary-signature "$DMG" || fail "Gatekeeper refuses $DMG"
 fi
+ditto -c -k --keepParent "$APP" "$ZIP"
 printf '%s\n' "$NOTES" > build/notes.md
 
 # The section gets its version and date under a new, empty [Unreleased], and
