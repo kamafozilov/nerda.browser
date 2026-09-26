@@ -66,7 +66,9 @@ final class Bookmarks {
     /// Every folder, each under the one it is in, for a menu to put a tab in one.
     var folders: [Row] { all.filter(\.item.isFolder) }
 
-    func item(_ id: Item.ID) -> Item? { all.first { $0.id == id }?.item }
+    /// Looked for where it is, without laying every one out in rows first:
+    /// the sidebar asks for many, on each pass.
+    func item(_ id: Item.ID) -> Item? { Self.find(id, in: items) }
 
     /// Puts `item` in `folder` (nil: at the top), at `index`; past the end is the end.
     func add(_ item: Item, to folder: Item.ID? = nil, at index: Int = .max) {
@@ -142,6 +144,39 @@ final class Bookmarks {
         }
     }
 
+    private static func find(_ id: Item.ID, in items: [Item]) -> Item? {
+        for item in items {
+            if item.id == id { return item }
+            if let children = item.children, let found = find(id, in: children) { return found }
+        }
+        return nil
+    }
+
+    /// The folders `ids` are in, however deep; whether any of `items` holds one.
+    @discardableResult
+    static func folders(holding ids: Set<Item.ID>, in items: [Item], into found: inout Set<Item.ID>) -> Bool {
+        var holds = false
+        for item in items {
+            if let children = item.children {
+                if folders(holding: ids, in: children, into: &found) {
+                    found.insert(item.id)
+                    holds = true
+                }
+            } else if ids.contains(item.id) {
+                holds = true
+            }
+        }
+        return holds
+    }
+
+    /// Those of `open` in the bookmarks' order, as the sidebar shows them.
+    static func inOrder<T>(_ open: [Item.ID: T], in items: [Item], into found: inout [T]) {
+        for item in items {
+            if let value = open[item.id] { found.append(value) }
+            if let children = item.children { inOrder(open, in: children, into: &found) }
+        }
+    }
+
     @discardableResult
     private static func edit(_ id: Item.ID, in items: inout [Item], _ change: (inout Item) -> Void) -> Bool {
         for index in items.indices {
@@ -210,18 +245,37 @@ final class Bookmarks {
     }
 }
 
+/// See `Browser.openBookmarks`.
+struct OpenBookmarks {
+    /// A bookmark's tab, by the bookmark, while it is open.
+    let tabs: [Bookmarks.Item.ID: Tab]
+    /// The folders with a bookmark open in them, however deep.
+    let folders: Set<Bookmarks.Item.ID>
+}
+
 extension Browser {
     /// A bookmark's tab, while it is open.
     func tab(of bookmark: Bookmarks.Item.ID) -> Tab? { tabs.first { $0.bookmark == bookmark } }
 
     /// A folder's open tabs, those in folders inside it too.
     func tabs(in folder: Bookmarks.Item.ID) -> [Tab] {
-        guard let item = bookmarks.item(folder) else { return [] }
+        // Mostly none is open: nothing to look for then.
+        guard tabs.contains(where: { $0.bookmark != nil }), let item = bookmarks.item(folder) else { return [] }
         let ids = Set(Bookmarks.ids(in: item))
         return tabs.filter { $0.bookmark.map(ids.contains) == true }
     }
 
     func hasTabs(in folder: Bookmarks.Item.ID) -> Bool { !tabs(in: folder).isEmpty }
+
+    /// Each open bookmark's tab, and the folders they are in: looked up once
+    /// for all the sidebar's rows, rather than through every tab and
+    /// bookmark again for each row.
+    var openBookmarks: OpenBookmarks {
+        let open = Dictionary(tabs.compactMap { tab in tab.bookmark.map { ($0, tab) } }) { first, _ in first }
+        var folders = Set<Bookmarks.Item.ID>()
+        if !open.isEmpty { Bookmarks.folders(holding: Set(open.keys), in: bookmarks.items, into: &folders) }
+        return OpenBookmarks(tabs: open, folders: folders)
+    }
 
     /// A folder's open tabs closed; the bookmarks stay.
     func closeTabs(in folder: Bookmarks.Item.ID) {

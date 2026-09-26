@@ -355,9 +355,10 @@ extension View {
     @ViewBuilder func glassPanel(cornerRadius: CGFloat, tint: Double = 0.75, lifted: Bool = true) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         if #available(macOS 26, *) {
-            glassEffect(.regular.tint(Palette.ground.opacity(tint)), in: shape)
+            let panel = glassEffect(.regular.tint(Palette.ground.opacity(tint)), in: shape)
                 .overlay(shape.strokeBorder(Color.primary.opacity(lifted ? 0.14 : 0)))
-                .shadow(color: .black.opacity(lifted ? 0.35 : 0), radius: 24, y: 10)
+            // Not lifted, no shadow at all, rather than a clear one left on its layer.
+            if lifted { panel.shadow(color: .black.opacity(0.35), radius: 24, y: 10) } else { panel }
         } else {
             background(.thickMaterial, in: shape)
                 .overlay(shape.strokeBorder(.quaternary))

@@ -45,6 +45,9 @@ final class Backdrop {
     private(set) var image: CGImage?
     /// The file `image` is, or is being made from.
     @ObservationIgnored private var shown: URL?
+    /// How many new tabs show `image` now (`BackdropView`).
+    @ObservationIgnored var showing = 0
+    @ObservationIgnored private var memoryPressure: (any DispatchSourceMemoryPressure)?
 
     /// Your pictures, oldest first.
     private(set) var chosen: [URL]
@@ -78,6 +81,20 @@ final class Backdrop {
         chosen = kept
         wallpaper = UserDefaults.standard.string(forKey: "newTabWallpaper").flatMap(Wallpaper.init(saved:))
             ?? kept.first.map { .chosen($0.lastPathComponent) } ?? .daily
+        // Short of memory, the picture is let go while no new tab shows it:
+        // decoded, it takes 20 MB, up to 100 MB for one of yours on a 6K
+        // screen. The next new tab decodes it again.
+        memoryPressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        memoryPressure?.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.release() }
+        }
+        memoryPressure?.activate()
+    }
+
+    private func release() {
+        guard showing == 0, image != nil else { return }
+        image = nil
+        shown = nil
     }
 
     /// Your pictures in `folder`, oldest first; the one kept before there
@@ -290,5 +307,7 @@ struct BackdropView: View {
         .opacity(0.55)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+        .onAppear { Backdrop.shared.showing += 1 }
+        .onDisappear { Backdrop.shared.showing -= 1 }
     }
 }
