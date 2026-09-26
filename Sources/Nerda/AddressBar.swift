@@ -71,7 +71,7 @@ struct AddressBar: View {
             }
             .padding(.leading, 4)
             if !browser.isPrivate {
-                ExtensionButtons()
+                ExtensionButtons(scheme: scheme)
                     .padding(.leading, 4)
             }
         }

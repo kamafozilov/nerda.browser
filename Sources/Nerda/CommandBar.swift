@@ -342,4 +342,14 @@ extension View {
                 .shadow(color: .black.opacity(0.3), radius: 24, y: 10)
         }
     }
+
+    /// A popover's ground, as `glassPanel`'s: the system's glass under a
+    /// popover, where one reaches over a page, goes grey over a white page,
+    /// and the app's text on it with it. Tinted with the window's ground,
+    /// it reads over any page, as the panels over a page do.
+    func popoverGlass(tint: Double = 0.75) -> some View {
+        presentationBackground {
+            Rectangle().fill(.regularMaterial).overlay(Palette.ground.opacity(tint))
+        }
+    }
 }

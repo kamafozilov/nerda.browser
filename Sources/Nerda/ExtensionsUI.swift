@@ -6,6 +6,9 @@ import WebKit
 /// them all, and leads to the Chrome Web Store. Not in incognito, where
 /// extensions don't run.
 struct ExtensionButtons: View {
+    /// The window's light or dark, not the page's the address bar takes: the
+    /// list is one of Nerda's own, as Chrome's menus keep the browser's.
+    let scheme: ColorScheme
     private var extensions: Extensions { .shared }
 
     var body: some View {
@@ -19,8 +22,14 @@ struct ExtensionButtons: View {
                 extensions.menuOpen.toggle()
             }
             .background(ExtensionAnchor(id: Extensions.menuAnchor))
-            .popover(isPresented: Bindable(extensions).menuOpen, arrowEdge: .bottom) {
-                ExtensionMenu()
+            // From a view in the window's light or dark: a popover takes its
+            // ground's from the view it hangs from, and the button's is the page's.
+            .background {
+                Color.clear
+                    .popover(isPresented: Bindable(extensions).menuOpen, arrowEdge: .bottom) {
+                        ExtensionMenu().popoverGlass()
+                    }
+                    .environment(\.colorScheme, scheme)
             }
         }
     }
