@@ -17,8 +17,8 @@ A fix: what went wrong before, and what happens now.
 ## Screenshots
 
 <!--
-Every change this makes on screen, in pictures from the test VM (./vm.sh):
-each screen of something new, and a before and an after of each thing that
+Optional: what this changes on screen, in pictures taken on this Mac in the
+background: each screen of something new, and a before and an after of each thing that
 looks or works differently. Leave them in build/screenshots/, named for what
 they show and numbered in reading order (1-store-page.png,
 2-extensions-menu.before.png, 2-extensions-menu.after.png): pushing the branch
@@ -42,7 +42,7 @@ list. Mention anything left for later.
 <!--
 Only what was really done, with its result:
 - `swift test`: 83 tests pass
-- In the VM: the steps tried, and what happened
+- On screen: the steps tried, and what happened
 - `./bench.sh` before and after, when speed or memory could change
 Anything not run is written as "Not run: …". Never claim a check that
 didn't happen.

@@ -5,6 +5,8 @@
 #   ./build.sh          release build: build/Nerda.app, the Nerda people use
 #   ./build.sh debug    debug build: build/Nerda Dev.app, a separate app with
 #                       its own bundle id, data and keychain item (Edition.swift)
+#   ./build.sh test     build/Nerda Test.app, for agents trying things on
+#                       screen: Nerda Dev's build with data of its own
 #   ./build.sh bench    build/Nerda Bench.app, for bench.sh: a development build
 #                       with data of its own, optimized as a release is
 #
@@ -18,6 +20,10 @@ CONFIG="${1:-release}"
 if [ "$CONFIG" = release ]; then
   NAME="Nerda"
   ID="dev.nerda.browser"
+elif [ "$CONFIG" = test ]; then
+  NAME="Nerda Test"
+  ID="dev.nerda.browser.test"
+  CONFIG=debug
 elif [ "$CONFIG" = bench ]; then
   NAME="Nerda Bench"
   ID="dev.nerda.browser.bench"
