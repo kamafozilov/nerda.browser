@@ -89,7 +89,13 @@ enum Bench {
                 sample["open"] = open
                 // What the page's own clock doesn't see: the tab and its page
                 // made, WebKit's process started, Nerda's say on the navigation.
-                if let end = sample["load"], end > 0 { sample["overhead"] = open - end }
+                // Up to where that clock starts, as it said how long ago that
+                // was: `open` ends with the page's last load, and a site that
+                // sends itself on (github.com, nytimes.com) came out below zero
+                // against the load time of a document other than the one timed.
+                if let age = sample.removeValue(forKey: "age") {
+                    sample["overhead"] = Date.now.timeIntervalSince(start) * 1000 - age
+                }
                 if loaded == nil { sample["timedOut"] = 1 }
                 samples.append(sample)
                 browser.close(tab.id)
@@ -285,7 +291,7 @@ enum Bench {
             });
         }
         return { ttfb: n?.responseStart, fcp: fcp?.startTime, lcp, dcl: n?.domContentLoadedEventEnd,
-                 load: n?.loadEventEnd, requests: performance.getEntriesByType('resource').length };
+                 load: n?.loadEventEnd, requests: performance.getEntriesByType('resource').length, age: performance.now() };
         """
 
     // MARK: The web's benchmarks
