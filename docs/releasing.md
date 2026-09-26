@@ -22,7 +22,11 @@ They run side by side, and working on Nerda Dev never touches the tabs, history 
 
 ## Every change: the changelog
 
-A change people would notice gets its line in `CHANGELOG.md` under `## [Unreleased]`, in the same commit as the change. The release notes are made from these lines; nothing is written at release time. Use one of these headings, in this order, and add only the ones that have entries:
+A change people would notice gets its line in `CHANGELOG.md` under `## [Unreleased]`, in the same commit as the change. The release notes are made from these lines; nothing is written at release time. They are read in two places: the GitHub Release, and What's New, which Nerda shows once after it updates itself.
+
+### Which heading
+
+Use one of these headings, in this order, and add only the ones that have entries:
 
 - `### Added`: new features.
 - `### Changed`: changes in existing behaviour.
@@ -31,14 +35,40 @@ A change people would notice gets its line in `CHANGELOG.md` under `## [Unreleas
 - `### Fixed`: bug fixes.
 - `### Security`: fixes for vulnerabilities.
 
-How to write a line:
+A commit's type points to the heading (`feat` to Added or Changed, `fix` to Fixed), but the reader decides: something that works differently now is Changed even when it came as a `feat`.
 
-- One line per change, beginning with a dash, written for the person using Nerda: what they can now do or what now works, not how it was built.
-- Name the shortcut or menu item when there is one, for example "Find in page (⌘F)" or "File › Import Passwords…".
-- A Fixed line describes the problem that is gone: "Return opens the picked suggestion again while the pointer rests on the list."
-- Leave out refactors, build scripts, docs and tests. Leave out fixes to something that hasn't been released yet, because for the reader it simply works.
+### What gets a line
 
-Commit messages keep their own convention (`feat(scope): …`, `fix(scope): …`); `git log v0.0.1..HEAD --oneline` lists what is new since a release, to check the changelog against.
+- A change people would notice, one line each. A pull request usually adds one.
+- Not refactors, build scripts, docs or tests.
+- Not a fix to something that hasn't been released yet: for the reader it simply works. If it changes what the thing does, edit its line under `[Unreleased]` instead.
+
+### In what order
+
+Within a heading, the change people will notice most comes first: a new feature before a new setting, a fix to something everyone uses before one to a corner of Settings. A new line goes where it belongs in that order, not always at the end.
+
+### How to write a line
+
+- A dash, then the thing as the person sees it, first: its name on screen, "Bookmarks, …", "Renaming a tab …", "Nerda › Check for Updates… …". Then what they can do with it now, or what now works.
+- Written to the person using Nerda, as "you", in the present tense: "Pick one to go to its tab", not "Users can now pick…" or "Added the ability to…".
+- **Added**: what it is, where it is, and how to use it.
+- **Changed**: what it does now, and what it did before when that helps.
+- **Fixed**: the problem that is gone, as the person saw it, then what happens now: "The window fills the screen again when the Dock hides or shows, where it left a gap at the bottom."
+- Names exactly as on screen: menus and settings as a path with › ("Settings › General", "File › Import Bookmarks…"), buttons and items by their label, shortcuts in brackets with their symbols (⌘ ⌥ ⇧ ⌃): "View Page Source (⌥⌘U)".
+- No code: no type, file or function names, and no "we". Other browsers by name when they make it clearer: "as in Chrome", "as in Arc".
+- Short: one to three sentences. The most important thing in the first one, as What's New may be read no further.
+- British spelling, as the rest of Nerda: colour, behaviour, licence.
+- Only inline Markdown: `**bold**` sparingly, `` `code` `` for something typed (an address, a path), links. What's New shows nothing else, so no nested lists, pictures or headings of your own.
+
+| Instead of | Write |
+|---|---|
+| Added UpdateCard to the sidebar | A new version shows as a card at the bottom of the sidebar, with its number. |
+| Fixed bug in rename field focus handling | Renaming a tab ends with a click anywhere, where before only a click on the page did. |
+| Improved developer tools | Developer tools: Inspect Element when you right-click a page, and Developer Tools (⌥⌘I) in View › Developer. |
+
+### Before a release
+
+`git log v0.0.1..HEAD --oneline` (from the latest tag) lists what is new since a release: each `feat` and `fix` there either has its line, or is left out for one of the reasons above. Then read `[Unreleased]` from top to bottom as someone who has never seen the code.
 
 ## Making a release
 
