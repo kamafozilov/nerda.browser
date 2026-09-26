@@ -43,13 +43,15 @@ They are taken in the test VM, never on the owner's Mac (see [AGENTS.md](../AGEN
 
 1. For a fix or a change, before touching the code: `./vm.sh open`, bring Nerda to the state that shows the problem, `./vm.sh shot build/before.png`. Forgot? `git worktree add /tmp/nerda-base main`, the same steps from there, then `git worktree remove /tmp/nerda-base`.
 2. After the change: `./vm.sh open`, the same steps, `./vm.sh shot build/after.png`.
-3. Crop both to the part that changed, with enough around it to see where it is: `sips -c HEIGHT WIDTH --cropOffset Y X build/after.png`.
-4. `./screenshots.sh build/before.png build/after.png` (or only `after.png`) puts them on GitHub and prints the lines for the Screenshots section.
-5. `./vm.sh done`.
+3. Crop both to the part that changed, with enough around it to see where it is: `sips -c HEIGHT WIDTH --cropOffset Y X build/after.png`. Two views of one change (a dialog and a settings page) go side by side in one `after.png`.
+4. `./vm.sh done`.
 
-`./screenshots.sh` keeps them on the `screenshots` branch, in a folder named after your branch, so `main` never carries pictures; that branch is never merged. Sending a file again replaces it, though GitHub may show the old one for a few minutes. From a fork, it uses your fork, and its printed lines are the ones to use.
+The change isn't finished until they are in `build/`; from there, they reach the pull request on their own:
 
-Upload them **before** the pull request is opened: T3 Code writes the picture addresses from the branch name, so they have to be there already.
+- **Pushing the branch** uploads them: `.githooks/pre-push` runs `./screenshots.sh build/before.png build/after.png` (whichever are there) before the branch goes, whoever pushes it: T3 Code's buttons, `gh pr create` or `git push`. It is on once per clone: `git config core.hooksPath .githooks`.
+- **The Screenshots check** (`.github/workflows/screenshots.yml`) runs on every pull request as it opens, is edited or gets new commits. It puts the uploaded pictures into the Screenshots section, whatever was written there, and fails a pull request that has none and doesn't say "Nothing on screen changes." A picture dragged into the body on GitHub counts too.
+
+`./screenshots.sh` keeps them on the `screenshots` branch, in a folder named after your branch, so `main` never carries pictures; that branch is never merged. Sending a file again replaces it, though GitHub may show the old one for a few minutes; sending it unchanged does nothing. Run it by hand for pictures taken after the last push, then push again or edit the body, and the check puts them in. From a fork, it uses your fork.
 
 ## Opening it
 
@@ -57,7 +59,7 @@ Before opening, check:
 
 - `swift test` passes.
 - The changelog line is in the same commit as the change, if people would notice it.
-- The screenshots are uploaded.
+- The screenshots are in `build/` (or the change has nothing on screen): the push uploads them.
 
 **From T3 Code**, with its commit and pull request buttons: T3 Code writes commit messages and the pull request from this repository's `AGENTS.md`, its last 20 commit subjects and the template on `main`. Its settings, under Source Control, stay at *Source control writing style: Repository conventions* with *Follow change request templates* on. It sees only the diff, so read what it wrote and correct it with `gh pr edit` where it guessed (Testing above all).
 
