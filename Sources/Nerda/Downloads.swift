@@ -1,3 +1,4 @@
+import os
 import SwiftUI
 import UniformTypeIdentifiers
 import WebKit
@@ -29,17 +30,29 @@ final class Download: Identifiable {
 
     init(_ task: WKDownload) {
         self.task = task
+        // Every chunk reports in; only those that move what is drawn go on
+        // to the main thread, not one hop per chunk.
+        let drawn = OSAllocatedUnfairLock(initialState: (received: Int64(0), total: Int64(-1)))
         observation = task.progress.observe(\.completedUnitCount) { [weak self] progress, _ in
             let received = progress.completedUnitCount, total = progress.totalUnitCount
+            guard drawn.withLock({ drawn in
+                guard Self.moves(received: received, total: total, from: drawn) else { return false }
+                drawn = (received, total)
+                return true
+            }) else { return }
             Task { @MainActor in self?.update(received: received, total: total) }
         }
     }
 
-    /// Every chunk reports in; what is drawn only needs to move every half percent.
-    private func update(received: Int64, total: Int64) {
+    /// What is drawn only needs to move every half percent, or 256 KB while
+    /// the size isn't known, and once more at the end.
+    nonisolated static func moves(received: Int64, total: Int64, from drawn: (received: Int64, total: Int64)) -> Bool {
         let step = total > 0 ? total / 200 : 256 * 1024
-        guard state == .running,
-              total != self.total || received - self.received >= step || received == total else { return }
+        return total != drawn.total || received - drawn.received >= step || received == total
+    }
+
+    private func update(received: Int64, total: Int64) {
+        guard state == .running else { return }
         self.received = received
         self.total = total
     }
