@@ -801,6 +801,23 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     #expect(onPage.tabs.count == 1 && onPage.selected?.title == "Example")
 }
 
+/// With pinned tabs set not to load at launch, it starts on a new tab and
+/// the pinned tab sleeps until opened.
+@MainActor
+@Test func pinnedTabsCanWaitToBeOpened() async throws {
+    let folder = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appending(path: "session.json")
+    let pin = Session.Tab(url: somewhere, title: "Example", state: nil, zoom: 1, pinned: true, home: somewhere)
+    try JSONEncoder().encode(Session(tabs: [pin], selected: 0)).write(to: file)
+
+    let browser = Browser()
+    browser.restore(from: file, loadingPins: false)
+    await Task.yield()
+    #expect(browser.tabs.count == 2 && browser.selected?.isBlank == true)
+    #expect(browser.tabs[0].isPinned && browser.tabs[0].isAsleep)
+}
+
 /// The settings tab comes back too, on the page it was left on, and on screen if it was.
 @MainActor
 @Test func theSettingsTabComesBack() throws {
@@ -1105,8 +1122,8 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     restored.restore(from: file)
     #expect(restored.tabs.map(\.isPinned) == [true, true, false, false])
     #expect(restored.tabs.map(\.title) == ["a.test", "c.test", "example.com", "b.test"])
-    // Pinned tabs wake as soon as the window is up: the main thread's next turn.
-    try await Task.sleep(for: .milliseconds(50))
+    // Pinned tabs wake once the window is up, one after another.
+    for _ in 0..<100 where restored.tabs[1].isAsleep { try await Task.sleep(for: .milliseconds(20)) }
     #expect(!restored.tabs[0].isAsleep && !restored.tabs[1].isAsleep)
     #expect(restored.tabs[3].isAsleep)
 
@@ -1114,6 +1131,14 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     restored.setPinned(false, restored.tabs[0].id)
     #expect(restored.tabs.map(\.title) == ["c.test", "a.test", "example.com", "b.test"])
     #expect(restored.tabs.map(\.isPinned) == [true, false, false, false])
+
+    // Out of memory, or taking more than their share, they sleep too.
+    restored.sleepIdleTabs(unseenFor: 0, pinsToo: true, over: .max)
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(!restored.tabs[0].isAsleep)
+    restored.sleepIdleTabs(unseenFor: 0, pinsToo: true)
+    for _ in 0..<100 where !restored.tabs[0].isAsleep { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(restored.tabs[0].isAsleep)
 }
 
 /// A pinned tab goes back to where it was pinned (its tile double-clicked),

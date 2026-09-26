@@ -176,6 +176,7 @@ private struct GeneralSettings: View {
     @AppStorage(Screenshot.key) private var screenshot = true
     @AppStorage(SpellCheck.key) private var spellCheck = true
     @AppStorage(QuitConfirmation.key) private var warnsBeforeQuitting = true
+    @AppStorage(Session.loadsPinsKey) private var loadsPins = true
 
     var body: some View {
         DefaultBrowserCard()
@@ -217,6 +218,10 @@ private struct GeneralSettings: View {
             }
         }
         SettingsGroup {
+            SettingsRow(title: "Load pinned tabs at launch", detail: "Off, Nerda opens on a new tab and loads a pinned tab when you open it",
+                        icon: "pin") {
+                SettingsToggle(title: "Load pinned tabs at launch", isOn: $loadsPins)
+            }
             SettingsRow(title: "Warn before quitting", detail: "Ask before ⌘Q closes every window", icon: "power") {
                 SettingsToggle(title: "Warn before quitting", isOn: $warnsBeforeQuitting)
             }
