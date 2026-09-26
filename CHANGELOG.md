@@ -7,6 +7,15 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- Settings › General › Load pinned tabs at launch. Turned off, Nerda opens on a new tab, and a pinned tab loads only when you open it.
+
+### Changed
+
+- Nerda takes less memory with pinned tabs and heavy sites. At launch the tab on screen loads first and pinned tabs follow one at a time. A tab out of sight for 10 minutes that takes more than 500 MB, as x.com, Gmail or a 3D site can, sleeps, pinned or not, and loads again when you open it. When the Mac runs out of memory, pinned tabs sleep too.
+- A pinned site that is asleep shows its icon in grey, and in colour again once you open it and it loads.
+
 ## [0.0.9] - 2026-09-26
 
 ### Changed

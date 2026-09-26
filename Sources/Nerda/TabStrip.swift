@@ -175,7 +175,7 @@ struct TabStrip: View {
             ForEach(items, id: \.self) { id in
                 if let id, let tab = browser.tabs.first(where: { $0.id == id }) {
                     PinnedIcon(site: tab.site, loading: tab.isLoading, title: tab.title,
-                               selected: id == browser.selectedID, press: { browser.select(id) }) {
+                               selected: id == browser.selectedID, asleep: tab.isAsleep, press: { browser.select(id) }) {
                         browser.select(id)
                     }
                     // Its place stays empty while it is dragged: where it will land.
@@ -533,6 +533,8 @@ private struct PinnedIcon: View {
     let loading: Bool
     let title: String
     let selected: Bool
+    /// Asleep (`Tab.sleep`): its icon in grey, as not running.
+    var asleep = false
     var press: (() -> Void)?
     let action: () -> Void
 
@@ -544,6 +546,7 @@ private struct PinnedIcon: View {
         Button(action: action) {
             TabIcon(site: site, loading: loading && Favicons.origin(of: site).flatMap { Favicons.shared.icon($0).image } == nil,
                     size: 16)
+                .saturation(asleep ? 0 : 1)
                 .frame(width: TabStrip.icon, height: 26)
                 .background(shape.fill(selected ? Palette.wash : hovering ? Palette.hover : .clear))
                 .contentShape(shape)

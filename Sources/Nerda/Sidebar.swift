@@ -304,7 +304,7 @@ struct Sidebar: View {
                 if let id {
                     if let tab = browser.tabs.first(where: { $0.id == id }) {
                         PinnedTile(site: tab.site, loading: tab.isLoading, title: tab.title,
-                                   selected: id == browser.selectedID,
+                                   selected: id == browser.selectedID, asleep: tab.isAsleep,
                                    press: { browser.select(id) }) {
                             browser.select(id)
                         }
@@ -1068,6 +1068,8 @@ private struct PinnedTile: View {
     let loading: Bool
     let title: String
     let selected: Bool
+    /// Asleep (`Tab.sleep`): its icon in grey, as not running.
+    var asleep = false
     /// As a tab row's: on the way down.
     var press: (() -> Void)?
     let action: () -> Void
@@ -1085,6 +1087,7 @@ private struct PinnedTile: View {
             // otherwise sit as a spinner for seconds.
             TabIcon(site: site, loading: loading && Favicons.origin(of: site).flatMap { Favicons.shared.icon($0).image } == nil,
                     size: 16)
+                .saturation(asleep ? 0 : 1)
                 .frame(maxWidth: .infinity)
                 .frame(height: Sidebar.tileHeight)
                 .background {

@@ -88,6 +88,14 @@ final class Browser: NSObject {
     // ponytail: fixed; a setting once there are settings. Edge's default is 2 hours,
     // this is shorter because staying light is the point.
     static let sleepAfter: TimeInterval = 30 * 60
+    /// A tab taking more than `heavy` sleeps after this long unseen, pinned
+    /// or not. Most pages take 100–400 MB; x.com and Gmail kept 650–750 MB
+    /// each, pinned and never seen, and a WebGL site GBs. Woken, it loads
+    /// again in a second or two.
+    static let heavyAfter: TimeInterval = 10 * 60
+    static let heavy: UInt64 = 500 << 20
+    /// Between one pinned tab loading at launch and the next (Session).
+    static let pinLoadGap: Duration = .milliseconds(500)
     @ObservationIgnored private var sleepTimer: Timer?
     @ObservationIgnored private var memoryPressure: (any DispatchSourceMemoryPressure)?
     /// The address last loaded again for a redirect WebKit lost, so it is only tried once.
@@ -116,7 +124,10 @@ final class Browser: NSObject {
         super.init()
         // Checked each minute, loosely, so the system can fold it in with other wake-ups.
         sleepTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.sleepIdleTabs(unseenFor: Self.sleepAfter) }
+            MainActor.assumeIsolated {
+                self?.sleepIdleTabs(unseenFor: Self.sleepAfter)
+                self?.sleepIdleTabs(unseenFor: Self.heavyAfter, pinsToo: true, over: Self.heavy)
+            }
         }
         sleepTimer?.tolerance = 15
         // What changes without telling (scrolling, a page changing its own
@@ -126,10 +137,14 @@ final class Browser: NSObject {
             MainActor.assumeIsolated { if NSApp?.isActive == true { self?.saveSession(waiting: false) } }
         }
         sessionTimer?.tolerance = 3
-        // When the Mac runs short of memory, every tab out of sight sleeps at once.
+        // When the Mac runs short of memory, every tab out of sight sleeps at
+        // once; when it runs out, as in Safari, pinned ones too.
         memoryPressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         memoryPressure?.setEventHandler { [weak self] in
-            MainActor.assumeIsolated { self?.sleepIdleTabs(unseenFor: 0) }
+            MainActor.assumeIsolated {
+                let critical = self?.memoryPressure?.data.contains(.critical) == true
+                self?.sleepIdleTabs(unseenFor: 0, pinsToo: critical)
+            }
         }
         memoryPressure?.activate()
     }
@@ -142,10 +157,12 @@ final class Browser: NSObject {
     }
 
     /// Tabs out of sight at least this long, and not busy (playing, on a call),
-    /// sleep. Pinned ones never do: being always ready is what they are for.
-    func sleepIdleTabs(unseenFor age: TimeInterval) {
+    /// sleep; of those, only the ones taking more than `size`, if given.
+    /// Pinned ones only with `pinsToo`: being always ready is what they are for.
+    func sleepIdleTabs(unseenFor age: TimeInterval, pinsToo: Bool = false, over size: UInt64 = 0) {
         let cutoff = Date.now.addingTimeInterval(-age)
-        for tab in tabs where tab.id != selectedID && !tab.isPinned && !tab.isAsleep && tab.lastSeen <= cutoff {
+        for tab in tabs where tab.id != selectedID && (pinsToo || !tab.isPinned) && !tab.isAsleep
+            && tab.lastSeen <= cutoff && (size == 0 || (tab.memory ?? 0) > size) {
             Task {
                 // Asked of the page, so it may have come on screen in the meantime.
                 guard await !tab.isBusy(), tab.id != selectedID else { return }

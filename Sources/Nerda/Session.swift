@@ -31,6 +31,12 @@ nonisolated struct Session: Codable, Equatable, Sendable {
     var selected: Int?
 
     static let file = Edition.folder.appending(path: "session.json")
+
+    /// Whether pinned tabs load as soon as Nerda opens, and it opens on the
+    /// tab left on screen. Off, it opens on a new tab and every tab sleeps
+    /// until opened: nothing loads that isn't asked for.
+    static let loadsPinsKey = "loadsPinnedTabsAtLaunch"
+    static var loadsPins: Bool { UserDefaults.standard.object(forKey: loadsPinsKey) as? Bool ?? true }
 }
 
 extension Browser {
@@ -39,7 +45,7 @@ extension Browser {
     /// newer version, or cut short) is set aside rather than overwritten.
     /// New tabs aren't saved: they are nowhere. Left on one, or with none to
     /// open, it starts on a new tab, as other browsers do.
-    func restore(from file: URL) {
+    func restore(from file: URL, loadingPins: Bool = Session.loadsPins) {
         sessionFile = file
         defer { if tabs.isEmpty { add(Tab()) } }
         guard tabs.isEmpty, let data = try? Data(contentsOf: file) else { return }
@@ -51,10 +57,15 @@ extension Browser {
         guard !tabs.isEmpty else { return }
         // A bookmark taken away since (in another window, before a crash): its tab joins the list.
         for tab in tabs where tab.bookmark.map({ bookmarks.item($0) == nil }) == true { tab.bookmark = nil }
-        // Pinned sites are there at once, as they always are: loaded as soon
-        // as the window is up, which making their pages would hold up.
-        DispatchQueue.main.async { [weak self] in
-            for tab in self?.tabs ?? [] where tab.isPinned { _ = tab.webView }
+        guard loadingPins else { return add(Tab()) }
+        // Pinned sites are there at once, as they always are: loaded once the
+        // window is up, which making their pages would hold up, and after the
+        // tab on screen, one at a time, so they don't all load together with it.
+        Task { [weak self] in
+            for tab in self?.tabs ?? [] where tab.isPinned {
+                try? await Task.sleep(for: Self.pinLoadGap)
+                if tab.isAsleep, self?.tabs.contains(where: { $0 === tab }) == true { _ = tab.webView }
+            }
         }
         if let index = session.selected, tabs.indices.contains(index) { selectedID = tabs[index].id } else { add(Tab()) }
     }
