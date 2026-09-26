@@ -15,6 +15,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - What's New, after Nerda updates itself, stays a compact card however tall the window is: the first notes show at a glance and the rest scroll, where before it stretched over most of a tall window.
 
+### Fixed
+
+- Downloads, AI chats and the menu read clearly over a light page. Before, they turned grey over a white site and their text faded into it, most of all with the tabs across the top.
+
 ## [0.0.6] - 2026-09-26
 
 ### Added

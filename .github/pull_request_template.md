@@ -17,21 +17,13 @@ A fix: what went wrong before, and what happens now.
 ## Screenshots
 
 <!--
-Pictures from the test VM (./vm.sh), left in build/ as before.png and
-after.png: pushing the branch uploads them, and the Screenshots check puts
-them here. The address is the upload's commit, which ./screenshots.sh prints:
-https://raw.githubusercontent.com/kamafozilov/nerda.browser/<commit>/<file>
-
-A new feature (feat), one picture:
-
-![after](https://raw.githubusercontent.com/kamafozilov/nerda.browser/<commit>/after.png)
-
-A fix or a change to something that already existed (fix, or feat that
-changes behaviour), two pictures side by side:
-
-| Before | After |
-| --- | --- |
-| ![before](https://raw.githubusercontent.com/kamafozilov/nerda.browser/<commit>/before.png) | ![after](https://raw.githubusercontent.com/kamafozilov/nerda.browser/<commit>/after.png) |
+Every change this makes on screen, in pictures from the test VM (./vm.sh):
+each screen of something new, and a before and an after of each thing that
+looks or works differently. Leave them in build/screenshots/, named for what
+they show and numbered in reading order (1-store-page.png,
+2-extensions-menu.before.png, 2-extensions-menu.after.png): pushing the branch
+uploads them, and the Screenshots check puts them here, each under its
+caption, before and after side by side.
 
 Nothing on screen changes (build, docs, refactor, perf): write
 "Nothing on screen changes." instead.

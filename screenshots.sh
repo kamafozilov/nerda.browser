@@ -5,16 +5,26 @@
 # and every clone of it stay free of pictures. They are shown by the commit's
 # address, which never changes, so a picture sent again gets a new address.
 #
-#   ./screenshots.sh build/after.png                    a new feature
-#   ./screenshots.sh build/before.png build/after.png   a fix or a change
+#   ./screenshots.sh              every picture in build/screenshots/
+#   ./screenshots.sh FILE...      these pictures
 #
-# A file keeps its name, so name them before.png and after.png: that is what
-# .github/pull_request_template.md expects. Sending one again replaces it.
+# What is sent is the pull request's whole set: a picture left out of it is
+# taken off. Each is named for what it shows, numbered in the order to read
+# them, a before and an after of one thing by the same name:
+#
+#   build/screenshots/1-store-page.png
+#   build/screenshots/2-extensions-menu.before.png
+#   build/screenshots/2-extensions-menu.after.png
+#
 # docs/pull-requests.md has the whole process.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-[ $# -gt 0 ] || { sed -n '7,8p' "$0" >&2; exit 1; }
+if [ $# -eq 0 ]; then
+  shopt -s nullglob
+  set -- build/screenshots/*.png
+  [ $# -gt 0 ] || { echo "screenshots.sh: no pictures in build/screenshots/" >&2; exit 1; }
+fi
 BRANCH="$(git branch --show-current)"
 [ -n "$BRANCH" ] || { echo "screenshots.sh: not on a branch" >&2; exit 1; }
 # owner/repo of origin, from git@github.com:o/r.git or https://github.com/o/r
@@ -22,17 +32,14 @@ REPO="$(git remote get-url origin | sed -E 's#\.git$##; s#^.*github\.com[:/]##')
 
 REF="refs/screenshots/$BRANCH"
 
-# Built in a throwaway index, so the checkout's own index and files are
-# never touched. Without the ref on origin yet, the first commit starts it.
+# Built in a throwaway index from these pictures alone, so the checkout's own
+# index and files are never touched. The last upload, if there was one, is
+# the parent, and only its tree is compared.
 export GIT_INDEX_FILE="$(mktemp -u)"
 trap 'rm -f "$GIT_INDEX_FILE"' EXIT
-if git fetch -q origin "$REF" 2>/dev/null; then
-  PARENT="-p FETCH_HEAD"
-  git read-tree FETCH_HEAD
-else
-  PARENT=
-  git read-tree --empty
-fi
+PARENT=
+git fetch -q origin "$REF" 2>/dev/null && PARENT="-p FETCH_HEAD"
+git read-tree --empty
 for f; do
   git update-index --add --cacheinfo "100644,$(git hash-object -w "$f"),$(basename "$f")"
 done

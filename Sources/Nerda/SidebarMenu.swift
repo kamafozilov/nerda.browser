@@ -160,10 +160,12 @@ struct SidebarMenu: View {
 
 extension View {
     /// The menu's own look: frosted, rounded, with a fine edge and a shadow
-    /// lifting it off what is under it.
+    /// lifting it off what is under it. Tinted with the window's ground, as
+    /// `popoverGlass` is: across the top it opens over the page, and frosted
+    /// alone it went grey over a white one, its shortcuts fading into it.
     func menuPanel() -> some View {
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
-        return background(.regularMaterial, in: shape)
+        return background { shape.fill(.regularMaterial).overlay(shape.fill(Palette.ground.opacity(0.75))) }
             .overlay(shape.strokeBorder(Color.primary.opacity(0.1)))
             .shadow(color: .black.opacity(0.3), radius: 16, y: 6)
     }
