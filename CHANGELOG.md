@@ -15,6 +15,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Changed
 
 - An open bookmark shows its close button all the time, not only under the pointer, so you can see at a glance which ones are open.
+- What's New, after Nerda updates itself, is clear glass like the rest of Nerda instead of a near-black card, and wider and taller, so more of the notes read at a glance. Short notes no longer float in empty space.
 
 ## [0.0.7] - 2026-09-26
 
