@@ -365,12 +365,6 @@ private struct PageCard: View {
         .mask {
             UnevenRoundedRectangle(bottomLeadingRadius: radius, bottomTrailingRadius: radius, style: .continuous)
         }
-        .overlay {
-            if let tab = browser.selected, tab.isOnThisMac, tab.hasPage, !browser.locked {
-                HazardTape(shape: UnevenRoundedRectangle(bottomLeadingRadius: radius, bottomTrailingRadius: radius,
-                                                         style: .continuous))
-            }
-        }
         .overlay(alignment: .topTrailing) {
             // A new tab, or the settings, has no page to look in.
             if browser.findBarOpen, browser.selected?.hasPage == true {
@@ -392,21 +386,6 @@ private struct PageCard: View {
                     .offset(x: choices.spot.minX, y: choices.spot.maxY + 4)
             }
         }
-    }
-}
-
-/// Amber and black along a shape's edge, as Arc marks a page being worked
-/// on: here, one from a server on this Mac (Developer Mode).
-struct HazardTape<S: InsettableShape>: View {
-    let shape: S
-    var width: CGFloat = 3
-
-    var body: some View {
-        ZStack {
-            shape.strokeBorder(Color(white: 0.1), lineWidth: width)
-            shape.strokeBorder(Palette.dev, style: StrokeStyle(lineWidth: width, dash: [10, 8]))
-        }
-        .allowsHitTesting(false)
     }
 }
 
