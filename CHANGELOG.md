@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- Window › Task Manager: every tab, extension and part of Nerda with the memory and CPU it takes, and whether a tab is on screen, asleep or playing sound. Double-click a tab to go to it; End Process closes the tabs you chose.
+
 ## [0.0.10] - 2026-09-26
 
 ### Added

@@ -126,7 +126,7 @@ enum Bench {
         // Each page's process named by its site, to tell which one is busy.
         var sites: [pid_t: String] = [:]
         for tab in tabs {
-            if let pid = (tab.page?.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value {
+            if let pid = tab.pid {
                 sites[pid] = tab.url?.host() ?? "?"
             }
         }
@@ -158,8 +158,8 @@ enum Bench {
         let asleep = memory()
         say("  memory, all but one asleep: \(describe(asleep))")
         // What is still up besides the page on screen: a page's process let go of late, or kept.
-        let shown = (browser.selected?.page?.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value
-        for (pid, usage) in processes() where ["pages", ""].contains(kind(of: pid)) {
+        let shown = browser.selected?.pid
+        for (pid, usage) in Processes.all() where ["pages", ""].contains(Processes.kind(of: pid)) {
             say(String(format: "    page process %d %@%@: %.0f MB", pid, sites[pid] ?? "?", pid == shown ? " (on screen)" : "",
                        Double(usage.ri_phys_footprint) / 1_048_576))
         }
@@ -345,29 +345,11 @@ enum Bench {
 
     // MARK: Memory and CPU
 
-    /// Nerda and the WebKit processes working for it (its pages, their
-    /// network and graphics), found as Activity Monitor finds them: by whom
-    /// they work for. Nerda must be opened by LaunchServices (`open`), or
-    /// they work for the terminal it was started from.
-    private static func processes() -> [(pid: pid_t, usage: rusage_info_v4)] {
-        var pids = [pid_t](repeating: 0, count: 8192)
-        let count = Int(proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size)))
-        let me = getpid()
-        return pids.prefix(max(count, 0)).compactMap { pid in
-            guard pid == me || responsiblePID(pid) == me else { return nil }
-            var usage = rusage_info_v4()
-            let read = withUnsafeMutablePointer(to: &usage) {
-                $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
-            }
-            return read == 0 ? (pid, usage) : nil
-        }
-    }
-
     /// Footprint in MB, as Activity Monitor's Memory column: Nerda's own, and its WebKit processes' by kind.
     private static func memory() -> [String: Double] {
         var memory: [String: Double] = [:]
-        for (pid, usage) in processes() {
-            let kind = pid == getpid() ? "nerda" : kind(of: pid)
+        for (pid, usage) in Processes.all() {
+            let kind = pid == getpid() ? "nerda" : Processes.kind(of: pid)
             memory[kind, default: 0] += Double(usage.ri_phys_footprint) / 1_048_576
             if kind == "pages" { memory["pageProcesses", default: 0] += 1 }
         }
@@ -375,32 +357,18 @@ enum Bench {
         return memory
     }
 
-    private static func kind(of pid: pid_t) -> String {
-        var name = [CChar](repeating: 0, count: 256)
-        proc_name(pid, &name, UInt32(name.count))
-        let process = String(decoding: name.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-        if process.contains("WebContent") { return "pages" }
-        if process.contains("Networking") { return "network" }
-        if process.contains("GPU") { return "graphics" }
-        return process
-    }
-
     /// CPU time, as a share of one core, and wake-ups from idle, of Nerda and its processes over `seconds`.
     private static func cpu(over seconds: Double, naming sites: [pid_t: String] = [:]) async
         -> (percent: Double, wakeups: Double, by: [String: Double]) {
-        let before = Dictionary(processes().map { ($0.pid, $0.usage) }) { a, _ in a }
+        let before = Dictionary(Processes.all().map { ($0.pid, $0.usage) }) { a, _ in a }
         try? await Task.sleep(for: .seconds(seconds))
-        var info = mach_timebase_info()
-        mach_timebase_info(&info)
         var time = 0.0, wakeups = 0.0
         var by: [String: Double] = [:]
-        for (pid, after) in processes() {
+        for (pid, after) in Processes.all() {
             guard let start = before[pid] else { continue }
-            // In ticks of the Mac's clock, not nanoseconds, on Apple silicon.
-            let ticks = (after.ri_user_time + after.ri_system_time) - (start.ri_user_time + start.ri_system_time)
-            let spent = Double(ticks) * Double(info.numer) / Double(info.denom) / 1e9
+            let spent = Processes.seconds((after.ri_user_time + after.ri_system_time) - (start.ri_user_time + start.ri_system_time))
             time += spent
-            let name = pid == getpid() ? "nerda" : sites[pid] ?? kind(of: pid)
+            let name = pid == getpid() ? "nerda" : sites[pid] ?? Processes.kind(of: pid)
             by[name, default: 0] += spent / seconds * 100
             wakeups += Double((after.ri_pkg_idle_wkups + after.ri_interrupt_wkups) - (start.ri_pkg_idle_wkups + start.ri_interrupt_wkups))
         }
@@ -478,8 +446,4 @@ private extension String {
     func leftPadded(_ width: Int) -> String { String(repeating: " ", count: max(width - count, 0)) + self }
 }
 
-/// Who a process works for, as the system counts it for privacy prompts and
-/// Activity Monitor: a WebKit process works for the app whose page it runs.
-@_silgen_name("responsibility_get_pid_responsible_for_pid")
-private func responsiblePID(_ pid: pid_t) -> pid_t
 #endif
