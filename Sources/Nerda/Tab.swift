@@ -504,16 +504,10 @@ final class Tab: Identifiable {
 
     /// What the page's process takes, as Activity Monitor's Memory column
     /// counts it; nil while asleep, or before the page has a process.
-    // WebKit SPI, as Bench uses: should it go, the card shows no memory.
-    var memory: UInt64? {
-        guard let page, page.responds(to: NSSelectorFromString("_webProcessIdentifier")),
-              let pid = (page.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value, pid > 0 else { return nil }
-        var usage = rusage_info_v4()
-        let read = withUnsafeMutablePointer(to: &usage) {
-            $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
-        }
-        return read == 0 ? usage.ri_phys_footprint : nil
-    }
+    var memory: UInt64? { pid.flatMap(Processes.usage)?.ri_phys_footprint }
+
+    /// The page's process; nil while asleep, or before it has one.
+    var pid: pid_t? { page.flatMap(Processes.pid) }
 
     @discardableResult
     private func wake(for target: URL? = nil) -> WKWebView {

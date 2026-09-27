@@ -25,6 +25,8 @@ final class AppMenu: NSObject {
             item("Select Next Tab", #selector(nextTab), "\t", .control, target: self),
             item("Select Previous Tab", #selector(previousTab), "\t", [.control, .shift], target: self),
             .separator(),
+            item("Task Manager", #selector(openTaskManager), target: self),
+            .separator(),
             item("Bring All to Front", #selector(NSApplication.arrangeInFront(_:))),
         ] + (1...9).map { number in
             // ⌘1 to ⌘9 work without nine lines of menu for them.
@@ -193,6 +195,7 @@ final class AppMenu: NSObject {
     @objc private func newIncognitoWindow() { Windows.openIncognito() }
     @objc private func openSettings() { shown.openSettings() }
     @objc private func openHistory() { shown.openHistory() }
+    @objc private func openTaskManager() { TaskManager.show() }
     @objc private func searchTabs() { shown.showCommandBar() }
     @objc private func openLocation() { shown.editAddress() }
     @objc private func closeTab() { browser.closeSelectedTab() }
