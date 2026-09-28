@@ -354,7 +354,10 @@ nonisolated private enum Swap {
         init(report: @escaping @Sendable (Double) -> Void) { self.report = report }
 
         func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {
-            watching = task.progress.observe(\.fractionCompleted) { [self] progress, _ in
+            // Weakly: the watcher holds the observation, and the task holds the
+            // watcher (its delegate) only while the download runs.
+            watching = task.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
+                guard let self else { return }
                 let fraction = progress.fractionCompleted
                 // All in is said once the download is over, not while it is saved.
                 guard Int(fraction * 100) != percent, fraction < 1 else { return }
