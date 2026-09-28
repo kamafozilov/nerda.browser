@@ -34,12 +34,20 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// would open it again.
     private var closedByButton: (id: String, at: Date)?
 
-    /// The popup's web view, while one is up — for the bench.
+    /// The popup's web view, while one is up — for the bench, and for its
+    /// clipboard to follow a permission (Extensions.clipboardChanged).
     var view: WKWebView? { web }
+
+    /// Kept up while Nerda asks a question on the window: the sheet takes
+    /// the key window, and a transient popover would close, taking the
+    /// extension's page that asked with it (its copy waits on the answer).
+    var holds = false {
+        didSet { popover?.behavior = holds ? .applicationDefined : .transient }
+    }
 
     func show(_ url: URL, for context: WKWebExtensionContext, from anchor: NSView?) {
         close()
-        guard let configuration = context.webViewConfiguration else { return }
+        guard let configuration = Extensions.configuration(for: context) else { return }
         // Sized the way Chrome sizes a popup (see preferred), unseen, while
         // the popover already stands at the size this popup had last time;
         // then shown. It has to be in the window meanwhile: WebKit suspends

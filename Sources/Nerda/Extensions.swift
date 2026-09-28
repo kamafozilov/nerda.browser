@@ -216,8 +216,42 @@ final class Extensions: NSObject {
     /// The configuration an extension's page has to be made with, as only a
     /// view made from its extension's is served its pages; nil for the web.
     static func configuration(for url: URL) -> WKWebViewConfiguration? {
-        guard host(of: url) != nil else { return nil }
-        return shared.controller.extensionContext(for: url)?.webViewConfiguration
+        guard host(of: url) != nil, let context = shared.controller.extensionContext(for: url) else { return nil }
+        return configuration(for: context)
+    }
+
+    /// Its extension's configuration, with the clipboard its permissions
+    /// give it, as in Chrome: clipboardWrite copies without a click,
+    /// clipboardRead pastes too. WebKit leaves copying to a click and has
+    /// no clipboardRead, and a password manager copies from its offscreen
+    /// page, which is never clicked. The preferences are its own: all
+    /// extensions' pages share one set otherwise.
+    static func configuration(for context: WKWebExtensionContext) -> WKWebViewConfiguration? {
+        guard let configuration = context.webViewConfiguration else { return nil }
+        if let own = configuration.preferences.copy() as? WKPreferences { configuration.preferences = own }
+        clipboard(configuration.preferences, for: context)
+        return configuration
+    }
+
+    /// WebKit SPI (`_javaScriptCanAccessClipboard`, `_domPasteAllowed`, set
+    /// by key): should it go, an extension's page copies only on a click.
+    static func clipboard(_ preferences: WKPreferences, for context: WKWebExtensionContext) {
+        let allowed = ExtensionShims.allowed(context.uniqueIdentifier, context: context)
+        let read = allowed.contains("clipboardRead")
+        for (key, on) in [("JavaScriptCanAccessClipboard", read || allowed.contains("clipboardWrite")), ("DOMPasteAllowed", read)]
+        where preferences.responds(to: NSSelectorFromString("_set\(key):")) {
+            preferences.setValue(on, forKey: key)
+        }
+    }
+
+    /// After a permission is granted or taken back: its pages already open
+    /// follow, the offscreen one above all, made before anything was asked.
+    static func clipboardChanged(_ context: WKWebExtensionContext) {
+        let id = context.uniqueIdentifier
+        let popup = ExtensionPopup.shared.extensionID == id ? ExtensionPopup.shared.view : nil
+        for web in [ExtensionShims.offscreen[id], popup].compactMap({ $0 }) {
+            clipboard(web.configuration.preferences, for: context)
+        }
     }
 
     func noteError(_ text: String, for id: String) {
@@ -1053,6 +1087,8 @@ final class Extensions: NSObject {
             guard let window = self?.browser?.window, window.isVisible else {
                 return alert.runModal() == .alertFirstButtonReturn
             }
+            ExtensionPopup.shared.holds = true
+            defer { ExtensionPopup.shared.holds = false }
             return await alert.beginSheetModal(for: window) == .alertFirstButtonReturn
         }
         question = task

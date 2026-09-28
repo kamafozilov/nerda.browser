@@ -1890,16 +1890,18 @@ enum ExtensionShims {
       // Permissions. WebKit knows its own and throws on any other name,
       // where Chrome answers false. The ones Nerda answers itself are
       // Nerda's to grant: those a manifest names are granted, optional
-      // ones are asked for.
+      // ones are asked for. clipboardWrite is Nerda's too: WebKit wants a
+      // click for it, which a worker asking never has, and Nerda gives the
+      // extension's pages the clipboard itself (Extensions.clipboard).
       if (chrome.permissions) {
-        const webkit = new Set(["activeTab", "alarms", "clipboardWrite", "contextMenus", "cookies", "declarativeNetRequest",
+        const webkit = new Set(["activeTab", "alarms", "contextMenus", "cookies", "declarativeNetRequest",
           "declarativeNetRequestFeedback", "declarativeNetRequestWithHostAccess", "menus", "nativeMessaging", "scripting",
           "storage", "tabs", "unlimitedStorage", "webNavigation", "webRequest"]);
         const ours = new Set(["bookmarks", "history", "downloads", "downloads.open", "downloads.shelf", "downloads.ui",
           "tabGroups", "sidePanel", "offscreen", "notifications", "tts", "fontSettings", "management", "identity",
           "identity.email", "idle", "power", "privacy", "browsingData", "sessions", "topSites", "search", "system.cpu",
           "system.memory", "system.storage", "system.display", "readingList", "contentSettings", "proxy", "favicon",
-          "clipboardRead", "geolocation", "userScripts"]);
+          "clipboardRead", "clipboardWrite", "geolocation", "userScripts"]);
         const manifest = (() => { try { return runtime.getManifest() || {}; } catch (e) { return {}; } })();
         const declared = new Set(manifest.permissions || []);
         const split = (list = []) => ({
@@ -3034,7 +3036,7 @@ enum ExtensionShims {
         case "offscreen.createDocument":
             guard offscreen[id] == nil else { throw Unsupported(what: "Only a single offscreen document may be created.") }
             guard let path = (first as? [String: Any])?["url"] as? String,
-                  let configuration = context.webViewConfiguration
+                  let configuration = Extensions.configuration(for: context)
             else { throw Unsupported(what: "No page for the offscreen document") }
             let page = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
             guard let url = ExtensionShims.page(path, in: context) else { throw Unsupported(what: "No page for the offscreen document") }
@@ -3292,14 +3294,16 @@ enum ExtensionShims {
             guard wanted.allSatisfy(named.contains) else {
                 throw Unsupported(what: "Only permissions specified in the manifest may be requested.")
             }
-            // Those Chrome grants without a word, having nothing to warn of.
+            // Those Chrome grants without a word, having nothing to warn of;
+            // the question names only the others.
             let silent: Set<String> = ["tabGroups", "sidePanel", "offscreen", "idle", "power", "fontSettings", "search",
-                                       "system.cpu", "system.memory", "system.display", "favicon"]
-            let names = wanted.map { $0.replacingOccurrences(of: ".", with: " ") }.joined(separator: ", ")
-            let yes = wanted.allSatisfy(silent.contains) ? true : await owner.ask(more: names, context: context)
+                                       "system.cpu", "system.memory", "system.display", "favicon", "clipboardWrite"]
+            let names = wanted.filter { !silent.contains($0) }.map { $0.replacingOccurrences(of: ".", with: " ") }.joined(separator: ", ")
+            let yes = names.isEmpty ? true : await owner.ask(more: names, context: context)
             guard yes else { return false }
             let had = UserDefaults.standard.stringArray(forKey: "extensions.granted.\(id)") ?? []
             UserDefaults.standard.set(Array(Set(had + wanted)).sorted(), forKey: "extensions.granted.\(id)")
+            Extensions.clipboardChanged(context)
             return true
         case "permissions.afterClick":
             // permissions.request for WebKit's own permissions and sites,
@@ -3340,6 +3344,7 @@ enum ExtensionShims {
             let gone = Set((first as? [String]) ?? [])
             let had = UserDefaults.standard.stringArray(forKey: "extensions.granted.\(id)") ?? []
             UserDefaults.standard.set(had.filter { !gone.contains($0) }, forKey: "extensions.granted.\(id)")
+            Extensions.clipboardChanged(context)
             return true
 
         // MARK: tabs, by where they are in the row
