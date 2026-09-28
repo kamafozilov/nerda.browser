@@ -263,3 +263,27 @@ private let contentWorld = """
         """)
     #expect(context.evaluateScript("JSON.stringify(posted.filter((m) => m.relay !== undefined).map((m) => m.relay))").toString() == #"[{"e":5}]"#)
 }
+
+/// A new copy takes an extension's place in one step: the old one ends up
+/// where the new one was, and a copy that can't be moved in leaves the
+/// working one where it is.
+@Test func replacingAnExtensionKeepsTheWorkingCopy() throws {
+    let target = try extensionFolder(["bg.js": "old"])
+    let staged = try extensionFolder(["bg.js": "new"])
+    defer { for folder in [target, staged] { try? FileManager.default.removeItem(at: folder) } }
+    let read = { (folder: URL) in try String(contentsOf: folder.appendingPathComponent("bg.js"), encoding: .utf8) }
+
+    try Extensions.replace(staged, at: target)
+    #expect(try read(target) == "new")
+    #expect(try read(staged) == "old")
+
+    try FileManager.default.removeItem(at: staged)
+    #expect(throws: (any Error).self) { try Extensions.replace(staged, at: target) }
+    #expect(try read(target) == "new")
+
+    let empty = staged.deletingLastPathComponent().appendingPathComponent("nerda-ext-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: empty) }
+    try Extensions.replace(target, at: empty)
+    #expect(try read(empty) == "new")
+    #expect(!FileManager.default.fileExists(atPath: target.path))
+}
