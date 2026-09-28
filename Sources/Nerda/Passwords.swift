@@ -279,6 +279,23 @@ actor Vault {
         return store(all)
     }
 
+    /// Every saved sign-in, without its password: the Passwords window's
+    /// list, from the file, as the list under a sign-in box is.
+    func all() -> [Name] {
+        knownNames()
+    }
+
+    /// One changed in the Passwords window, its site, name or password; all
+    /// or none. It keeps whether it was last used over plain http.
+    func change(_ old: Account, to new: Account, password: String) -> Bool {
+        guard let loaded = loadLogins() else { return false }
+        var all = kept(loaded)
+        let was = all.first { $0.account == old }
+        all.removeAll { $0.account == old || $0.account == new }
+        all.append(Login(host: new.host, user: new.user, password: password, saved: .now, clear: was?.clear))
+        return store(all)
+    }
+
     /// Gone from the list at once, without asking the keychain for anything;
     /// from the keychain too if it has been read this run, else with the next save.
     func forget(_ account: Account) {

@@ -26,6 +26,7 @@ final class AppMenu: NSObject {
             item("Select Previous Tab", #selector(previousTab), "\t", [.control, .shift], target: self),
             .separator(),
             item("Task Manager", #selector(openTaskManager), target: self),
+            item("Passwords", #selector(openPasswords), "l", [.command, .option], target: self),
             .separator(),
             item("Bring All to Front", #selector(NSApplication.arrangeInFront(_:))),
         ] + (1...9).map { number in
@@ -196,6 +197,7 @@ final class AppMenu: NSObject {
     @objc private func openSettings() { shown.openSettings() }
     @objc private func openHistory() { shown.openHistory() }
     @objc private func openTaskManager() { TaskManager.show() }
+    @objc private func openPasswords() { PasswordsWindow.show() }
     @objc private func searchTabs() { shown.showCommandBar() }
     @objc private func openLocation() { shown.editAddress() }
     @objc private func closeTab() { browser.closeSelectedTab() }
