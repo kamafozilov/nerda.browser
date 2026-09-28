@@ -10,6 +10,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Fixed
 
 - Extensions that talk to an app on your Mac or keep a live connection, as password managers do, leave nothing running behind them when they restart, update or are turned off, where each restart kept its helper's memory and connection until Nerda quit. A burst of messages between an extension's pages is handled once, where some were handled twice, and an extension's popup left open or just closed stays quiet, where it kept waking Nerda several times a second.
+- A block list that can't be fetched, as one added by an address that has gone, is tried again after a few hours, where Nerda fetched and compiled every list again every half hour, taking a few seconds of CPU and hundreds of megabytes each time. Lists found unchanged no longer reload the rules in every open tab.
 
 ## [0.0.12] - 2026-09-28
 

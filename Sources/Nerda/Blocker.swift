@@ -16,6 +16,8 @@ final class Blocker {
 
     /// How long a list is used before it is fetched again.
     private static let refreshAfter: TimeInterval = 4 * 24 * 60 * 60
+    /// How long a fetch that didn't bring every list waits to be tried again.
+    private static let retryAfter: TimeInterval = 6 * 60 * 60
     // Version the compiled artifact too: unsafe rules from an older converter
     // must never be installed while an update is pending or the Mac is offline.
     // Compiled in parts, each under WebKit's 150,000 rules: "blocklist-v4-0", …
@@ -23,6 +25,7 @@ final class Blocker {
     /// What came before parts, used until they are there.
     nonisolated private static let previous = "blocklist-v3"
     private static let fetchedKey = "blocklist-v3-fetched"
+    private static let triedKey = "blocklist-v3-tried"
     private static let chosenKey = "filterLists"
     private static let addedKey = "addedFilterLists"
 
@@ -140,8 +143,13 @@ final class Blocker {
     }
 
     /// Due every few days, and while a chosen list was never had, whatever the
-    /// date says: an offline launch before 0.0.9 wrote it without one.
+    /// date says: an offline launch before 0.0.9 wrote it without one. With
+    /// rules in use, a fetch that failed waits a few hours: a list that can't
+    /// be had (an address gone, a list refused) otherwise had every list
+    /// fetched and compiled again, ~6 s and ~700 MB, every half hour.
     private var isDue: Bool {
+        if !rules.isEmpty, let tried = UserDefaults.standard.object(forKey: Self.triedKey) as? Date,
+           Date.now.timeIntervalSince(tried) < Self.retryAfter { return false }
         if chosen.contains(where: { !FileManager.default.fileExists(atPath: FilterList(title: "", url: $0).cached.path) }) { return true }
         guard let fetched = UserDefaults.standard.object(forKey: Self.fetchedKey) as? Date else { return true }
         return Date.now.timeIntervalSince(fetched) > Self.refreshAfter
@@ -156,6 +164,10 @@ final class Blocker {
         guard !refreshing else { return again = (again ?? false) || fetch }
         guard let executable = Bundle.main.executableURL else { return }
         refreshing = true
+        if fetch { UserDefaults.standard.set(Date.now, forKey: Self.triedKey) }
+        // When the rules were last compiled: the same after means the helper
+        // found the lists unchanged, and the pages keep the rules they have.
+        let compiledBefore = Self.compiledAt()
         defer {
             refreshing = false
             if let fetch = again {
@@ -186,6 +198,7 @@ final class Blocker {
             UserDefaults.standard.set(Date.now, forKey: Self.fetchedKey)
         }
         named()
+        if !rules.isEmpty, compiledBefore != nil, Self.compiledAt() == compiledBefore { return }
         use(await Self.compiled())
     }
 
@@ -308,6 +321,10 @@ final class Blocker {
 
     /// Where the digest of what was compiled last is kept.
     nonisolated private static let compiledDigestFile = FilterList.folder.appending(path: "Compiled lists")
+    /// When the digest was last written, that is, when the rules were last compiled.
+    private static func compiledAt() -> Date? {
+        try? FileManager.default.attributesOfItem(atPath: compiledDigestFile.path)[.modificationDate] as? Date
+    }
 
     /// The lists' text as compiled by this build: the executable's date
     /// stands for its converter, so a new Nerda turns unchanged lists into
