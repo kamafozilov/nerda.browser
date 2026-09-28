@@ -748,6 +748,25 @@ final class Extensions: NSObject {
         return parts.url ?? url
     }
 
+    /// Whether a website at `site` may open this extension page, as Chrome
+    /// decides: the page is among its manifest's web_accessible_resources,
+    /// for every site (Manifest V2) or for sites its `matches` name.
+    func opens(_ url: URL, from site: URL?) -> Bool {
+        guard let id = Self.host(of: url), let context = contexts[id] else { return false }
+        return Self.webAccessible(url.path, from: site, in: context.webExtension.manifest)
+    }
+
+    static func webAccessible(_ path: String, from site: URL?, in manifest: [String: Any]) -> Bool {
+        guard let entries = manifest["web_accessible_resources"] as? [Any] else { return false }
+        let path = String(path.drop { $0 == "/" })
+        let named = { (patterns: [String]) in patterns.contains { fnmatch(String($0.drop { $0 == "/" }), path, 0) == 0 } }
+        return entries.contains { entry in
+            if let resource = entry as? String { return named([resource]) }
+            guard let entry = entry as? [String: Any], named(entry["resources"] as? [String] ?? []), let site else { return false }
+            return (entry["matches"] as? [String] ?? []).contains { (try? WKWebExtension.MatchPattern(string: $0))?.matches(site) == true }
+        }
+    }
+
     /// The page the manifest names for the button, when WebKit hasn't said.
     static func popupURL(for context: WKWebExtensionContext) -> URL? {
         let manifest = context.webExtension.manifest

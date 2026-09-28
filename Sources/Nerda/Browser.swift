@@ -475,12 +475,22 @@ extension Browser: WKNavigationDelegate {
             Task { tab.go(to: url) }
             return .cancel
         }
+        // And a website sending it to one of an extension's pages the
+        // extension lets that site open, as Nord Account ends NordPass's
+        // sign-in: the tab makes itself a page for the extension. In a
+        // page for the web it fails to load.
+        if let host = Extensions.host(of: url), action.targetFrame?.isMainFrame ?? true,
+           let tab = tab(for: webView), tab.madeFor != host,
+           Extensions.shared.opens(url, from: webView.url) {
+            Task { tab.go(to: url) }
+            return .cancel
+        }
         // 0.0.0.0, the address local servers print as where they listen, is
         // refused by WebKit; it means this Mac, so 127.0.0.1 is opened instead.
         if action.targetFrame?.isMainFrame ?? true, url.host() == "0.0.0.0",
            var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) {
             parts.host = "127.0.0.1"
-            if let local = parts.url { webView.load(URLRequest(url: local)) }
+            if let local = parts.url { webView.load(.page(local)) }
             return .cancel
         }
 
@@ -519,7 +529,7 @@ extension Browser: WKNavigationDelegate {
         if response.response.url == nil {
             guard response.isForMainFrame, let url = webView.url, url != retried else { return .cancel }
             retried = url
-            Task { webView.load(URLRequest(url: url)) }
+            Task { webView.load(.page(url)) }
             return .cancel
         }
         let http = response.response as? HTTPURLResponse

@@ -86,6 +86,46 @@ private let contentWorld = """
     #expect(worker.hasSuffix("chrome.runtime.onInstalled.addListener(() => {});"))
 }
 
+/// A click on its button that woke the worker reaches the listener the
+/// extension adds once it has started, as NordPass's does, rather than none.
+@Test func clickThatWokeTheWorkerWaitsForItsListener() throws {
+    let folder = try extensionFolder([
+        "manifest.json": #"{"manifest_version": 3, "background": {"service_worker": "bg.js"}}"#,
+        "bg.js": "chrome.action.onClicked.addListener(() => {});",
+    ])
+    defer { try? FileManager.default.removeItem(at: folder) }
+    // A worker's world as WebKit makes it: listeners taken while it
+    // starts, refused after.
+    let worker = """
+        globalThis.ServiceWorkerGlobalScope = { [Symbol.hasInstance]: (o) => o === globalThis };
+        const timers = [];
+        globalThis.setTimeout = (f) => timers.push(f);
+        globalThis.clearTimeout = globalThis.setInterval = globalThis.clearInterval = () => {};
+        let started = false;
+        const event = () => ({ fire(...a) { this.all.forEach((f) => f(...a)); }, all: [],
+          addListener(f) { if (started) throw new Error("addListener must be called during startup"); this.all.push(f); },
+          removeListener() {}, hasListener() { return false; } });
+        globalThis.chrome = { runtime: { id: "abc", getURL: (p) => "chrome-extension://abc/" + p,
+          getManifest: () => ({ background: { service_worker: "bg.js" } }), sendMessage: () => Promise.resolve(),
+          sendNativeMessage: () => Promise.resolve(), connect: () => ({}),
+          onMessage: event(), onConnect: event(), onInstalled: event() }, action: { onClicked: event() } };
+        """
+    let context = JSContext()!
+    context.evaluateScript(worker)
+    #expect(context.exception == nil)
+    context.evaluateScript(ExtensionShims.shim(for: folder))
+    #expect(context.exception == nil)
+    context.evaluateScript("""
+        started = true;
+        chrome.action.onClicked.fire({ id: 7 });
+        let heard;
+        chrome.action.onClicked.addListener((tab) => { heard = tab.id; });
+        while (timers.length) timers.shift()();
+        """)
+    #expect(context.exception == nil)
+    #expect(context.evaluateScript("heard").toInt32() == 7)
+}
+
 /// The worker listens from the start for the events its own code mentions,
 /// imports included, and not for those only its popup does; an import it
 /// works out as it runs has every script count.
@@ -129,4 +169,22 @@ private let contentWorld = """
     ])
     defer { try? FileManager.default.removeItem(at: computed) }
     #expect(events(computed) == ["alarms.onAlarm", "tabs.onUpdated"])
+}
+
+/// A site opens only the extension pages its manifest lets that site open,
+/// as Chrome allows: NordPass lets Nord Account open app.html, and no other
+/// site, and no other page.
+@MainActor @Test func sitesOpenOnlyPagesTheExtensionLetsThem() throws {
+    let manifest = try JSONSerialization.jsonObject(with: Data(#"""
+        {"web_accessible_resources": [
+          {"resources": ["assets/*.svg"], "matches": ["https://*/*"]},
+          {"resources": ["app.html"], "matches": ["https://*.nordaccount.com/*"]}]}
+        """#.utf8)) as! [String: Any]
+    let nord = URL(string: "https://nordaccount.com/product/nordpass/login")!
+    #expect(Extensions.webAccessible("/app.html", from: nord, in: manifest))
+    #expect(Extensions.webAccessible("/assets/icons/a.svg", from: URL(string: "https://example.com/")!, in: manifest))
+    #expect(!Extensions.webAccessible("/app.html", from: URL(string: "https://example.com/")!, in: manifest))
+    #expect(!Extensions.webAccessible("/index.html", from: nord, in: manifest))
+    #expect(!Extensions.webAccessible("/app.html", from: nil, in: manifest))
+    #expect(Extensions.webAccessible("/page.html", from: nil, in: ["web_accessible_resources": ["page.html"]]))
 }

@@ -216,7 +216,7 @@ final class Tab: Identifiable {
         // Woken first, while it has nowhere to go, or it would load `url` twice.
         let page = page ?? wake(for: url)
         self.url = url
-        page.load(URLRequest(url: url))
+        page.load(.page(url))
     }
 
     private func makePage(_ configuration: WKWebViewConfiguration) -> WKWebView {
@@ -520,7 +520,7 @@ final class Tab: Identifiable {
         if let state = slept?.state {
             page.interactionState = state
         } else if let url, target == nil {
-            page.load(URLRequest(url: url))
+            page.load(.page(url))
         }
         slept = nil
         return page
@@ -548,7 +548,7 @@ final class Tab: Identifiable {
     /// from the cache.
     func reload(fromOrigin: Bool = false) {
         if let failure {
-            webView.load(URLRequest(url: failure.url, cachePolicy: fromOrigin ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy))
+            webView.load(.page(failure.url, cachePolicy: fromOrigin ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy))
         } else if fromOrigin {
             webView.reloadFromOrigin()
         } else {
@@ -581,7 +581,7 @@ final class Tab: Identifiable {
     /// A pinned tab back where it was pinned.
     func goHome() {
         guard let home else { return }
-        webView.load(URLRequest(url: home))
+        webView.load(.page(home))
     }
 
     /// One step in or out (+1, −1), or back to the zoom pages open at (0).
@@ -962,5 +962,15 @@ struct PageFailure: View {
         .frame(maxWidth: 420)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.ground)
+    }
+}
+
+extension URLRequest {
+    /// A page for a tab, waited for as long as WebKit waits for one a page
+    /// opens itself, and as Chrome does: a plain URLRequest gives up after a
+    /// minute. Nord Account answers a sign-in's first request after 80
+    /// seconds at times, and its page stayed blank.
+    static func page(_ url: URL, cachePolicy: CachePolicy = .useProtocolCachePolicy) -> URLRequest {
+        URLRequest(url: url, cachePolicy: cachePolicy, timeoutInterval: TimeInterval(Int32.max))
     }
 }
