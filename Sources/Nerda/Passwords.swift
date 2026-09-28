@@ -40,8 +40,17 @@ struct PasswordChoices: Equatable {
     let site: String
     /// Listed for a page that came over plain http.
     let clear: Bool
-    var spot: CGRect
+    /// Moved (the page scrolled, or put the caret in another box): the
+    /// list starts again as if just shown.
+    var spot: CGRect { didSet { if spot != oldValue { shown = .now } } }
     var accounts: [Account]
+    /// When it came up where it is. A page can put the caret in a sign-in
+    /// box itself, an invisible one under the pointer included, or move the
+    /// box there: a click that was already on its way is not a choice, so
+    /// the list takes none for its first half second, as Chrome's does.
+    var shown = Date.now
+
+    var takesClicks: Bool { Date.now.timeIntervalSince(shown) > 0.5 }
 }
 
 /// A sign-in that worked, with a password not yet kept.
@@ -655,7 +664,8 @@ extension Browser {
 
     /// One of the accounts listed, into the page it was listed on.
     func fill(_ account: Account) {
-        guard let choices = passwordChoices, let page = tabs.first(where: { $0.id == choices.tab })?.page else { return }
+        guard let choices = passwordChoices, choices.takesClicks,
+              let page = tabs.first(where: { $0.id == choices.tab })?.page else { return }
         choicesAsked += 1
         passwordChoices = nil
         Task {

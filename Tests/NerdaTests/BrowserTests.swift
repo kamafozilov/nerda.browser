@@ -1294,6 +1294,18 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     #expect(Vault.offered(names, clear: false).map(\.user) == ["me", "admin"])
 }
 
+/// A list of accounts that has just come up, or just moved, takes no click:
+/// one already on its way when a page put it under the pointer isn't a choice.
+@MainActor @Test func accountsListTakesNoClickAsItAppears() {
+    var choices = PasswordChoices(tab: UUID(), site: "example.com", clear: false,
+                                  spot: CGRect(x: 0, y: 0, width: 200, height: 30), accounts: [])
+    #expect(!choices.takesClicks)
+    choices.shown = .now.addingTimeInterval(-1)
+    #expect(choices.takesClicks)
+    choices.spot.origin.y = 40
+    #expect(!choices.takesClicks)
+}
+
 /// Exports as Passwords and Chrome write them: quoted fields with commas,
 /// quotes and line breaks, a byte-order mark, and rows with nothing to keep.
 @Test func exportedPasswordsAreReadIn() {

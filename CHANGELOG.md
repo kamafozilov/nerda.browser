@@ -27,6 +27,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Security
 
 - Extensions can do no more than Chrome lets them: they can't send a tab to a javascript: or file: address, open a private window as a normal one, or see into another extension's pages. Opening a download needs its own permission, only just after you used the extension and only for a file it downloaded itself; search, notifications, idle, power and speech need theirs; and only an extension that asks can talk to apps on your Mac.
+- The list of saved accounts under a sign-in box takes a click only once it has been in place half a second, so a page can't put it under your pointer as you click and have a password filled in.
 - Add to Nerda on a Chrome Web Store page installs only the extension that page is about, and only on the store over https.
 
 ## [0.0.10] - 2026-09-26
