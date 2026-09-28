@@ -1,5 +1,6 @@
 import Foundation
 import JavaScriptCore
+import WebKit
 import Testing
 @testable import Nerda
 
@@ -327,4 +328,34 @@ private let contentWorld = """
     #expect(context.evaluateScript("heard.join(' ')").toString()
         == "popup:false port-popup:false tab:true port-tab:true framed:true port-framed:true")
     #expect(context.evaluateScript("chrome.tabGroups.Color.BLUE").toString() == "blue")
+}
+
+/// What an extension is held to, as in Chrome: no tab sent to script or a
+/// file, no reach into other extensions' pages, and from a store page only
+/// the extension that page is about.
+@MainActor @Test func extensionsGetNoMoreThanChromeGives() throws {
+    #expect(throws: (any Error).self) { try Extensions.mayOpen(URL(string: "javascript:alert(1)")!) }
+    #expect(throws: (any Error).self) { try Extensions.mayOpen(URL(string: "JavaScript:alert(1)")!) }
+    #expect(throws: (any Error).self) { try Extensions.mayOpen(URL(fileURLWithPath: "/etc/hosts")) }
+    try Extensions.mayOpen(URL(string: "https://example.com/")!)
+    try Extensions.mayOpen(URL(string: "chrome-extension://abc/page.html")!)
+
+    let pattern = { (text: String) in try WKWebExtension.MatchPattern(string: text) }
+    #expect(Extensions.reachesExtensions(try pattern("chrome-extension://*/*")))
+    #expect(!Extensions.reachesExtensions(try pattern("<all_urls>")))
+    #expect(!Extensions.reachesExtensions(try pattern("https://*/*")))
+    #expect(Extensions.othersPage(URL(string: "chrome-extension://other/popup.html"), of: "mine"))
+    #expect(!Extensions.othersPage(URL(string: "chrome-extension://mine/popup.html"), of: "mine"))
+    #expect(!Extensions.othersPage(URL(string: "https://example.com/"), of: "mine"))
+
+    let id = String(repeating: "a", count: 32), other = String(repeating: "b", count: 32)
+    let store = { (text: String) in WebStore.extensionID(on: URL(string: text)) }
+    #expect(store("https://chromewebstore.google.com/detail/name/\(id)") == id)
+    #expect(store("https://chromewebstore.google.com/detail/\(id)/reviews") == id)
+    #expect(store("https://chrome.google.com/webstore/detail/name/\(id)") == id)
+    #expect(store("http://chromewebstore.google.com/detail/name/\(id)") == nil)
+    #expect(store("https://someone@chromewebstore.google.com/detail/name/\(id)") == nil)
+    #expect(store("https://chromewebstore.google.com/search/\(other)") == nil)
+    #expect(store("https://chromewebstore.google.com/detail/name/\(id)?x=\(other)") == id)
+    #expect(store("https://example.com/detail/name/\(id)") == nil)
 }

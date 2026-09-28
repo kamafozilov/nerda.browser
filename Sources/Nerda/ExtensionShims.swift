@@ -981,6 +981,11 @@ enum ExtensionShims {
             if (background) { sendResponse("pong"); return; }
             return true;
           }
+          // Nerda's own envelopes come from this extension only: another
+          // extension (onMessageExternal) could otherwise speak as one of its
+          // user scripts, or as a frame of its own.
+          const fromHere = !!(sender && sender.id === runtime.id);
+          if (message && (message.__nerdaUserScript === true || message.__nerdaToFrame) && !fromHere) return;
           if (message && message.__nerdaUserScript === true) {
             const route = root.__nerdaUserScriptMessage;
             return route && route(message.message, sender, sendResponse) && !settled ? true : undefined;
@@ -1882,15 +1887,19 @@ enum ExtensionShims {
           if (typeof callback !== "function") return pr;
           pr.then((v) => callback(v), (e) => withLastError(e, callback));
         };
+        // Extension pages are never an extension's to reach, as in Chrome,
+        // where such a pattern isn't even valid (see
+        // Extensions.reachesExtensions): never held, never asked for.
+        const extensionPages = (origins) => origins.some((o) => /^(chrome|webkit)-extension:/i.test(String(o)));
         put(p, "contains", withCb(async ({ permissions = [], origins = [] }) => {
           const { theirs, mine, unknown } = split(permissions);
-          if (unknown.length) return false;
+          if (unknown.length || extensionPages(origins)) return false;
           if (mine.length) { const have = await granted(); if (!mine.every((m) => have.has(m))) return false; }
           return theirs.length || origins.length ? contains({ permissions: theirs, origins }) : true;
         }));
         put(p, "request", withCb(async ({ permissions = [], origins = [] }) => {
           const { theirs, mine, unknown } = split(permissions);
-          if (unknown.length) return false;
+          if (unknown.length || extensionPages(origins)) return false;
           if (mine.length) {
             const have = await granted();
             const missing = mine.filter((m) => !have.has(m));
@@ -2778,6 +2787,11 @@ enum ExtensionShims {
         "readingList": "readingList",
         "userScripts": "userScripts",
         "identity": "identity",
+        "search": "search",
+        "notifications": "notifications",
+        "idle": "idle",
+        "power": "power",
+        "tts": "tts",
     ]
 
     /// What this extension asked for: the names in its manifest and any
@@ -2923,6 +2937,7 @@ enum ExtensionShims {
             let spec = first as? [String: Any] ?? [:]
             guard let url = (spec["url"] as? String).flatMap(URL.init(string:)) else { throw Unsupported(what: "No url to download") }
             guard await browser.download(url) else { throw Unsupported(what: "No page to download through") }
+            if let started = browser.downloads.first { ownDownloads[id, default: []].insert(started.id) }
             return browser.downloads.count
         case "downloads.search":
             let all = Array(browser.downloads.reversed())
@@ -2941,7 +2956,20 @@ enum ExtensionShims {
             let item = all[index - 1]
             switch api {
             case "downloads.cancel": if item.state == .running { item.cancel() }
-            case "downloads.open": if let file = item.file { NSWorkspace.shared.open(file) }
+            case "downloads.open":
+                // As in Chrome: its own permission, only just after you did
+                // something in the extension, never on its own from its
+                // worker, and only a file it downloaded itself, not yours.
+                guard allowed(id, context: context).contains("downloads.open") else {
+                    throw Unsupported(what: "The extension never asked for \u{201C}downloads.open\u{201D}")
+                }
+                guard Extensions.justUsed(id) else {
+                    throw Unsupported(what: "downloads.open() may only be called in response to a user gesture.")
+                }
+                guard ownDownloads[id]?.contains(item.id) == true else {
+                    throw Unsupported(what: "Only a download this extension started can be opened by it")
+                }
+                if let file = item.file { NSWorkspace.shared.open(file) }
             default: if let file = item.file { NSWorkspace.shared.activateFileViewerSelecting([file]) }
             }
             return nil
@@ -3379,6 +3407,7 @@ enum ExtensionShims {
         case "identity.launchWebAuthFlow":
             let spec = first as? [String: Any] ?? [:]
             guard let url = (spec["url"] as? String).flatMap(URL.init(string:)) else { throw Unsupported(what: "No authorization url") }
+            try Extensions.mayOpen(url)
             return try await ExtensionAuth.run(url, extension: id, browser: browser).absoluteString
         case "identity.getProfileUserInfo":
             return ["email": "", "id": ""]
@@ -3446,6 +3475,9 @@ enum ExtensionShims {
         if !FileManager.default.fileExists(atPath: url.path) { try text.write(to: url, atomically: true, encoding: .utf8) }
         return "_nerda/" + name
     }
+
+    /// The downloads each extension started itself: the only ones it may open.
+    static var ownDownloads: [String: Set<UUID>] = [:]
 
     /// Popups extensions set for their buttons: per tab, or "*" for all.
     static var popups: [String: [String: String]] = [:]

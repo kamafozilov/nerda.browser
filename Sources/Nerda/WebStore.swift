@@ -13,15 +13,23 @@ enum WebStore {
     /// Where the extensions list's Chrome Web Store goes: its extensions, not its themes.
     static let home = URL(string: "https://chromewebstore.google.com/category/extensions")!
 
+    /// The store itself, over https, with nothing before its host.
     static func isStorePage(_ url: URL?) -> Bool {
-        let host = url?.host()?.lowercased() ?? ""
-        return host == "chromewebstore.google.com" || (host == "chrome.google.com" && url?.path().hasPrefix("/webstore") == true)
+        guard let url, url.scheme?.lowercased() == "https", url.user == nil, url.password == nil else { return false }
+        let host = url.host()?.lowercased() ?? ""
+        return host == "chromewebstore.google.com" || (host == "chrome.google.com" && url.path().hasPrefix("/webstore"))
     }
 
-    /// The extension a store page is about, if it is one's page.
+    /// The extension a store page is about: the id in its /detail/ path and
+    /// nowhere else, as that is the listing the page shows.
     static func extensionID(on url: URL?) -> String? {
         guard let url, isStorePage(url) else { return nil }
-        return Crx.id(in: url.path())
+        let pattern = url.host()?.lowercased() == "chromewebstore.google.com"
+            ? #"^/detail/(?:[^/]+/)?([a-p]{32})(?:/.*)?$"#
+            : #"^/webstore/detail/(?:[^/]+/)?([a-p]{32})(?:/.*)?$"#
+        let path = url.path()
+        guard let match = path.firstMatch(of: try! Regex(pattern)), let id = match.output[1].substring else { return nil }
+        return String(id)
     }
 
     static func install(in configuration: WKUserContentController) {

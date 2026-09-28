@@ -22,6 +22,11 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - A second click on an extension's button closes its popup, where it could open it again at once. A popup whose page sets its own width takes that width while open, narrower too, as Bitwarden's narrow setting asks.
 - An app on your Mac that set itself up for Vivaldi or Opera, as a password manager's desktop app does, answers its extension in Nerda too, where only apps set up for Chrome, Edge, Brave, Arc or Chromium did.
 
+### Security
+
+- Extensions can do no more than Chrome lets them: they can't send a tab to a javascript: or file: address, open a private window as a normal one, or see into another extension's pages. Opening a download needs its own permission, only just after you used the extension and only for a file it downloaded itself; search, notifications, idle, power and speech need theirs; and only an extension that asks can talk to apps on your Mac.
+- Add to Nerda on a Chrome Web Store page installs only the extension that page is about, and only on the store over https.
+
 ## [0.0.10] - 2026-09-26
 
 ### Added

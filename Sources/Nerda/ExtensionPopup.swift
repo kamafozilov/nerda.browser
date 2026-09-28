@@ -304,7 +304,7 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// A link that asks for a new window becomes a tab, and the popup goes —
     /// the way it does in Chrome when you follow a link out of one.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = action.request.url { Extensions.shared.browser?.open(url) }
+        if let url = action.request.url, (try? Extensions.mayOpen(url)) != nil { Extensions.shared.browser?.open(url) }
         close()
         return nil
     }
@@ -341,9 +341,11 @@ final class PopupPage: NSObject, WKWebExtensionTab {
 
     func window(for context: WKWebExtensionContext) -> (any WKWebExtensionWindow)? { Extensions.shared.window }
     func indexInWindow(for context: WKWebExtensionContext) -> Int { NSNotFound }
-    func webView(for context: WKWebExtensionContext) -> WKWebView? { web }
+    // Another extension gets nothing of it: it is this one's page (see
+    // Extensions.othersPage).
+    func webView(for context: WKWebExtensionContext) -> WKWebView? { Extensions.othersPage(web?.url, for: context) ? nil : web }
     func title(for context: WKWebExtensionContext) -> String? { web?.title }
-    func url(for context: WKWebExtensionContext) -> URL? { web?.url }
+    func url(for context: WKWebExtensionContext) -> URL? { Extensions.othersPage(web?.url, for: context) ? nil : web?.url }
     func isLoadingComplete(for context: WKWebExtensionContext) -> Bool { !(web?.isLoading ?? false) }
     func isSelected(for context: WKWebExtensionContext) -> Bool { false }
     func close(for context: WKWebExtensionContext) async throws { ExtensionPopup.shared.close() }
