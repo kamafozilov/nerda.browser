@@ -18,6 +18,9 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - A site that takes more than a minute to answer opens once it answers, where Nerda gave up after a minute and left the page blank.
 - A secure (https) site can send you to an extension's page that the extension lets it open, as a sign-in done on the extension maker's site does, where the page failed to load.
 - An extension whose update, reload or install fails keeps the copy that worked, running and with its settings, where it was left removed. Turning an extension off or removing it also closes its hidden page and lets the Mac sleep again if it was keeping it awake.
+- Passbolt's popup shows your passwords and Claude's extension starts, as in Chrome, where the popup stayed empty and Claude's did nothing. A side panel that names its tab in its address opens, where it failed to load.
+- A second click on an extension's button closes its popup, where it could open it again at once. A popup whose page sets its own width takes that width while open, narrower too, as Bitwarden's narrow setting asks.
+- An app on your Mac that set itself up for Vivaldi or Opera, as a password manager's desktop app does, answers its extension in Nerda too, where only apps set up for Chrome, Edge, Brave, Arc or Chromium did.
 
 ## [0.0.10] - 2026-09-26
 

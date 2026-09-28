@@ -29,9 +29,9 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     private(set) var extensionID: String?
     /// The extension's own button, when the popup hangs from it.
     private weak var button: NSView?
-    /// The popup a click on its own button just closed: the popover goes
-    /// on that click's mouse-down, and the button's press comes after, on
-    /// its mouse-up — which would open it again.
+    /// The popup a click on its own button just closed: the popover can go
+    /// on mouse-down or mouse-up, before the button's press arrives — which
+    /// would open it again.
     private var closedByButton: (id: String, at: Date)?
 
     /// The popup's web view, while one is up — for the bench.
@@ -116,7 +116,7 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     }
 
     /// From the page's first load: sized, then followed as it grows — a
-    /// list filled in by a reply from the worker — for a few seconds.
+    /// list filled in by a reply from the worker — for as long as it's open.
     private func follow() {
         guard measuring == nil else { return }
         if !shown { firstMeasure() }
@@ -147,7 +147,7 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// A press on the button of an extension whose popup is up closes it,
     /// as in Chrome — whether the popover is still there (a click on the
     /// view it hangs from doesn't close it) or went on this click's
-    /// mouse-down. Closed, it is not opened again.
+    /// mouse-down or mouse-up. Closed, it is not opened again.
     func closes(_ id: String) -> Bool {
         defer { closedByButton = nil }
         if popover != nil, extensionID == id {
@@ -262,14 +262,12 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
 
     /// Measured again as the page builds itself, the way Chrome measures on
     /// each layout: for its first two seconds the popup follows it either
-    /// way, after that it only grows — so a page that settles doesn't set
-    /// it rocking.
+    /// way, after that it only grows, but for a width the page names — so a
+    /// page that settles doesn't set it rocking.
     private var ticks = 0
     private func grow() {
         guard shown, let web, let popover else { return }
         ticks += 1
-        // Six seconds on, it has settled.
-        if ticks > 24 { return measuring?.invalidate() ?? () }
         if ticks <= 8 {
             web.evaluateJavaScript("(\(ExtensionPopup.preferred))()") { [weak self] value, _ in
                 MainActor.assumeIsolated {
@@ -281,11 +279,17 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
             }
             return
         }
-        web.evaluateJavaScript("[\(ExtensionPopup.reach)('width'), (() => { const d = document.documentElement; return d && d.scrollHeight > d.clientHeight ? d.scrollHeight : 0; })()]") { value, _ in
+        // After its first six seconds, once a second is enough to follow it.
+        if ticks > 24, ticks % 4 != 0 { return }
+        // A width the page names for itself, remembered as the first
+        // measure does, is followed both ways: Bitwarden's narrow setting
+        // shrinks it.
+        web.evaluateJavaScript("[\(ExtensionPopup.reach)('width'), (() => { const d = document.documentElement; return d && d.scrollHeight > d.clientHeight ? d.scrollHeight : 0; })(), (() => { const m = window.__nerdaSizing || (window.__nerdaSizing = {}), w = document.documentElement.getBoundingClientRect().width; if (Math.abs(w - innerWidth) > 1) return m.w = w; return m.w && Math.abs(m.w - innerWidth) <= 1 ? m.w : 0; })()]") { value, _ in
             MainActor.assumeIsolated {
-                guard let pair = value as? [Double], pair.count == 2 else { return }
+                guard let pair = value as? [Double], pair.count == 3 else { return }
                 let now = popover.contentSize
-                let wanted = NSSize(width: min(800, max(now.width, pair[0])), height: min(600, max(now.height, pair[1])))
+                let width = pair[2] > 0 ? max(25, pair[2].rounded(.up)) : max(now.width, pair[0])
+                let wanted = NSSize(width: min(800, width), height: min(600, max(now.height, pair[1])))
                 if wanted != now { self.apply(wanted) }
             }
         }
@@ -305,11 +309,15 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         return nil
     }
 
-    /// Closing on a mouse-down over the popup's own button.
+    /// Closing on a click over the popup's own button. The click being
+    /// handled, not the live mouse state: AppKit can close the popover on
+    /// mouse-up, when no button is pressed any more. The event also keeps
+    /// its location if the pointer has since moved.
     func popoverWillClose(_ notification: Notification) {
         guard (notification.object as? NSPopover) === popover, let id = extensionID,
-              let button, let window = button.window, NSEvent.pressedMouseButtons & 1 != 0 else { return }
-        let spot = button.convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+              let button, let window = button.window, let event = NSApp.currentEvent,
+              event.window === window, event.type == .leftMouseDown || event.type == .leftMouseUp else { return }
+        let spot = button.convert(event.locationInWindow, from: nil)
         if button.bounds.contains(spot) { closedByButton = (id, Date()) }
     }
 

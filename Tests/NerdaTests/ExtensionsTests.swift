@@ -287,3 +287,44 @@ private let contentWorld = """
     #expect(try read(empty) == "new")
     #expect(!FileManager.default.fileExists(atPath: target.path))
 }
+
+/// The worker hears its popup's messages and ports with no tab, as Chrome
+/// gives them (Passbolt turned a port with one away); a tab's, and one of
+/// its pages framed in a website's, keep theirs.
+@Test func popupMessagesComeWithNoTab() throws {
+    let folder = try extensionFolder(["manifest.json": #"{"manifest_version": 3, "background": {"service_worker": "bg.js"}}"#, "bg.js": ""])
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let worker = """
+        globalThis.ServiceWorkerGlobalScope = { [Symbol.hasInstance]: (o) => o === globalThis };
+        globalThis.setTimeout = globalThis.clearTimeout = globalThis.setInterval = globalThis.clearInterval = () => {};
+        const event = () => ({ fire(...a) { this.all.forEach((f) => f(...a)); }, all: [],
+          addListener(f) { this.all.push(f); }, removeListener() {}, hasListener() { return false; } });
+        globalThis.chrome = { runtime: { id: "abc", getURL: (p) => "chrome-extension://abc/" + p,
+          getManifest: () => ({ background: { service_worker: "bg.js" } }), sendMessage: () => Promise.resolve(),
+          sendNativeMessage: () => Promise.resolve(), connect: () => ({}),
+          onMessage: event(), onConnect: event(), onInstalled: event() } };
+        """
+    let context = JSContext()!
+    context.evaluateScript(worker)
+    context.evaluateScript(ExtensionShims.shim(for: folder))
+    #expect(context.exception == nil)
+    context.evaluateScript("""
+        const popup = "chrome-extension://abc/popup.html";
+        const senders = {
+          popup: { id: "abc", url: popup, frameId: 0, tab: { id: 9, index: NaN, url: popup } },
+          tab: { id: "abc", url: "https://example.com/", frameId: 0, tab: { id: 2, index: 0, url: "https://example.com/" } },
+          framed: { id: "abc", url: popup, frameId: 3, tab: { id: 2, index: 0, url: "https://example.com/" } },
+        };
+        const heard = [];
+        chrome.runtime.onMessage.addListener((m, sender) => { heard.push(m + ":" + !!sender.tab); });
+        chrome.runtime.onConnect.addListener((port) => { heard.push(port.name + ":" + !!port.sender.tab); });
+        for (const [name, sender] of Object.entries(senders)) {
+          chrome.runtime.onMessage.fire(name, sender, () => {});
+          chrome.runtime.onConnect.fire({ name: "port-" + name, sender, onMessage: event(), onDisconnect: event(), postMessage() {} });
+        }
+        """)
+    #expect(context.exception == nil)
+    #expect(context.evaluateScript("heard.join(' ')").toString()
+        == "popup:false port-popup:false tab:true port-tab:true framed:true port-framed:true")
+    #expect(context.evaluateScript("chrome.tabGroups.Color.BLUE").toString() == "blue")
+}
