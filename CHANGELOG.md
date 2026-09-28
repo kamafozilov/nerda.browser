@@ -11,11 +11,16 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - Window › Task Manager: every tab, extension and part of Nerda with the memory and CPU it takes, and whether a tab is on screen, asleep or playing sound. Double-click a tab to go to it; End Process closes the tabs you chose.
 
+### Changed
+
+- The saved accounts under a sign-in box list the one you used last first, whether you picked it there or typed its password in, where the newest saved came first.
+
 ### Fixed
 
 - Extensions that sign you in or ask for a site's access from their button, as Figma's does, work: the question is asked where the extension got an error, and a sign-in the extension watches for in its own tab finishes, where the tab stayed on "Can't Open This Page".
 - Extensions that keep a line open to their background, as password managers do, go on answering after a moment unused, and their button opens at the first click, where after two minutes their pages and the icons they add to sign-in fields stopped doing anything.
 - Extensions whose pages wait on their background hear it, as in Chrome: Bitwarden signs in and syncs, 1Password's popup gets past "Connecting to the app", and user scripts in ScriptCat and Tampermonkey can fetch from other sites, where each of these stayed stuck.
+- Sites that try a passkey first, which Nerda can't use, ask for your password straight away, where they left you stuck on the passkey. A password manager extension that keeps your passkeys still answers them.
 - A site that takes more than a minute to answer opens once it answers, where Nerda gave up after a minute and left the page blank.
 - A secure (https) site can send you to an extension's page that the extension lets it open, as a sign-in done on the extension maker's site does, where the page failed to load.
 - An extension whose update, reload or install fails keeps the copy that worked, running and with its settings, where it was left removed. Turning an extension off or removing it also closes its hidden page and lets the Mac sleep again if it was keeping it awake.
@@ -27,6 +32,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Security
 
 - Extensions can do no more than Chrome lets them: they can't send a tab to a javascript: or file: address, open a private window as a normal one, or see into another extension's pages. Opening a download needs its own permission, only just after you used the extension and only for a file it downloaded itself; search, notifications, idle, power and speech need theirs; and only an extension that asks can talk to apps on your Mac.
+- The list of saved accounts under a sign-in box takes a click only once it has been in place half a second, so a page can't put it under your pointer as you click and have a password filled in.
 - Add to Nerda on a Chrome Web Store page installs only the extension that page is about, and only on the store over https.
 
 ## [0.0.10] - 2026-09-26

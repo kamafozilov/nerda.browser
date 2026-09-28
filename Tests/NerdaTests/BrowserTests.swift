@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import ImageIO
+import JavaScriptCore
 import Network
 import SwiftUI
 import Testing
@@ -1292,6 +1293,62 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     let names = before + [Vault.Name(host: "router.lan", user: "admin", saved: .now, clear: true)]
     #expect(Vault.offered(names, clear: true).map(\.user) == ["admin"])
     #expect(Vault.offered(names, clear: false).map(\.user) == ["me", "admin"])
+}
+
+/// The account used last is listed first, whether it was put into a page or
+/// signed in with; one never used counts from when it was saved. Names
+/// written before Nerda kept the date read as never used, and using one
+/// touches only the file, never the keychain.
+@Test func savedPasswordsListTheLastUsedFirst() async throws {
+    let file = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: file) }
+    try Data(#"[{"host":"example.com","user":"old","saved":0},{"host":"login.example.com","user":"new","saved":100}]"#.utf8)
+        .write(to: file)
+    let vault = Vault(service: "Nerda Tests \(UUID().uuidString)", names: file)
+    #expect(await vault.accounts(for: "example.com", clear: false).map(\.user) == ["new", "old"])
+    await vault.touch([Account(host: "example.com", user: "old")])
+    #expect(await vault.accounts(for: "example.com", clear: false).map(\.user) == ["old", "new"])
+    let names = try JSONDecoder().decode([Vault.Name].self, from: Data(contentsOf: file))
+    #expect(names.first { $0.user == "old" }?.used != nil)
+    #expect(names.first { $0.user == "new" }?.used == nil)
+}
+
+/// A list of accounts that has just come up, or just moved, takes no click:
+/// one already on its way when a page put it under the pointer isn't a choice.
+@MainActor @Test func accountsListTakesNoClickAsItAppears() {
+    var choices = PasswordChoices(tab: UUID(), site: "example.com", clear: false,
+                                  spot: CGRect(x: 0, y: 0, width: 200, height: 30), accounts: [])
+    #expect(!choices.takesClicks)
+    choices.shown = .now.addingTimeInterval(-1)
+    #expect(choices.takesClicks)
+    choices.spot.origin.y = 40
+    #expect(!choices.takesClicks)
+}
+
+/// Sites don't see a passkey object Nerda can't answer, so they ask for the
+/// password; a passkey request is turned down at once. An extension that
+/// answers passkey requests with its own get on navigator.credentials gets
+/// the object back for the sites.
+@MainActor @Test func passkeysHiddenUnlessAnExtensionAnswers() {
+    let context = JSContext()!
+    context.evaluateScript("""
+        globalThis.window = globalThis;
+        globalThis.DOMException = class extends Error { constructor(message, name) { super(message); this.name = name; } };
+        globalThis.CredentialsContainer = class { get() { return Promise.resolve('password'); } create() { return Promise.resolve(null); } };
+        globalThis.navigator = { credentials: new CredentialsContainer() };
+        globalThis.PublicKeyCredential = function PublicKeyCredential() {};
+        """)
+    context.evaluateScript(Passwords.withoutPasskeys)
+    #expect(context.exception == nil)
+    #expect(context.evaluateScript("typeof PublicKeyCredential").toString() == "undefined")
+    context.evaluateScript("""
+        navigator.credentials.get({ publicKey: {} }).catch((error) => { globalThis.refused = error.name; });
+        navigator.credentials.get({ password: true }).then((answer) => { globalThis.answered = answer; });
+        """)
+    #expect(context.evaluateScript("refused").toString() == "NotAllowedError")
+    #expect(context.evaluateScript("answered").toString() == "password")
+    context.evaluateScript("navigator.credentials.get = () => Promise.resolve('from the extension');")
+    #expect(context.evaluateScript("typeof PublicKeyCredential").toString() == "function")
 }
 
 /// Exports as Passwords and Chrome write them: quoted fields with commas,

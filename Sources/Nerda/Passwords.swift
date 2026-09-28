@@ -40,8 +40,17 @@ struct PasswordChoices: Equatable {
     let site: String
     /// Listed for a page that came over plain http.
     let clear: Bool
-    var spot: CGRect
+    /// Moved (the page scrolled, or put the caret in another box): the
+    /// list starts again as if just shown.
+    var spot: CGRect { didSet { if spot != oldValue { shown = .now } } }
     var accounts: [Account]
+    /// When it came up where it is. A page can put the caret in a sign-in
+    /// box itself, an invisible one under the pointer included, or move the
+    /// box there: a click that was already on its way is not a choice, so
+    /// the list takes none for its first half second, as Chrome's does.
+    var shown = Date.now
+
+    var takesClicks: Bool { Date.now.timeIntervalSince(shown) > 0.5 }
 }
 
 /// A sign-in that worked, with a password not yet kept.
@@ -76,9 +85,13 @@ actor Vault {
         /// Last used on a page that came over plain http; nil for https, as
         /// every login kept before this was taken to be.
         var clear: Bool?
+        /// When it last went into a page or signed someone in; nil if never
+        /// since it was saved. As the names have it at the last save: they
+        /// keep it between saves, without the keychain.
+        var used: Date?
 
         var account: Account { Account(host: host, user: user) }
-        var name: Name { Name(host: host, user: user, saved: saved, clear: clear) }
+        var name: Name { Name(host: host, user: user, saved: saved, clear: clear, used: used) }
     }
 
     /// As kept in the file: a login without its password.
@@ -87,8 +100,11 @@ actor Vault {
         var user: String
         var saved: Date
         var clear: Bool?
+        var used: Date?
 
         var account: Account { Account(host: host, user: user) }
+        /// Saving one is using it: it was just typed in, and it worked.
+        var lastUsed: Date { max(used ?? saved, saved) }
     }
 
     /// Those that may be offered on a page: on one that came over plain
@@ -171,7 +187,14 @@ actor Vault {
     }
 
     private func store(_ new: [Login]) -> Bool {
-        let sorted = new.sorted { $0.saved > $1.saved }
+        // When each was last used is the names', written on every use without
+        // the keychain; it goes into the keychain with a save.
+        let used = Dictionary(loadNames().map { ($0.account, $0.used) }, uniquingKeysWith: { first, _ in first })
+        let sorted = new.map { login in
+            var login = login
+            login.used = used[login.account] ?? login.used
+            return login
+        }.sorted { $0.saved > $1.saved }
         guard let data = try? JSONEncoder().encode(sorted) else { return false }
         var status = SecItemUpdate(item as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecItemNotFound {
@@ -193,11 +216,25 @@ actor Vault {
         return logins.filter { accounts.contains($0.account) }
     }
 
-    /// The accounts for `host`'s site, its own host's first, for a page that
-    /// came over plain http (`clear`) or not. From the file, without the
+    /// The accounts for `host`'s site, the one used last first, for a page
+    /// that came over plain http (`clear`) or not. From the file, without the
     /// keychain, unless the file has to be made again.
     func accounts(for host: String, clear: Bool) -> [Account] {
-        Site.matching(Self.offered(knownNames(), clear: clear).map(\.account), host)
+        let names = Self.offered(knownNames(), clear: clear)
+        let lastUsed = Dictionary(names.map { ($0.account, $0.lastUsed) }, uniquingKeysWith: max)
+        return Site.matching(names.map(\.account), host).sorted { lastUsed[$0]! > lastUsed[$1]! }
+    }
+
+    /// They were just used, put into a page or signed in with: listed first
+    /// from now on. In the file only, so filling never asks the keychain to
+    /// write; it keeps the date from the next save on.
+    func touch(_ accounts: [Account]) {
+        guard !accounts.isEmpty else { return }
+        writeNames(knownNames().map { name in
+            var name = name
+            if accounts.contains(name.account) { name.used = .now }
+            return name
+        })
     }
 
     func password(for account: Account) -> String? {
@@ -215,6 +252,7 @@ actor Vault {
         guard !same.isEmpty else { return (false, false) }
         guard let all = loadLogins() else { return nil }
         let known = all.filter { same.contains($0.account) && $0.password == sent.password }.map(\.account)
+        touch(known)
         // Where it was used last is where it is offered from now on: one kept
         // over https and typed into the site's plain http page by hand (a
         // router's) is offered there too, and once used over https again, no longer.
@@ -381,7 +419,72 @@ enum Passwords {
     static func install(in controller: WKUserContentController) {
         controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: world))
         controller.add(messages, contentWorld: world, name: "passwords")
+        controller.addUserScript(WKUserScript(source: withoutPasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
     }
+
+    /// Passkeys take an Apple entitlement Nerda doesn't have: WebKit then
+    /// says no passkey is to be had, yet leaves the passkey object there, so
+    /// sites go for the passkey first and leave you stuck on it. Without the
+    /// object they ask for the password straight away. navigator.credentials
+    /// itself stays, as sites use it for passwords too.
+    ///
+    /// Unless an extension answers passkey requests itself, as a password
+    /// manager with your passkeys in it does: it puts its own get and create
+    /// on navigator.credentials, or reaches for the passkey object from a
+    /// script of its own; from then on sites see the object and ask the
+    /// extension. Any request it leaves to Nerda is turned down at once, as
+    /// if you had said no, where WebKit would try and fail. After Search's.
+    static let withoutPasskeys = #"""
+        (() => {
+            let real = window.PublicKeyCredential;
+            if (!real) return;
+            let claimed = false;
+            const answered = () => {
+                if (claimed) return true;
+                try {
+                    if (navigator.credentials && Object.getOwnPropertyDescriptor(navigator.credentials, 'get')) claimed = true;
+                    // A script of an extension's own, as WebKit names it in a
+                    // stack: one it injects, or one loaded from its files.
+                    else if (/webkit-masked-url:|-extension:\/\//.test(new Error().stack ?? '')) claimed = true;
+                } catch {}
+                return claimed;
+            };
+            try {
+                Object.defineProperty(window, 'PublicKeyCredential', {
+                    configurable: true,
+                    get: () => answered() ? real : undefined,
+                    set: (value) => { real = value; },
+                });
+            } catch {
+                try { delete window.PublicKeyCredential; } catch {}
+                return;
+            }
+            const proto = CredentialsContainer.prototype;
+            for (const name of ['get', 'create']) {
+                const native = proto[name];
+                try {
+                    Object.defineProperty(proto, name, {
+                        configurable: true, writable: true,
+                        value: function (options) {
+                            if (!options?.publicKey) return native.apply(this, arguments);
+                            // Asked for under the name box: nothing to offer, so it
+                            // waits, as it would while nobody picks one, until the page lets it go.
+                            if (name === 'get' && options.mediation === 'conditional') {
+                                return new Promise((resolve, reject) => {
+                                    const signal = options.signal;
+                                    if (!signal) return;
+                                    const aborted = () => signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+                                    if (signal.aborted) return reject(aborted());
+                                    signal.addEventListener('abort', () => reject(aborted()), { once: true });
+                                });
+                            }
+                            return Promise.reject(new DOMException('The operation either timed out or was not allowed.', 'NotAllowedError'));
+                        },
+                    });
+                } catch {}
+            }
+        })();
+        """#
 
     final class Messages: NSObject, WKScriptMessageHandler {
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -655,18 +758,20 @@ extension Browser {
 
     /// One of the accounts listed, into the page it was listed on.
     func fill(_ account: Account) {
-        guard let choices = passwordChoices, let page = tabs.first(where: { $0.id == choices.tab })?.page else { return }
+        guard let choices = passwordChoices, choices.takesClicks,
+              let page = tabs.first(where: { $0.id == choices.tab })?.page else { return }
         choicesAsked += 1
         passwordChoices = nil
         Task {
             // nil when the Mac was asked whether Nerda may read it, and said no.
             guard let password = await vault.password(for: account) else { return }
-            _ = try? await page.callAsyncJavaScript(
+            let filled = try? await page.callAsyncJavaScript(
                 "return nerdaFill(user, password, site, secure)",
                 arguments: ["user": account.user, "password": password, "site": choices.site, "secure": !choices.clear],
                 contentWorld: Passwords.world
-            )
+            ) as? Bool
             page.window?.makeFirstResponder(page)
+            if filled == true { await vault.touch([account]) }
         }
     }
 
