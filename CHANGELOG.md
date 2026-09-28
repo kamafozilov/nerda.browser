@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Pinned sites sit four to a row at the top of the sidebar, where they sat three, so more fit before the tabs.
+
 ## [0.0.13] - 2026-09-28
 
 ### Fixed

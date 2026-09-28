@@ -681,11 +681,13 @@ struct Sidebar: View {
     }
 }
 
-/// The tiles: three to a row, each row shared out evenly, so one fills the
+/// The tiles: four to a row, each row shared out evenly, so one fills the
 /// width. A drag finds what it is over by the same sums.
 private struct TileGrid: Layout {
+    static let perRow = 4
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let rows = CGFloat((subviews.count + 2) / 3)
+        let rows = CGFloat((subviews.count + Self.perRow - 1) / Self.perRow)
         return CGSize(width: proposal.width ?? 0, height: max(rows * (Sidebar.tileHeight + Sidebar.tileGap) - Sidebar.tileGap, 0))
     }
 
@@ -697,10 +699,10 @@ private struct TileGrid: Layout {
     }
 
     static func frame(_ index: Int, of count: Int, in bounds: CGRect) -> CGRect {
-        let row = index / 3
-        let across = CGFloat(min(3, count - row * 3))
+        let row = index / perRow
+        let across = CGFloat(min(perRow, count - row * perRow))
         let width = (bounds.width - Sidebar.tileGap * (across - 1)) / across
-        return CGRect(x: bounds.minX + CGFloat(index % 3) * (width + Sidebar.tileGap),
+        return CGRect(x: bounds.minX + CGFloat(index % perRow) * (width + Sidebar.tileGap),
                       y: bounds.minY + CGFloat(row) * (Sidebar.tileHeight + Sidebar.tileGap),
                       width: width, height: Sidebar.tileHeight)
     }
@@ -708,10 +710,10 @@ private struct TileGrid: Layout {
     /// The tile under `point` of `count`: the nearest, from outside them.
     static func index(at point: CGPoint, of count: Int, in bounds: CGRect) -> Int {
         let row = min(max(Int(((point.y - bounds.minY) / (Sidebar.tileHeight + Sidebar.tileGap)).rounded(.down)), 0),
-                      (count - 1) / 3)
-        let across = min(3, count - row * 3)
+                      (count - 1) / perRow)
+        let across = min(perRow, count - row * perRow)
         let column = Int(((point.x - bounds.minX) / ((bounds.width + Sidebar.tileGap) / CGFloat(across))).rounded(.down))
-        return row * 3 + min(max(column, 0), across - 1)
+        return row * perRow + min(max(column, 0), across - 1)
     }
 }
 
