@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.13] - 2026-09-28
+
 ### Fixed
 
 - Extensions that talk to an app on your Mac or keep a live connection, as password managers do, leave nothing running behind them when they restart, update or are turned off, where each restart kept its helper's memory and connection until Nerda quit. A burst of messages between an extension's pages is handled once, where some were handled twice, and an extension's popup left open or just closed stays quiet, where it kept waking Nerda several times a second.
@@ -239,7 +241,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.12...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.13...HEAD
+[0.0.13]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.12...v0.0.13
 [0.0.12]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.11...v0.0.12
 [0.0.11]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.10...v0.0.11
 [0.0.10]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.9...v0.0.10
