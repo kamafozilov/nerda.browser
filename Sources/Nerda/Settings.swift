@@ -842,6 +842,7 @@ private struct ShortcutsSettings: View {
             ("New Incognito Window", "Browse without saving history", "⇧⌘N"),
             ("Close Window", "Close the window and its tabs", "⇧⌘W"),
             ("Show All History", "Every page you have visited", "⌘Y"),
+            ("Passwords", "See, copy and change your saved passwords", "⌥⌘L"),
             ("Settings", "Open Nerda's settings", "⌘,"),
             ("Minimize", "Put the window in the Dock", "⌘M"),
             ("Hide Nerda", "Hide Nerda's windows", "⌘H"),

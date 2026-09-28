@@ -39,7 +39,7 @@ struct SidebarMenuButton: View {
 
 /// What the app has besides the tabs, on a panel over the sidebar's bottom
 /// corner: History opens to its side, as a submenu does, and so does Developer,
-/// the page's developer tools; Settings and New Tab
+/// the page's developer tools; Passwords, Settings and New Tab
 /// with their keys, and an incognito window. Downloads have their own button beside it. Profiles go at its top once there are any.
 /// In an incognito window, no History: it isn't kept there.
 /// Drawn by SwiftUI rather than as a system menu, so it can look like the rest.
@@ -69,6 +69,8 @@ struct SidebarMenu: View {
                     .onHover { if $0 { open = .history } }
                 }
 
+                MenuRow(icon: "key", title: "Passwords", shortcut: "⌥⌘L") { run { PasswordsWindow.show() } }
+                    .onHover { if $0 { open = nil } }
                 MenuRow(icon: "gearshape", title: "Settings", shortcut: "⌘,") { run { browser.openSettings() } }
                     .onHover { if $0 { open = nil } }
                 MenuRow(icon: "chevron.left.forwardslash.chevron.right", title: "Developer", submenu: true, lit: open == .developer) {

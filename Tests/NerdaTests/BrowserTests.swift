@@ -1353,6 +1353,16 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
 
 /// Exports as Passwords and Chrome write them: quoted fields with commas,
 /// quotes and line breaks, a byte-order mark, and rows with nothing to keep.
+/// A password added by hand is kept under the host of what was typed for its
+/// website, an address or a bare host, as one saved on the site would be.
+@Test func passwordsAddedByHandGoUnderTheirSite() {
+    #expect(PasswordsWindow.host(of: "https://www.GitHub.com/login") == "github.com")
+    #expect(PasswordsWindow.host(of: " accounts.google.com ") == "accounts.google.com")
+    #expect(PasswordsWindow.host(of: "127.0.0.1:8080") == "127.0.0.1")
+    #expect(PasswordsWindow.host(of: "") == nil)
+    #expect(PasswordsWindow.host(of: "not a site") == nil)
+}
+
 @Test func exportedPasswordsAreReadIn() {
     let apple = "\u{FEFF}Title,URL,Username,Password,Notes,OTPAuth\r\n"
         + "Google,https://accounts.google.com/,kama@gmail.com,\"p,a\"\"ss\",\"two\nlines\",\r\n"
