@@ -27,8 +27,11 @@ final class Tab: Identifiable {
     /// background: the address bar wears it, so it reads as part of the page.
     private(set) var color: NSColor?
     /// Set when the last address could not be opened: the page shows why
-    /// instead, and Reload tries that address again.
-    var failure: (url: URL, message: String)?
+    /// instead, and Reload tries that address again. Extensions are told of
+    /// the address, as Chrome tells of its error page's.
+    var failure: (url: URL, message: String)? {
+        didSet { if failure?.url != oldValue?.url { Extensions.shared.changed(self, .URL) } }
+    }
     /// Kept at the top of the sidebar as a tile, and never put to sleep for
     /// being idle: the sites always open. ⌘W lets its page go, tile and all
     /// kept (`Browser.closeSelectedTab`). See `Browser.setPinned`.

@@ -183,7 +183,9 @@ final class Extensions: NSObject {
         }
     }
 
-    /// When you last pressed each extension's button.
+    /// When you last pressed each extension's button: a permissions.request
+    /// made from that press is one you asked for, even once WebKit no longer
+    /// sees it (see ExtensionShims, "permissions.afterClick").
     static var clicked: [String: Date] = [:]
     /// When you last clicked or typed in one of each extension's own pages:
     /// its popup, or a page of its in a tab. Real events only: a page's
@@ -379,6 +381,15 @@ final class Extensions: NSObject {
             // `fence`).
             for pattern in found.allRequestedMatchPatterns where !Self.reachesExtensions(pattern) {
                 context.setPermissionStatus(.grantedExplicitly, for: pattern)
+            }
+            // Its own sign-in address, https://<id>.chromiumapp.org, which
+            // is never loaded (see ExtensionAuth.handOver). WebKit shows an
+            // extension a tab's address only where it has access, where
+            // Chrome's "tabs" is enough, and one watching its sign-in tab
+            // for that address has to be able to see it.
+            if ExtensionShims.allowed(item.id, context: context).contains("identity"),
+               let own = try? WKWebExtension.MatchPattern(string: "https://\(item.id).chromiumapp.org/*") {
+                context.setPermissionStatus(.grantedExplicitly, for: own)
             }
             Self.fence(context)
             // WebKit's nativeMessaging, granted above to all, is the shim's
@@ -1010,7 +1021,7 @@ final class Extensions: NSObject {
         await ask("asks for more access", detail: names, context: context)
     }
 
-    private func ask(_ question: String, detail: String, context: WKWebExtensionContext) async -> Bool {
+    func ask(_ question: String, detail: String, context: WKWebExtensionContext) async -> Bool {
         await ask(
             "\(context.webExtension.displayName ?? "An extension") \(question)",
             detail: detail, icon: context.webExtension.icon(for: CGSize(width: 64, height: 64)),

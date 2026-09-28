@@ -13,6 +13,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Fixed
 
+- Extensions that sign you in or ask for a site's access from their button, as Figma's does, work: the question is asked where the extension got an error, and a sign-in the extension watches for in its own tab finishes, where the tab stayed on "Can't Open This Page".
 - Extensions that keep a line open to their background, as password managers do, go on answering after a moment unused, and their button opens at the first click, where after two minutes their pages and the icons they add to sign-in fields stopped doing anything.
 - Extensions whose pages wait on their background hear it, as in Chrome: Bitwarden signs in and syncs, 1Password's popup gets past "Connecting to the app", and user scripts in ScriptCat and Tampermonkey can fetch from other sites, where each of these stayed stuck.
 - A site that takes more than a minute to answer opens once it answers, where Nerda gave up after a minute and left the page blank.

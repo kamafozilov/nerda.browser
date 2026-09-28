@@ -330,6 +330,57 @@ private let contentWorld = """
     #expect(context.evaluateScript("chrome.tabGroups.Color.BLUE").toString() == "blue")
 }
 
+/// A permissions.request WebKit refuses for want of a click, made from the
+/// button's click whose tab the shim filled in first, is asked of Nerda;
+/// any other refusal stands.
+@Test func permissionsRequestAfterTheButtonsClickAsksNerda() throws {
+    let folder = try extensionFolder([
+        "manifest.json": #"{"manifest_version": 3, "background": {"service_worker": "bg.js"}}"#, "bg.js": "",
+    ])
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let worker = """
+        globalThis.ServiceWorkerGlobalScope = { [Symbol.hasInstance]: (o) => o === globalThis };
+        globalThis.setTimeout = globalThis.clearTimeout = globalThis.setInterval = globalThis.clearInterval = () => {};
+        const event = () => ({ addListener() {}, removeListener() {}, hasListener() { return false; } });
+        globalThis.asked = [];
+        let refusal = "Must be called during a user gesture.";
+        globalThis.chrome = { runtime: { id: "abc", getURL: (p) => "chrome-extension://abc/" + p,
+          getManifest: () => ({ background: { service_worker: "bg.js" } }), sendMessage: () => Promise.resolve(),
+          sendNativeMessage: (host, m) => { asked.push(m.api); return Promise.resolve({ value: true }); }, connect: () => ({}),
+          onMessage: event(), onConnect: event(), onInstalled: event() },
+          permissions: { contains: () => Promise.resolve(true), getAll: () => Promise.resolve({}), remove: () => Promise.resolve(true),
+            request: () => Promise.reject(new Error(refusal)) } };
+        """
+    let context = JSContext()!
+    context.evaluateScript(worker)
+    context.evaluateScript(ExtensionShims.shim(for: folder))
+    #expect(context.exception == nil)
+    context.evaluateScript("""
+        globalThis.results = [];
+        chrome.permissions.request({ origins: ["https://www.figma.com/*"] }).then((v) => results.push(v));
+        """)
+    #expect(context.evaluateScript("asked.join()").toString() == "permissions.afterClick")
+    #expect(context.evaluateScript("results.join()").toString() == "true")
+    context.evaluateScript("""
+        refusal = "Only permissions specified in the manifest may be requested.";
+        chrome.permissions.request({ permissions: ["tabs"] }).catch((e) => results.push("refused"));
+        """)
+    #expect(context.evaluateScript("asked.length").toInt32() == 1)
+    #expect(context.evaluateScript("results.join()").toString() == "true,refused")
+}
+
+/// Only https://<id>.chromiumapp.org is an extension's sign-in answer.
+@MainActor @Test func signInAnswersAreTheExtensionsOwnAddress() {
+    let id = String(repeating: "a", count: 32)
+    let answer = { (text: String) in ExtensionAuth.returning(URL(string: text)!) }
+    #expect(answer("https://\(id).chromiumapp.org/cb?code=1") == id)
+    #expect(answer("https://\(id.uppercased()).ChromiumApp.org/") == id)
+    #expect(answer("http://\(id).chromiumapp.org/") == nil)
+    #expect(answer("https://chromiumapp.org/") == nil)
+    #expect(answer("https://x.\(id).chromiumapp.org/") == nil)
+    #expect(answer("https://\(id).chromiumapp.org.example.com/") == nil)
+}
+
 /// What an extension is held to, as in Chrome: no tab sent to script or a
 /// file, no reach into other extensions' pages, and from a store page only
 /// the extension that page is about.
