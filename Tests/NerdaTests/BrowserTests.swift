@@ -1294,6 +1294,24 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     #expect(Vault.offered(names, clear: false).map(\.user) == ["me", "admin"])
 }
 
+/// The account used last is listed first, whether it was put into a page or
+/// signed in with; one never used counts from when it was saved. Names
+/// written before Nerda kept the date read as never used, and using one
+/// touches only the file, never the keychain.
+@Test func savedPasswordsListTheLastUsedFirst() async throws {
+    let file = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: file) }
+    try Data(#"[{"host":"example.com","user":"old","saved":0},{"host":"login.example.com","user":"new","saved":100}]"#.utf8)
+        .write(to: file)
+    let vault = Vault(service: "Nerda Tests \(UUID().uuidString)", names: file)
+    #expect(await vault.accounts(for: "example.com", clear: false).map(\.user) == ["new", "old"])
+    await vault.touch([Account(host: "example.com", user: "old")])
+    #expect(await vault.accounts(for: "example.com", clear: false).map(\.user) == ["old", "new"])
+    let names = try JSONDecoder().decode([Vault.Name].self, from: Data(contentsOf: file))
+    #expect(names.first { $0.user == "old" }?.used != nil)
+    #expect(names.first { $0.user == "new" }?.used == nil)
+}
+
 /// A list of accounts that has just come up, or just moved, takes no click:
 /// one already on its way when a page put it under the pointer isn't a choice.
 @MainActor @Test func accountsListTakesNoClickAsItAppears() {

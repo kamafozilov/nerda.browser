@@ -11,6 +11,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - Window › Task Manager: every tab, extension and part of Nerda with the memory and CPU it takes, and whether a tab is on screen, asleep or playing sound. Double-click a tab to go to it; End Process closes the tabs you chose.
 
+### Changed
+
+- The saved accounts under a sign-in box list the one you used last first, whether you picked it there or typed its password in, where the newest saved came first.
+
 ### Fixed
 
 - Extensions that sign you in or ask for a site's access from their button, as Figma's does, work: the question is asked where the extension got an error, and a sign-in the extension watches for in its own tab finishes, where the tab stayed on "Can't Open This Page".
