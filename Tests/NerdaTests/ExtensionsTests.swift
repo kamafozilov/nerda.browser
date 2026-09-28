@@ -206,3 +206,60 @@ private let contentWorld = """
     #expect(Extensions.webAccessible(page("/page.html"), from: other, in: two))
     #expect(!Extensions.webAccessible(page("/page.html"), from: nil, in: two))
 }
+
+/// Bitwarden names its clean-up methods with Symbol.dispose, which WebKit
+/// doesn't have: the shim gives it, before any extension code runs.
+@Test func disposalSymbolsAreThere() {
+    let context = JSContext()!
+    context.evaluateScript(contentWorld)
+    context.evaluateScript(ExtensionShims.contentScript)
+    #expect(context.exception == nil)
+    #expect(context.evaluateScript("Symbol.dispose === Symbol.for('Symbol.dispose') && typeof Symbol.asyncDispose === 'symbol'").toBool())
+}
+
+/// A message the worker sends reaches one of the extension's pages once,
+/// whether WebKit brings it, the channel does, or both in either order; two
+/// alike are two, and a content script's alike one pairs with none.
+@Test func relayedMessagesReachAPageOnce() throws {
+    let folder = try extensionFolder(["manifest.json": #"{"manifest_version": 3, "background": {"service_worker": "bg.js"}}"#, "bg.js": ""])
+    defer { try? FileManager.default.removeItem(at: folder) }
+    // One of the extension's pages: a channel the test posts on, timers it
+    // runs, and WebKit's onMessage it fires.
+    let page = """
+        globalThis.location = { protocol: "chrome-extension:", origin: "chrome-extension://abc", pathname: "/page.html", href: "chrome-extension://abc/page.html" };
+        const channels = {}, posted = [];
+        globalThis.BroadcastChannel = class { constructor(name) { channels[name] = this; } postMessage(m) { posted.push(m); } };
+        let timers = [];
+        globalThis.setTimeout = (f) => { timers.push(f); return timers.length; };
+        globalThis.clearTimeout = globalThis.setInterval = globalThis.clearInterval = () => {};
+        const run = () => { for (let i = 0; i < 5 && timers.length; i++) { const now = timers; timers = []; now.forEach((f) => f()); } };
+        const listeners = [];
+        globalThis.chrome = { runtime: { id: "abc", getURL: (p) => "chrome-extension://abc/" + p,
+          getManifest: () => ({ background: { service_worker: "bg.js" } }), sendMessage: () => Promise.resolve(),
+          sendNativeMessage: () => Promise.resolve(), connect: () => ({}),
+          onMessage: { addListener(f) { listeners.push(f); }, removeListener() {}, hasListener() { return false; } } } };
+        """
+    let context = JSContext()!
+    context.evaluateScript(page)
+    context.evaluateScript(ExtensionShims.shim(for: folder))
+    #expect(context.exception == nil)
+    context.evaluateScript("""
+        const heard = [];
+        chrome.runtime.onMessage.addListener((m) => { heard.push(JSON.stringify(m)); });
+        const worker = { id: "abc", url: "chrome-extension://abc/bg.js" };
+        const native = (m, sender = worker) => listeners.forEach((f) => f(m, sender, () => {}));
+        const relayed = (m) => channels["nerda-messages"].onmessage({ data: { relay: m, from: "w", url: worker.url } });
+        native({ a: 1 }); relayed({ a: 1 }); run();
+        relayed({ b: 2 }); run(); native({ b: 2 });
+        relayed({ c: 3 }); relayed({ c: 3 }); run();
+        native({ d: 4 }, { id: "abc", url: "https://example.com/" }); relayed({ d: 4 }); run();
+        """)
+    #expect(context.exception == nil)
+    #expect(context.evaluateScript("heard.join(' ')").toString() == #"{"a":1} {"b":2} {"c":3} {"c":3} {"d":4} {"d":4}"#)
+    // What the page sends goes on the channel too; the shim's own envelopes don't.
+    context.evaluateScript("""
+        posted.length = 0;
+        chrome.runtime.sendMessage({ e: 5 }); chrome.runtime.sendMessage({ __nerdaCall: {} });
+        """)
+    #expect(context.evaluateScript("JSON.stringify(posted.filter((m) => m.relay !== undefined).map((m) => m.relay))").toString() == #"[{"e":5}]"#)
+}

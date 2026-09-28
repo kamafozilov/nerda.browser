@@ -319,6 +319,13 @@ enum ExtensionShims {
       // nothing may be left there for a page to see: Safari leaves nothing.
       const ours = (() => { try { return !!(chrome && chrome.runtime && chrome.runtime.id); } catch (e) { return false; } })();
       if (!ours || root.__nerdaShim) return;
+      // Bitwarden's code names its classes' clean-up methods with these,
+      // which WebKit doesn't have yet: without them it stopped before
+      // signing in. Defined before any extension code runs; Symbol.for
+      // keeps the one name shared by all its frames.
+      for (const name of ["dispose", "asyncDispose"]) {
+        if (root.Symbol[name] === undefined) Object.defineProperty(root.Symbol, name, { value: root.Symbol.for("Symbol." + name) });
+      }
       // A popup is loaded from a copy of its page (Extensions.unpopped), but
       // goes by its page's own address, as in Chrome, before any of its code
       // runs: messages carry it, and some extensions answer only their own
@@ -505,6 +512,87 @@ enum ExtensionShims {
       // event.addRoutes) — a speed-up, so nothing is lost without it.
       if (worker && typeof root.InstallEvent === "function" && !InstallEvent.prototype.addRoutes) {
         InstallEvent.prototype.addRoutes = () => Promise.resolve();
+      }
+      // clients.matchAll() in an extension's worker: Chrome lists the
+      // extension's own pages that are open: its popup, its pages in tabs,
+      // its offscreen document. WebKit lists none, so an extension that
+      // checks whether its popup is open before sending it news always
+      // hears no: 1Password's popup stays on "connecting to the app" for
+      // ever. The browser knows which pages are open, so they are added to
+      // the list; a message posted to one reaches it through a channel the
+      // pages listen on, as a message from the worker.
+      // The other way round, a page reaches the worker through
+      // navigator.serviceWorker, and the worker answers the page a message
+      // came from: ScriptCat's worker hands each GM_xmlhttpRequest to its
+      // offscreen document so. Here no worker controls the extension's
+      // pages, so a page is given one that posts to the worker over the same
+      // channel, and a message either way says who sent it. A port handed
+      // over with a message can't cross the channel: it stays with the
+      // sender, and what is posted to the one the other side is given comes
+      // back over the channel to it (Tampermonkey's worker sends one).
+      const clientsChannel = typeof BroadcastChannel === "function" && !inContent && !embedded ? new BroadcastChannel("nerda-clients") : null;
+      const heldPorts = new Map();
+      const handOver = (transfer) => (Array.isArray(transfer) ? transfer : (transfer && transfer.transfer) || [])
+        .filter((p) => p instanceof MessagePort)
+        .map((port) => { const key = Math.random().toString(36).slice(2); heldPorts.set(key, port); return key; });
+      const answered = (data) => {
+        if (typeof data.port !== "string") return false;
+        const port = heldPorts.get(data.port);
+        if (port) port.postMessage(data.data);
+        return true;
+      };
+      const messageFrom = (source, data, keys) => {
+        const ports = (Array.isArray(keys) ? keys : []).map((key) => {
+          const pair = new MessageChannel();
+          pair.port1.onmessage = (e) => clientsChannel.postMessage({ port: key, data: e.data });
+          return pair.port2;
+        });
+        const event = new MessageEvent("message", { data, ports, origin: location.origin });
+        if (source) Object.defineProperty(event, "source", { value: source });
+        return event;
+      };
+      if (worker && clientsChannel && root.clients && typeof root.clients.matchAll === "function") {
+        const matchAll = root.clients.matchAll.bind(root.clients);
+        const client = (p) => ({
+          id: "nerda-" + p.id, url: p.url, type: "window", frameType: "top-level",
+          visibilityState: p.visible ? "visible" : "hidden", focused: !!p.focused,
+          postMessage: (data, transfer) => { try { clientsChannel.postMessage({ url: p.url, data, ports: handOver(transfer) }); } catch (e) {} },
+          focus() { return Promise.resolve(this); },
+          navigate: () => Promise.resolve(null),
+        });
+        put(root.clients, "matchAll", async (options) => {
+          const found = [...await matchAll(options)];
+          const type = (options && options.type) || "window";
+          if (type !== "window" && type !== "all") return found;
+          let pages = [];
+          try { pages = (await native("clients.pages", [])) || []; } catch (e) {}
+          const listed = new Set(found.map((c) => c.url));
+          return found.concat(pages.filter((p) => p && typeof p.url === "string" && !listed.has(p.url)).map(client));
+        });
+        clientsChannel.onmessage = ({ data }) => {
+          if (!data || answered(data) || typeof data.from !== "string") return;
+          root.dispatchEvent(messageFrom(client({ id: data.from, url: data.from }), data.data, data.ports));
+        };
+      } else if (clientsChannel && !background && typeof navigator !== "undefined" && navigator.serviceWorker) {
+        const container = navigator.serviceWorker;
+        const script = (() => { try { return (runtime.getManifest().background || {}).service_worker; } catch (e) { return null; } })();
+        const controller = script && !container.controller ? {
+          scriptURL: new URL(script, location.origin + "/").href, state: "activated", onstatechange: null, onerror: null,
+          postMessage: (data, transfer) => { try { clientsChannel.postMessage({ from: location.href, data, ports: handOver(transfer) }); } catch (e) {} },
+          addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => true,
+        } : null;
+        clientsChannel.onmessage = ({ data }) => {
+          if (!data || answered(data) || data.url !== location.href) return;
+          try { container.dispatchEvent(messageFrom(controller, data.data, data.ports)); } catch (e) {}
+        };
+        // Only the controller: `ready` is left as WebKit has it, since a
+        // made-up registration has none of a real one's methods
+        // (showNotification...), and a page calling them would throw where
+        // it used to wait.
+        if (controller) {
+          kept.add(container);
+          try { Object.defineProperty(container, "controller", { configurable: true, get: () => controller }); } catch (e) {}
+        }
       }
       // WebKit runs an extension's worker on its web process's main thread,
       // and a worker's WebSocket waits there for the main thread to set up
@@ -785,31 +873,34 @@ enum ExtensionShims {
           return k && k.length < 4000 ? k : null;
         } catch (e) { return null; }
       };
-      // A page at the address of the extension's popup hears nothing the
-      // worker sends to all its pages: WebKit keeps those for a popup of its
-      // own, which Nerda's isn't (see ExtensionPopup). Dark Reader's popup
-      // never saw its settings change. So the worker says it on the channel
-      // too, and such a page takes it from there, once whichever way it came.
-      // ponytail: one way; a popup's answer to the worker's message isn't carried back.
-      const relayed = !!channel && !background && (() => {
-        try {
-          const m = runtime.getManifest(), a = m.action || m.browser_action || {};
-          if (!a.default_popup) return false;
-          const u = new URL(runtime.getURL(a.default_popup));
-          return u.pathname === location.pathname;
-        } catch (e) { return false; }
-      })();
-      let relayTo = null;
-      const lately = new Map();
-      const once = (message, how) => {
-        const key = keyOf(message), now = Date.now();
-        if (!key) return true;
-        const was = lately.get(key);
-        if (was && was.how !== how && now - was.at < 1500) return false;
-        if (lately.size > 200) lately.clear();
-        lately.set(key, { how, at: now });
-        return true;
+      // WebKit brings a message the worker or one of the extension's pages
+      // sends to few of its other pages, or none: never to a page at the
+      // address of its popup, as it keeps those for a popup of its own,
+      // which Nerda's isn't (see ExtensionPopup). Dark Reader's popup never
+      // saw its settings change, and Bitwarden's sync and passkey window
+      // wait on such messages. So each one also goes over the channel, and
+      // a page that didn't hear it from WebKit takes it from there.
+      // A message's two copies are paired by count, on all of it, and only
+      // with what the extension's own pages and worker sent: one WebKit
+      // brought cancels one relayed copy still to come, and one relayed
+      // cancels a late one from WebKit. A content script's message, however
+      // alike, is never taken for one, and a copy left unpaired is
+      // forgotten after a few seconds.
+      // ponytail: one way; a page's answer to a relayed message isn't carried back.
+      const relayKey = (message) => { try { const text = JSON.stringify(message); return text === undefined ? null : text; } catch (e) { return null; } };
+      const ownPlace = (() => { try { return runtime.getURL(""); } catch (e) { return ""; } })();
+      const fromOwnPages = (sender) => !!sender && sender.id === runtime.id && typeof sender.url === "string" && !!ownPlace
+        && (sender.url + "/").startsWith(ownPlace.replace(/\/$/, "") + "/");
+      const heardNatively = new Map(), heardRelayed = new Map();
+      const count = (map, key, by) => {
+        const now = Date.now();
+        for (const [k, v] of map) if (now - v.at > 5000) map.delete(k);
+        const n = ((map.get(key) || {}).n || 0) + by;
+        if (n > 0) { if (map.size > 200) map.clear(); map.set(key, { n, at: now }); } else map.delete(key);
       };
+      const pending = (map, key) => { const v = map.get(key); return !!v && Date.now() - v.at <= 5000 && v.n > 0; };
+      let relayTo = null;
+      const relay = (message) => { if (channel) try { channel.postMessage({ relay: message, from: me, url: location.href }); } catch (e) {} };
       const tell = (message, verdict, heard) => {
         const key = channel && keyOf(message);
         if (key) channel.postMessage({ key, from: background ? "worker" : me, verdict, heard, at: Date.now() });
@@ -825,8 +916,13 @@ enum ExtensionShims {
             return;
           }
           if (data.bye) { peers.delete(data.from); waiting.forEach((check) => check()); return; }
-          if (data.relay) {
-            if (relayed && relayTo && once(data.relay.message, "relay")) relayTo(data.relay.message, data.relay.sender, () => {}, true);
+          if (data.relay !== undefined) {
+            const key = relayKey(data.relay);
+            if (!background && relayTo && listening) setTimeout(() => {
+              if (key && pending(heardNatively, key)) { count(heardNatively, key, -1); return; }
+              if (key) count(heardRelayed, key, 1);
+              relayTo(data.relay, { id: runtime.id, url: data.url, origin: location.origin }, () => {}, true);
+            }, 50);
             return;
           }
           // A popup that closes is thrown away without a word; so a page
@@ -858,7 +954,11 @@ enum ExtensionShims {
         const listeners = new Set();
         let attached = false;
         const dispatch = function (message, sender, respond, viaRelay) {
-          if (relayed && told && !viaRelay && !once(message, "native")) return;
+          if (!background && told && !viaRelay && fromOwnPages(sender)) {
+            const k = relayKey(message);
+            if (k && pending(heardRelayed, k)) { count(heardRelayed, k, -1); return; }
+            if (k) count(heardNatively, k, 1);
+          }
           let settled = false, keep = false;
           const sendResponse = (value) => { if (!settled) { settled = true; respond(value); } };
           // Only the worker answers; any other page stays out of it.
@@ -916,7 +1016,9 @@ enum ExtensionShims {
             if (result === true) keep = true;
             else if (result && typeof result.then === "function") { keep = true; result.then(sendResponse, () => sendResponse(undefined)); }
           }
-          if (!inContent) tell(message, keep || settled ? "answers" : "passes", true);
+          // A relayed copy's answer reaches no one: said to pass, so the pages
+          // WebKit did bring it to don't leave the sender waiting on it.
+          if (!inContent) tell(message, !viaRelay && (keep || settled) ? "answers" : "passes", true);
           if (keep || settled) return keep && !settled ? true : undefined;
           // Nothing here answers it. In Chrome that leaves the question to
           // the extension's other pages and its worker; WebKit takes the
@@ -1108,10 +1210,8 @@ enum ExtensionShims {
           // Never heard back by the one that sends it, so said for it.
           if (!inContent) tell(typeof args[0] === "string" && args.length > 1 && typeof args[1] !== "function" ? args[1] : args[0], "passes");
           checkWorker();
-          // To all its pages, the popup's included (see `relayed`).
-          if (background && channel && typeof args[0] !== "string") {
-            try { channel.postMessage({ relay: { message: args[0], sender: { id: runtime.id, url: location.href, origin: location.origin } }, from: "worker" }); } catch (e) {}
-          }
+          // To all its other pages too (see `relay`); not the shim's own envelopes.
+          if (typeof args[0] !== "string" && !(args[0] && Object.keys(args[0]).some((k) => k.startsWith("__nerda")))) relay(args[0]);
           const answer = send(...args).then((r) => { if (r !== undefined) heard = Date.now(); return r; });
           return replied(answer, callback, "The message port closed before a response was received.");
         });
@@ -2916,6 +3016,26 @@ enum ExtensionShims {
             if ExtensionPopup.shared.extensionID == id { add("POPUP", ExtensionPopup.shared.view?.url) }
             if let page = offscreen[id] { add("OFFSCREEN_DOCUMENT", page.url) }
             return found
+        case "clients.pages":
+            // Its own open pages, for clients.matchAll() in its worker (see
+            // the shim): its popup, its pages in tabs of any window, its
+            // offscreen document.
+            var pages: [[String: Any]] = []
+            let own = context.baseURL.absoluteString
+            if ExtensionPopup.shared.extensionID == id, let web = ExtensionPopup.shared.view, let url = web.url {
+                let up = web.window?.isVisible == true
+                pages.append(["id": "popup", "url": url.absoluteString, "visible": up, "focused": up && web.window?.isKeyWindow == true])
+            }
+            for window in NSApp.windows {
+                guard let tabs = (window as? BrowserWindow)?.browser else { continue }
+                for tab in tabs.tabs {
+                    guard let web = tab.page, let url = web.url, url.absoluteString.hasPrefix(own) else { continue }
+                    let shown = tab.id == tabs.selectedID && web.window?.occlusionState.contains(.visible) == true
+                    pages.append(["id": tab.id.uuidString, "url": url.absoluteString, "visible": shown, "focused": shown && web.window?.isKeyWindow == true])
+                }
+            }
+            if let url = offscreen[id]?.url { pages.append(["id": "offscreen", "url": url.absoluteString, "visible": false, "focused": false]) }
+            return pages
 
         // MARK: notifications — the Mac's own
         case "notifications.create":
