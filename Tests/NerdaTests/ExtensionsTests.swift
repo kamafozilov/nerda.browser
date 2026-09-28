@@ -87,7 +87,8 @@ private let contentWorld = """
 }
 
 /// A click on its button that woke the worker reaches the listener the
-/// extension adds once it has started, as NordPass's does, rather than none.
+/// extension adds once it has started, as NordPass's does, rather than none,
+/// even when a listener it added while starting is gone again.
 @Test func clickThatWokeTheWorkerWaitsForItsListener() throws {
     let folder = try extensionFolder([
         "manifest.json": #"{"manifest_version": 3, "background": {"service_worker": "bg.js"}}"#,
@@ -116,6 +117,9 @@ private let contentWorld = """
     context.evaluateScript(ExtensionShims.shim(for: folder))
     #expect(context.exception == nil)
     context.evaluateScript("""
+        const gone = () => {};
+        chrome.action.onClicked.addListener(gone);
+        chrome.action.onClicked.removeListener(gone);
         started = true;
         chrome.action.onClicked.fire({ id: 7 });
         let heard;
@@ -173,18 +177,32 @@ private let contentWorld = """
 
 /// A site opens only the extension pages its manifest lets that site open,
 /// as Chrome allows: NordPass lets Nord Account open app.html, and no other
-/// site, and no other page.
+/// site, and no other page. Anything that reads two ways stays closed.
 @MainActor @Test func sitesOpenOnlyPagesTheExtensionLetsThem() throws {
     let manifest = try JSONSerialization.jsonObject(with: Data(#"""
-        {"web_accessible_resources": [
+        {"manifest_version": 3, "web_accessible_resources": [
           {"resources": ["assets/*.svg"], "matches": ["https://*/*"]},
-          {"resources": ["app.html"], "matches": ["https://*.nordaccount.com/*"]}]}
+          {"resources": ["app.html"], "matches": ["https://*.nordaccount.com/*"]},
+          {"resources": ["secret.html"], "matches": ["<all_urls>"], "use_dynamic_url": true},
+          {"resources": ["a?c.html"], "matches": ["<all_urls>"]}]}
         """#.utf8)) as! [String: Any]
-    let nord = URL(string: "https://nordaccount.com/product/nordpass/login")!
-    #expect(Extensions.webAccessible("/app.html", from: nord, in: manifest))
-    #expect(Extensions.webAccessible("/assets/icons/a.svg", from: URL(string: "https://example.com/")!, in: manifest))
-    #expect(!Extensions.webAccessible("/app.html", from: URL(string: "https://example.com/")!, in: manifest))
-    #expect(!Extensions.webAccessible("/index.html", from: nord, in: manifest))
-    #expect(!Extensions.webAccessible("/app.html", from: nil, in: manifest))
-    #expect(Extensions.webAccessible("/page.html", from: nil, in: ["web_accessible_resources": ["page.html"]]))
+    let page = { (path: String) in URL(string: "chrome-extension://abc" + path)! }
+    let nord = URL(string: "https://nordaccount.com/")!
+    let other = URL(string: "https://example.com/")!
+    #expect(Extensions.webAccessible(page("/app.html"), from: nord, in: manifest))
+    #expect(Extensions.webAccessible(page("/app.html?next=1"), from: URL(string: "https://my.nordaccount.com:8443/")!, in: manifest))
+    #expect(Extensions.webAccessible(page("/assets/icons/a.svg"), from: other, in: manifest))
+    #expect(!Extensions.webAccessible(page("/app.html"), from: other, in: manifest))
+    #expect(!Extensions.webAccessible(page("/index.html"), from: nord, in: manifest))
+    #expect(!Extensions.webAccessible(page("/app.html"), from: nil, in: manifest))
+    #expect(!Extensions.webAccessible(page("/app.html"), from: URL(string: "http://nordaccount.com/")!, in: manifest))
+    #expect(!Extensions.webAccessible(page("/assets/../secret.svg"), from: other, in: manifest))
+    #expect(!Extensions.webAccessible(page("/assets%2Fx.svg"), from: other, in: manifest))
+    #expect(!Extensions.webAccessible(page("/assets/x%5C.svg"), from: other, in: manifest))
+    #expect(!Extensions.webAccessible(page("/secret.html"), from: other, in: manifest))
+    #expect(Extensions.webAccessible(page("/a?c.html".replacingOccurrences(of: "?", with: "%3F")), from: other, in: manifest))
+    #expect(!Extensions.webAccessible(page("/abc.html"), from: other, in: manifest))
+    let two = ["manifest_version": 2, "web_accessible_resources": ["page.html"]] as [String: Any]
+    #expect(Extensions.webAccessible(page("/page.html"), from: other, in: two))
+    #expect(!Extensions.webAccessible(page("/page.html"), from: nil, in: two))
 }

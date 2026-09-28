@@ -753,18 +753,57 @@ final class Extensions: NSObject {
     /// for every site (Manifest V2) or for sites its `matches` name.
     func opens(_ url: URL, from site: URL?) -> Bool {
         guard let id = Self.host(of: url), let context = contexts[id] else { return false }
-        return Self.webAccessible(url.path, from: site, in: context.webExtension.manifest)
+        return Self.webAccessible(url, from: site, in: context.webExtension.manifest)
     }
 
-    static func webAccessible(_ path: String, from site: URL?, in manifest: [String: Any]) -> Bool {
-        guard let entries = manifest["web_accessible_resources"] as? [Any] else { return false }
-        let path = String(path.drop { $0 == "/" })
-        let named = { (patterns: [String]) in patterns.contains { fnmatch(String($0.drop { $0 == "/" }), path, 0) == 0 } }
-        return entries.contains { entry in
-            if let resource = entry as? String { return named([resource]) }
-            guard let entry = entry as? [String: Any], named(entry["resources"] as? [String] ?? []), let site else { return false }
-            return (entry["matches"] as? [String] ?? []).contains { (try? WKWebExtension.MatchPattern(string: $0))?.matches(site) == true }
+    /// Stricter than Chrome where it can't be told apart safely: only a
+    /// secure site, only a page named plainly (no "..", no encoded slash),
+    /// only `*` in the manifest's names, and no page it hides behind a
+    /// changing address (use_dynamic_url). Anything else stays closed.
+    static func webAccessible(_ url: URL, from site: URL?, in manifest: [String: Any]) -> Bool {
+        guard let site, site.scheme?.lowercased() == "https", let host = site.host(), !host.isEmpty,
+              site.user == nil, site.password == nil,
+              url.user == nil, url.password == nil, url.port == nil,
+              let encoded = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath,
+              !encoded.lowercased().contains("%2f"), !encoded.lowercased().contains("%5c"),
+              let decoded = encoded.removingPercentEncoding, decoded.hasPrefix("/"),
+              let path = plain(decoded.dropFirst())
+        else { return false }
+        var parts = URLComponents()
+        parts.scheme = "https"
+        parts.host = host
+        parts.port = site.port
+        parts.path = "/"
+        guard let origin = parts.url else { return false }
+        let named = { (resources: [String]) in
+            resources.contains { resource in
+                guard let resource = plain(resource.hasPrefix("/") ? resource.dropFirst() : Substring(resource)) else { return false }
+                let pattern = "\\A" + resource.components(separatedBy: "*").map(NSRegularExpression.escapedPattern).joined(separator: ".*") + "\\z"
+                return path.range(of: pattern, options: .regularExpression) != nil
+            }
         }
+        switch manifest["manifest_version"] as? Int {
+        case 2:
+            return named(manifest["web_accessible_resources"] as? [String] ?? [])
+        case 3:
+            return (manifest["web_accessible_resources"] as? [[String: Any]] ?? []).contains { rule in
+                if let dynamic = rule["use_dynamic_url"], dynamic as? Bool != false { return false }
+                return named(rule["resources"] as? [String] ?? [])
+                    && (rule["matches"] as? [String] ?? []).contains { (try? WKWebExtension.MatchPattern(string: $0))?.matches(origin) == true }
+            }
+        default:
+            return false
+        }
+    }
+
+    /// A path as it reads, or nil for one that reads two ways: a backslash,
+    /// a "." or ".." or empty step, a control character.
+    private static func plain(_ path: Substring) -> String? {
+        guard !path.isEmpty, !path.contains("\\"), !path.contains("%"),
+              !path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              !path.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0.isEmpty || $0 == "." || $0 == ".." })
+        else { return nil }
+        return String(path)
     }
 
     /// The page the manifest names for the button, when WebKit hasn't said.

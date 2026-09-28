@@ -478,12 +478,32 @@ extension Browser: WKNavigationDelegate {
         // And a website sending it to one of an extension's pages the
         // extension lets that site open, as Nord Account ends NordPass's
         // sign-in: the tab makes itself a page for the extension. In a
-        // page for the web it fails to load.
+        // page for the web it fails to load. The site is the page's that
+        // asked, not the tab's address, which in a redirect is already the
+        // extension's page; and only a plain GET from the page itself, not
+        // a form or a frame inside it.
         if let host = Extensions.host(of: url), action.targetFrame?.isMainFrame ?? true,
-           let tab = tab(for: webView), tab.madeFor != host,
-           Extensions.shared.opens(url, from: webView.url) {
-            Task { tab.go(to: url) }
-            return .cancel
+           let tab = tab(for: webView), tab.madeFor != host {
+            tab.returning = nil
+            let frame = action.sourceFrame
+            if frame.isMainFrame, (action.request.httpMethod ?? "GET") == "GET",
+               action.request.httpBody == nil, action.request.httpBodyStream == nil {
+                let origin = frame.securityOrigin
+                if !origin.host.isEmpty {
+                    var site = URLComponents()
+                    site.scheme = origin.protocol
+                    site.host = origin.host
+                    if origin.port > 0 { site.port = origin.port }
+                    if Extensions.shared.opens(url, from: site.url) {
+                        Task { tab.go(to: url) }
+                        return .cancel
+                    }
+                } else if [nil, "about:blank"].contains(frame.request.url?.absoluteString) {
+                    // A tab with no page yet has no site to ask for it: the
+                    // server that redirects it here is known only after.
+                    tab.returning = url
+                }
+            }
         }
         // 0.0.0.0, the address local servers print as where they listen, is
         // refused by WebKit; it means this Mac, so 127.0.0.1 is opened instead.
@@ -574,6 +594,23 @@ extension Browser: WKNavigationDelegate {
         hideChoices(on: tab)
         // A new document has nothing on show.
         if fullscreenTab == tab.id { fullscreenTab = nil }
+    }
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        tab(for: webView)?.loading = (navigation, webView.url)
+    }
+
+    /// A server sending a tab with no page yet on to an extension's page
+    /// that extension lets it open: as a site's own page asking (see
+    /// `policy`), judged by the server that sent it.
+    func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
+        guard let tab = tab(for: webView), let loading = tab.loading, loading.navigation === navigation else { return }
+        let target = tab.returning
+        tab.returning = nil
+        tab.loading = (navigation, webView.url)
+        guard let url = webView.url, url == target, Extensions.shared.opens(url, from: loading.site) else { return }
+        webView.stopLoading()
+        Task { tab.go(to: url) }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

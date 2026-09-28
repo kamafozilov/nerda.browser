@@ -105,6 +105,12 @@ final class Tab: Identifiable {
     /// The extension whose pages the page was made for (see `go`), or nil
     /// for the web's.
     @ObservationIgnored private(set) var madeFor: String?
+    /// The load under way and the site last answering for it, which a
+    /// server's redirect to an extension's page comes from (see Browser).
+    @ObservationIgnored var loading: (navigation: WKNavigation, site: URL?)?
+    /// An extension's page a tab with no page yet was sent to, to be opened
+    /// if WebKit then says a site's server sent it there.
+    @ObservationIgnored var returning: URL?
 
     /// The page, woken first if the tab was asleep.
     var webView: WKWebView { page ?? wake() }

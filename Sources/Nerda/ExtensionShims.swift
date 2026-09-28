@@ -1964,11 +1964,12 @@ enum ExtensionShims {
             const add = target.addListener.bind(target), remove = target.removeListener.bind(target);
             const late = new Set();
             const keeps = clicks.test(space + "." + key);
-            let direct = 0, held = [];
+            const direct = new Set();
+            let held = [];
             if (mentioned.has(space + "." + key)) {
               try {
                 add(function (...args) {
-                  if (keeps && !late.size && !direct) {
+                  if (keeps && !late.size && !direct.size) {
                     held.push(args);
                     setTimeout(() => { held = held.filter((a) => a !== args); }, 5000);
                     return;
@@ -1980,13 +1981,13 @@ enum ExtensionShims {
               } catch (e) {}
             }
             put(target, "addListener", (listener, ...rest) => {
-              try { add(listener, ...rest); direct++; }
+              try { add(listener, ...rest); direct.add(listener); }
               catch (e) { if (/startup/i.test(String(e && e.message))) late.add(listener); else throw e; }
               const kept = held;
               held = [];
               for (const args of kept) setTimeout(() => listener(...args));
             });
-            put(target, "removeListener", (listener) => { late.delete(listener); try { remove(listener); } catch (e) {} });
+            put(target, "removeListener", (listener) => { late.delete(listener); direct.delete(listener); try { remove(listener); } catch (e) {} });
           }
         }
       }
@@ -2047,13 +2048,12 @@ enum ExtensionShims {
         const wrapped = new WeakMap();
         // The worker's sender is the bare origin, with no slash after it.
         const fromOwn = (port) => !!port && !!port.sender && (String(port.sender.url) + "/").startsWith(own);
-        // WebKit unloads an idle worker half a minute on even with ports
-        // open to it, and tells neither end: the page's or content script's
-        // port goes dead without a word, and what it posts after is lost.
-        // NordPass's pages and content scripts each hold one for its state,
-        // and nothing on them answered any more. Chrome tells both ends, and
-        // they connect again, which wakes the worker. So a worker with ports
-        // open keeps itself up, as that comes to.
+        // WebKit unloads a worker with ports open to it once it hasn't posted
+        // on one for two minutes. NordPass's pages and content scripts each
+        // hold one for its state, and nothing on them answered any more. So
+        // a worker with ports open asks the browser to keep it up, which
+        // doesn't start it over. (A message of its own on the ports would
+        // keep it too, but a content script would hear it.)
         const open = new Set();
         let keeping = null;
         const hold = (port) => {
@@ -2996,9 +2996,10 @@ enum ExtensionShims {
             }
             owner.revive(id, because: "its worker wouldn't start")
             return nil
-        // A worker with ports open, up for another half minute (see the
-        // shim's `hold`). Asked of a worker that runs, WebKit only puts off
-        // unloading it.
+        // A worker with ports open, kept up (see the shim's `hold`). Asked
+        // of a worker that runs, WebKit only puts off unloading it: the same
+        // worker still answers four minutes on, where it is gone after two
+        // without this.
         case "background.keep":
             if context.webExtension.hasBackgroundContent { context.loadBackgroundContent { _ in } }
             return nil
