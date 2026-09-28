@@ -588,13 +588,17 @@ final class Extensions: NSObject {
               Date().timeIntervalSince(revived[id] ?? .distantPast) > 60 else { return }
         revived[id] = Date()
         noteError("restarted the extension: \(reason)", for: id)
-        // Its popup goes with it, and is opened again once it is back.
+        // Its popup goes with it, and is opened again once it is back: under
+        // its button, which leaves the bar with it and is a new one once the
+        // bar has drawn it again, a turn after loading. Hung from the old
+        // one, out of the window, the popup stood at the window's corner.
         let popup = ExtensionPopup.shared.extensionID == id ? ExtensionPopup.shared.view?.url : nil
-        let anchor = anchor(for: id)
         unload(id)
         Task {
             guard await load(item), let popup, let context = contexts[id] else { return }
-            ExtensionPopup.shared.show(popup, for: context, from: anchor)
+            DispatchQueue.main.async {
+                ExtensionPopup.shared.show(popup, for: context, from: self.anchor(for: id))
+            }
         }
     }
 
