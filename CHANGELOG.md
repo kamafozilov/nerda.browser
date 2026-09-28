@@ -14,6 +14,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Fixed
 
 - Extensions that keep a line open to their background, as password managers do, go on answering after a moment unused, and their button opens at the first click, where after two minutes their pages and the icons they add to sign-in fields stopped doing anything.
+- Extensions whose pages wait on their background hear it, as in Chrome: Bitwarden signs in and syncs, 1Password's popup gets past "Connecting to the app", and user scripts in ScriptCat and Tampermonkey can fetch from other sites, where each of these stayed stuck.
 - A site that takes more than a minute to answer opens once it answers, where Nerda gave up after a minute and left the page blank.
 - A secure (https) site can send you to an extension's page that the extension lets it open, as a sign-in done on the extension maker's site does, where the page failed to load.
 
