@@ -135,6 +135,82 @@ final class Extensions: NSObject {
         url?.scheme == scheme ? url?.host() : nil
     }
 
+    // MARK: - what an extension may never do
+
+    /// The schemes extension pages are served from: Nerda's, and WebKit's own.
+    nonisolated static let pageSchemes: Set<String> = [scheme, "webkit-extension"]
+
+    /// Extension pages, as a pattern names them: another extension's
+    /// (chrome-extension://<its id>/*) or every one's. No extension is ever
+    /// given them, not from its manifest, not asked for later, as Chrome
+    /// doesn't; its own pages are its own without asking.
+    nonisolated static func reachesExtensions(_ pattern: WKWebExtension.MatchPattern) -> Bool {
+        pageSchemes.contains(pattern.scheme?.lowercased() ?? "")
+    }
+
+    /// Other extensions' pages are never among "all sites" either: with
+    /// chrome-extension registered as a scheme, WebKit counts them in
+    /// <all_urls>, which Chrome doesn't, so they are refused outright. A
+    /// refusal for all hosts doesn't outweigh a grant naming one, WebKit
+    /// looks at those first, which is why none is ever made (see
+    /// `reachesExtensions`). Set again after anything is granted.
+    static func fence(_ context: WKWebExtensionContext) {
+        for scheme in pageSchemes {
+            if let pages = try? WKWebExtension.MatchPattern(string: "\(scheme)://*/*") {
+                context.setPermissionStatus(.deniedExplicitly, for: pages)
+            }
+        }
+    }
+
+    /// Whether this address is a page of an extension other than the one
+    /// asking, which it never gets to see into.
+    nonisolated static func othersPage(_ url: URL?, of id: String) -> Bool {
+        guard let url, pageSchemes.contains(url.scheme?.lowercased() ?? "") else { return false }
+        return url.host()?.lowercased() != id.lowercased()
+    }
+
+    static func othersPage(_ url: URL?, for context: WKWebExtensionContext) -> Bool {
+        othersPage(url, of: context.uniqueIdentifier)
+    }
+
+    /// Where an extension may send a tab. Not to javascript:, which would run
+    /// its code in whatever page the tab shows, a site it may have no access
+    /// to at all, nor to a file on this Mac. Chrome refuses both.
+    nonisolated static func mayOpen(_ url: URL) throws {
+        let scheme = url.scheme?.lowercased() ?? ""
+        guard scheme != "javascript", scheme != "file" else {
+            throw NSError(domain: "Nerda", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot navigate to a \(scheme): URL."])
+        }
+    }
+
+    /// When you last pressed each extension's button.
+    static var clicked: [String: Date] = [:]
+    /// When you last clicked or typed in one of each extension's own pages:
+    /// its popup, or a page of its in a tab. Real events only: a page's
+    /// script can dispatch one, but it never reaches here.
+    static var touched: [String: Date] = [:]
+    private static var touching: Any?
+
+    static func watchTouches() {
+        guard touching == nil else { return }
+        touching = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown]) { event in
+            var view: NSView? = event.type == .keyDown
+                ? event.window?.firstResponder as? NSView
+                : event.window?.contentView?.superview?.hitTest(event.locationInWindow)
+            while let found = view, !(found is WKWebView) { view = found.superview }
+            if let id = host(of: (view as? WKWebView)?.url) { touched[id] = Date() }
+            return event
+        }
+    }
+
+    /// You just did something in this extension, its button or a click or a
+    /// key in one of its pages, as Chrome's "user gesture" means: within the
+    /// last few seconds.
+    static func justUsed(_ id: String) -> Bool {
+        let latest = [clicked[id], touched[id]].compactMap { $0 }.max()
+        return latest.map { Date().timeIntervalSince($0) < 5 } ?? false
+    }
+
     /// The configuration an extension's page has to be made with, as only a
     /// view made from its extension's is served its pages; nil for the web.
     static func configuration(for url: URL) -> WKWebViewConfiguration? {
@@ -299,9 +375,24 @@ final class Extensions: NSObject {
                 context.setPermissionStatus(.grantedExplicitly, for: permission)
             }
             context.setPermissionStatus(.grantedExplicitly, for: .nativeMessaging)
-            for pattern in found.allRequestedMatchPatterns {
+            // Never one for extension pages, another's or all of them (see
+            // `fence`).
+            for pattern in found.allRequestedMatchPatterns where !Self.reachesExtensions(pattern) {
                 context.setPermissionStatus(.grantedExplicitly, for: pattern)
             }
+            Self.fence(context)
+            // WebKit's nativeMessaging, granted above to all, is the shim's
+            // line to Nerda; an app on this Mac answers only an extension
+            // whose own manifest asks for it, required or optional, as in
+            // Chrome. What Nerda added to the manifest doesn't count.
+            let added = Set((try? JSONSerialization.jsonObject(with: Data(contentsOf: folder.appending(path: ".nerda-added")))) as? [String] ?? [])
+            if found.optionalPermissions.contains(.nativeMessaging)
+                || found.requestedPermissions.contains(.nativeMessaging) && !added.contains("nativeMessaging") {
+                talksToApps.insert(item.id)
+            } else {
+                talksToApps.remove(item.id)
+            }
+            Self.watchTouches()
             try controller.load(context)
             watch(context)
             if contexts[item.id] == nil, loadsThisRun.contains(item.id) { loadedBefore.insert(item.id) }
@@ -475,6 +566,8 @@ final class Extensions: NSObject {
     @ObservationIgnored private var revived: [String: Date] = [:]
     /// Recent failed native messages, per extension and host.
     @ObservationIgnored private var failures: [String: [Date]] = [:]
+    /// The extensions that asked to talk to apps on this Mac (see `load`).
+    @ObservationIgnored private var talksToApps: Set<String> = []
 
     /// An extension whose worker won't start again: unloaded and loaded, as
     /// a relaunch would, at most once a minute, so one that can never start
@@ -870,6 +963,7 @@ final class Extensions: NSObject {
         ("privacy", "Change your privacy settings"), ("browsingData", "Clear your browsing data"),
         ("management", "See your other extensions"), ("notifications", "Show notifications"),
         ("sessions", "See your recently closed tabs"), ("topSites", "See your most visited sites"),
+        ("downloads.open", "Open files it downloads"),
     ]
 
     /// What an extension wants, in words.
@@ -985,6 +1079,7 @@ final class Extensions: NSObject {
 
     func press(_ id: String) {
         guard let context = contexts[id], !ExtensionPopup.shared.closes(id) else { return }
+        Self.clicked[id] = Date()
         if let tab = activeAdapter { context.userGesturePerformed(in: tab) }
         // An extension that asked for its button to open its side panel.
         if ExtensionShims.panelOnClick.contains(id), context.action(for: activeAdapter)?.presentsPopup != true {
@@ -1054,6 +1149,7 @@ extension Extensions: WKWebExtensionControllerDelegate {
 
     func webExtensionController(_ controller: WKWebExtensionController, openNewTabUsing configuration: WKWebExtension.TabConfiguration, for extensionContext: WKWebExtensionContext) async throws -> (any WKWebExtensionTab)? {
         guard let browser else { return nil }
+        try Self.mayOpen(configuration.url ?? URL(string: "about:blank")!)
         let tab = withAnimation(.slide) {
             browser.open(configuration.url ?? URL(string: "about:blank")!, inBackground: !configuration.shouldBeActive)
         }
@@ -1064,6 +1160,14 @@ extension Extensions: WKWebExtensionControllerDelegate {
     /// One window: a new window's pages become tabs in it.
     func webExtensionController(_ controller: WKWebExtensionController, openNewWindowUsing configuration: WKWebExtension.WindowConfiguration, for extensionContext: WKWebExtensionContext) async throws -> (any WKWebExtensionWindow)? {
         guard let browser else { return nil }
+        // A private window isn't something an extension can have here: made
+        // as a tab of this window, its pages would land in your History and
+        // cookies while the extension believed them private. Refused, as
+        // Chrome refuses when incognito isn't allowed.
+        if configuration.shouldBePrivate {
+            throw NSError(domain: "Nerda", code: 2, userInfo: [NSLocalizedDescriptionKey: "Private windows can't be opened by extensions."])
+        }
+        for url in configuration.tabURLs { try Self.mayOpen(url) }
         for (index, url) in configuration.tabURLs.enumerated() {
             withAnimation(.slide) { _ = browser.open(url, inBackground: index > 0 || !configuration.shouldBeFocused) }
         }
@@ -1091,9 +1195,15 @@ extension Extensions: WKWebExtensionControllerDelegate {
     }
 
     func webExtensionController(_ controller: WKWebExtensionController, promptForPermissionMatchPatterns matchPatterns: Set<WKWebExtension.MatchPattern>, in tab: (any WKWebExtensionTab)?, for extensionContext: WKWebExtensionContext) async -> (Set<WKWebExtension.MatchPattern>, Date?) {
-        let all = matchPatterns.contains { $0.matchesAllHosts || $0.matchesAllURLs }
-        let what = all ? "every website" : matchPatterns.map(\.string).sorted().joined(separator: ", ")
-        return await ask("wants to read and change \(what)", detail: "Until you remove the extension.", context: extensionContext) ? (matchPatterns, nil) : ([], nil)
+        // Extension pages are never given, so never asked about.
+        let wanted = matchPatterns.filter { !Self.reachesExtensions($0) }
+        guard !wanted.isEmpty else { return ([], nil) }
+        let all = wanted.contains { $0.matchesAllHosts || $0.matchesAllURLs }
+        let what = all ? "every website" : wanted.map(\.string).sorted().joined(separator: ", ")
+        guard await ask("wants to read and change \(what)", detail: "Until you remove the extension.", context: extensionContext) else { return ([], nil) }
+        // Given only once this returns: fenced again right after.
+        DispatchQueue.main.async { Self.fence(extensionContext) }
+        return (wanted, nil)
     }
 
     func webExtensionController(_ controller: WKWebExtensionController, didUpdate action: WKWebExtension.Action, forExtensionContext context: WKWebExtensionContext) {
@@ -1117,6 +1227,9 @@ extension Extensions: WKWebExtensionControllerDelegate {
             return try await ExtensionShims.answer(message, from: extensionContext, owner: self)
         }
         let id = extensionContext.uniqueIdentifier
+        guard talksToApps.contains(id) else {
+            throw ExtensionNative.Refused(why: "Access to native messaging requires the nativeMessaging permission.")
+        }
         do {
             return try await ExtensionNative.send(message, to: host, from: id)
         } catch {
@@ -1138,6 +1251,9 @@ extension Extensions: WKWebExtensionControllerDelegate {
         // The port a worker's shim opens only to find what ports share; it
         // lets go at once.
         if port.applicationIdentifier == ExtensionShims.application { return }
+        guard talksToApps.contains(extensionContext.uniqueIdentifier) else {
+            throw ExtensionNative.Refused(why: "Access to native messaging requires the nativeMessaging permission.")
+        }
         try ExtensionNative.connect(port, from: extensionContext.uniqueIdentifier)
     }
 }
@@ -1168,9 +1284,16 @@ final class ExtensionTab: NSObject, WKWebExtensionTab {
         return owner.place(of: tab) ?? NSNotFound
     }
 
-    func webView(for context: WKWebExtensionContext) -> WKWebView? { tab?.page }
+    /// A tab showing another extension's page gives an extension nothing of
+    /// it: no view to run a script in, no address, no picture, whatever it
+    /// was granted (see Extensions.reachesExtensions).
+    private func sealed(_ context: WKWebExtensionContext) -> Bool {
+        Extensions.othersPage(tab?.page?.url, for: context) || Extensions.othersPage(tab?.site, for: context)
+    }
+
+    func webView(for context: WKWebExtensionContext) -> WKWebView? { sealed(context) ? nil : tab?.page }
     func title(for context: WKWebExtensionContext) -> String? { tab?.title }
-    func url(for context: WKWebExtensionContext) -> URL? { tab?.site }
+    func url(for context: WKWebExtensionContext) -> URL? { sealed(context) ? nil : tab?.site }
     func isLoadingComplete(for context: WKWebExtensionContext) -> Bool { !(tab?.isLoading ?? false) }
     func isSelected(for context: WKWebExtensionContext) -> Bool { tab != nil && tab?.id == browser?.selectedID }
     func isPinned(for context: WKWebExtensionContext) -> Bool { tab?.isPinned ?? false }
@@ -1190,7 +1313,10 @@ final class ExtensionTab: NSObject, WKWebExtensionTab {
     /// The tab makes its page anew when the address is another kind: a
     /// website sent to an extension's page, as 1Password does once a sign-in
     /// in its tab has added the account, and back (see Tab.go).
-    func loadURL(_ url: URL, for context: WKWebExtensionContext) async throws { tab?.go(to: url) }
+    func loadURL(_ url: URL, for context: WKWebExtensionContext) async throws {
+        try Extensions.mayOpen(url)
+        tab?.go(to: url)
+    }
     func reload(fromOrigin: Bool, for context: WKWebExtensionContext) async throws { tab?.reload(fromOrigin: fromOrigin) }
     func goBack(for context: WKWebExtensionContext) async throws { tab?.page?.goBack() }
     func goForward(for context: WKWebExtensionContext) async throws { tab?.page?.goForward() }
@@ -1206,7 +1332,7 @@ final class ExtensionTab: NSObject, WKWebExtensionTab {
     }
 
     func takeSnapshot(using configuration: WKSnapshotConfiguration, for context: WKWebExtensionContext) async throws -> NSImage? {
-        guard let page = tab?.page else { return nil }
+        guard let page = tab?.page, !sealed(context) else { return nil }
         return try await page.takeSnapshot(configuration: configuration)
     }
 }
