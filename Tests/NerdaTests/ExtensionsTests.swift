@@ -410,3 +410,45 @@ private let contentWorld = """
     #expect(store("https://chromewebstore.google.com/detail/name/\(id)?x=\(other)") == id)
     #expect(store("https://example.com/detail/name/\(id)") == nil)
 }
+
+/// A tab manager with only "tabs" sees every tab's address, title and icon,
+/// where WebKit blanks them, and hears in onUpdated what changed; one
+/// without "tabs" is told nothing more.
+@Test func tabManagersSeeEveryTab() throws {
+    let folder = try extensionFolder(["manifest.json": #"{"manifest_version": 3, "background": {"service_worker": "bg.js"}}"#, "bg.js": ""])
+    defer { try? FileManager.default.removeItem(at: folder) }
+    // WebKit's tabs as seen without host access, and Nerda's answer to
+    // tabs.describe: what the tab at each place shows.
+    let world = { (permissions: String) in """
+        globalThis.setTimeout = () => 0;
+        globalThis.clearTimeout = globalThis.setInterval = globalThis.clearInterval = () => {};
+        let shown = { url: "https://a.example/", title: "A", favIconUrl: "data:image/png;base64,AA==" };
+        const heard = [], updated = [];
+        globalThis.chrome = { runtime: { id: "abc", getURL: (p) => "chrome-extension://abc/" + p,
+          getManifest: () => ({ permissions: \(permissions) }), sendMessage: () => Promise.resolve(), connect: () => ({}),
+          sendNativeMessage: (host, m) => Promise.resolve({ value: m.api === "tabs.describe" ? m.args[0].map(() => shown) : undefined }),
+          onMessage: { addListener() {}, removeListener() {}, hasListener() { return false; } } },
+          tabs: { query: () => Promise.resolve([{ id: 1, index: 0, url: "", title: "" }]),
+            onUpdated: { addListener(f) { updated.push(f); }, removeListener() {}, hasListener() { return false; } } } };
+        """ }
+    let fire = "updated.forEach((f) => f(1, { status: 'loading', url: '' }, { id: 1, index: 0, url: '', title: '' }));"
+    let listen = "chrome.tabs.onUpdated.addListener((id, info, tab) => heard.push([info.url, info.title, info.favIconUrl, tab.url]));"
+
+    let context = JSContext()!
+    context.evaluateScript(world(#"["tabs"]"#))
+    context.evaluateScript(ExtensionShims.shim(for: folder))
+    context.evaluateScript("let got; chrome.tabs.query({}).then((t) => { got = t[0]; });" + listen + fire)
+    #expect(context.exception == nil)
+    #expect(context.evaluateScript("[got.url, got.title, got.favIconUrl].join()").toString() == "https://a.example/,A,data:image/png;base64,AA==")
+    // The address came in with the load; a new title later is told as changed.
+    context.evaluateScript("shown = Object.assign({}, shown, { title: 'B' });" + fire.replacingOccurrences(of: "status: 'loading', url: ''", with: "status: 'complete'"))
+    #expect(context.evaluateScript("JSON.stringify(heard)").toString()
+        == #"[["https://a.example/",null,null,"https://a.example/"],[null,"B",null,"https://a.example/"]]"#)
+
+    let blind = JSContext()!
+    blind.evaluateScript(world("[]"))
+    blind.evaluateScript(ExtensionShims.shim(for: folder))
+    blind.evaluateScript(listen + fire)
+    #expect(blind.exception?.toString() == nil)
+    #expect(blind.evaluateScript("JSON.stringify(heard)").toString() == #"[["",null,null,""]]"#)
+}

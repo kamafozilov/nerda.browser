@@ -1801,9 +1801,9 @@ enum ExtensionShims {
 
       // Tabs as Chrome describes them. Every tab has a groupId (-1 when in
       // no group — Nerda has none), which code tests before anything else;
-      // and with the "tabs" permission an extension sees every tab's address
-      // and title, where WebKit shows them only for sites it has host
-      // access to.
+      // and with the "tabs" permission an extension sees every tab's address,
+      // title and icon, where WebKit shows the first two only for sites it
+      // has host access to and never the icon.
       if (chrome.tabs) {
         const seesTabs = (() => { try { return (runtime.getManifest().permissions || []).includes("tabs"); } catch (e) { return false; } })();
         const isTab = (t) => t && typeof t === "object" && typeof t.id === "number";
@@ -1811,13 +1811,17 @@ enum ExtensionShims {
         const mend = (list) => {
           const tabs = list.filter(isTab);
           for (const t of tabs) if (t.groupId === undefined) try { t.groupId = -1; } catch (e) {}
-          const blind = seesTabs ? tabs.filter((t) => !t.url && t.index >= 0) : [];
+          const blind = seesTabs ? tabs.filter((t) => (!t.url || !t.favIconUrl) && t.index >= 0) : [];
           if (!blind.length) return null;
           return native("tabs.describe", [blind.map((t) => t.index)]).then((info) => {
             blind.forEach((t, i) => {
               const d = info && info[i];
               if (!d) return;
-              try { if (d.url) t.url = d.url; if (d.title && !t.title) t.title = d.title; } catch (e) {}
+              try {
+                if (d.url && !t.url) t.url = d.url;
+                if (d.title && !t.title) t.title = d.title;
+                if (d.favIconUrl && !t.favIconUrl) t.favIconUrl = d.favIconUrl;
+              } catch (e) {}
             });
           }, () => {});
         };
@@ -1836,15 +1840,16 @@ enum ExtensionShims {
         for (const name of ["query", "get", "getCurrent", "create", "update", "duplicate", "move", "reload"]) mendResult(chrome.tabs, name);
         for (const name of ["get", "getAll", "getCurrent", "getLastFocused", "create"]) mendResult(chrome.windows, name);
         // Listeners given a tab: the tab is mended before they see it.
-        const mendArgs = (target, positions) => {
+        const mendArgs = (target, positions, told) => {
           if (!target || typeof target.addListener !== "function") return;
           const add = target.addListener.bind(target), remove = target.removeListener.bind(target);
           const wrapped = new Map();
           put(target, "addListener", (listener, ...rest) => {
+            const state = new Map();
             const w = function (...args) {
               const pending = mend(positions.map((i) => args[i]));
-              if (!pending) return listener.apply(this, args);
-              pending.then(() => listener.apply(this, args));
+              if (!pending) { if (told) told(args, state); return listener.apply(this, args); }
+              pending.then(() => { if (told) told(args, state); listener.apply(this, args); });
             };
             wrapped.set(listener, w);
             return add(w, ...rest);
@@ -1853,7 +1858,25 @@ enum ExtensionShims {
           put(target, "hasListener", (listener) => wrapped.has(listener));
         };
         mendArgs(chrome.tabs.onCreated, [0]);
-        mendArgs(chrome.tabs.onUpdated, [2]);
+        // What changed, in onUpdated's changeInfo. Without host access
+        // WebKit blanks url and title there ("") and leaves favIconUrl out,
+        // and a tab manager reads them there. A blanked one is filled from
+        // the tab; one left out is added when it differs from what this
+        // listener last saw of the tab.
+        const told = seesTabs ? (args, state) => {
+          const info = args[1], tab = args[2];
+          if (!info || typeof info !== "object" || !isTab(tab) || !tab.url) return;
+          const before = state.get(tab.id);
+          const fill = (key, changed) => {
+            const value = tab[key];
+            if (value && (info[key] === "" || (info[key] === undefined && changed))) try { info[key] = value; } catch (e) {}
+          };
+          fill("url", before ? before.url !== tab.url : info.status === "loading");
+          fill("title", !!before && before.title !== tab.title);
+          fill("favIconUrl", !!before && before.favIconUrl !== tab.favIconUrl);
+          state.set(tab.id, { url: tab.url, title: tab.title, favIconUrl: tab.favIconUrl });
+        } : null;
+        mendArgs(chrome.tabs.onUpdated, [2], told);
         mendArgs(chrome.action && chrome.action.onClicked, [0]);
         mendArgs(chrome.contextMenus && chrome.contextMenus.onClicked, [1]);
         mendArgs(chrome.menus && chrome.menus.onClicked, [1]);
@@ -3320,7 +3343,15 @@ enum ExtensionShims {
             let visible = owner.visibleTabs
             return ((first as? [Int]) ?? []).map { index -> Any in
                 guard visible.indices.contains(index) else { return NSNull() }
-                return ["url": visible[index].site?.absoluteString ?? "", "title": visible[index].title]
+                let tab = visible[index]
+                // Another extension's page stays blank, as WebKit keeps it
+                // (see ExtensionTab.sealed); its own are its own.
+                if Extensions.othersPage(tab.page?.url, for: context) || Extensions.othersPage(tab.site, for: context) {
+                    return ["url": "", "title": ""]
+                }
+                var described: [String: Any] = ["url": tab.site?.absoluteString ?? "", "title": tab.title]
+                if let icon = Favicons.origin(of: tab.site).flatMap(Favicons.shared.dataURL) { described["favIconUrl"] = icon }
+                return described
             }
         case "tabs.move", "tabs.discard", "tabs.activate":
             let visible = owner.visibleTabs
