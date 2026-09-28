@@ -419,7 +419,72 @@ enum Passwords {
     static func install(in controller: WKUserContentController) {
         controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: world))
         controller.add(messages, contentWorld: world, name: "passwords")
+        controller.addUserScript(WKUserScript(source: withoutPasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
     }
+
+    /// Passkeys take an Apple entitlement Nerda doesn't have: WebKit then
+    /// says no passkey is to be had, yet leaves the passkey object there, so
+    /// sites go for the passkey first and leave you stuck on it. Without the
+    /// object they ask for the password straight away. navigator.credentials
+    /// itself stays, as sites use it for passwords too.
+    ///
+    /// Unless an extension answers passkey requests itself, as a password
+    /// manager with your passkeys in it does: it puts its own get and create
+    /// on navigator.credentials, or reaches for the passkey object from a
+    /// script of its own; from then on sites see the object and ask the
+    /// extension. Any request it leaves to Nerda is turned down at once, as
+    /// if you had said no, where WebKit would try and fail. After Search's.
+    static let withoutPasskeys = #"""
+        (() => {
+            let real = window.PublicKeyCredential;
+            if (!real) return;
+            let claimed = false;
+            const answered = () => {
+                if (claimed) return true;
+                try {
+                    if (navigator.credentials && Object.getOwnPropertyDescriptor(navigator.credentials, 'get')) claimed = true;
+                    // A script of an extension's own, as WebKit names it in a
+                    // stack: one it injects, or one loaded from its files.
+                    else if (/webkit-masked-url:|-extension:\/\//.test(new Error().stack ?? '')) claimed = true;
+                } catch {}
+                return claimed;
+            };
+            try {
+                Object.defineProperty(window, 'PublicKeyCredential', {
+                    configurable: true,
+                    get: () => answered() ? real : undefined,
+                    set: (value) => { real = value; },
+                });
+            } catch {
+                try { delete window.PublicKeyCredential; } catch {}
+                return;
+            }
+            const proto = CredentialsContainer.prototype;
+            for (const name of ['get', 'create']) {
+                const native = proto[name];
+                try {
+                    Object.defineProperty(proto, name, {
+                        configurable: true, writable: true,
+                        value: function (options) {
+                            if (!options?.publicKey) return native.apply(this, arguments);
+                            // Asked for under the name box: nothing to offer, so it
+                            // waits, as it would while nobody picks one, until the page lets it go.
+                            if (name === 'get' && options.mediation === 'conditional') {
+                                return new Promise((resolve, reject) => {
+                                    const signal = options.signal;
+                                    if (!signal) return;
+                                    const aborted = () => signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+                                    if (signal.aborted) return reject(aborted());
+                                    signal.addEventListener('abort', () => reject(aborted()), { once: true });
+                                });
+                            }
+                            return Promise.reject(new DOMException('The operation either timed out or was not allowed.', 'NotAllowedError'));
+                        },
+                    });
+                } catch {}
+            }
+        })();
+        """#
 
     final class Messages: NSObject, WKScriptMessageHandler {
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {

@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import ImageIO
+import JavaScriptCore
 import Network
 import SwiftUI
 import Testing
@@ -1322,6 +1323,32 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     #expect(choices.takesClicks)
     choices.spot.origin.y = 40
     #expect(!choices.takesClicks)
+}
+
+/// Sites don't see a passkey object Nerda can't answer, so they ask for the
+/// password; a passkey request is turned down at once. An extension that
+/// answers passkey requests with its own get on navigator.credentials gets
+/// the object back for the sites.
+@MainActor @Test func passkeysHiddenUnlessAnExtensionAnswers() {
+    let context = JSContext()!
+    context.evaluateScript("""
+        globalThis.window = globalThis;
+        globalThis.DOMException = class extends Error { constructor(message, name) { super(message); this.name = name; } };
+        globalThis.CredentialsContainer = class { get() { return Promise.resolve('password'); } create() { return Promise.resolve(null); } };
+        globalThis.navigator = { credentials: new CredentialsContainer() };
+        globalThis.PublicKeyCredential = function PublicKeyCredential() {};
+        """)
+    context.evaluateScript(Passwords.withoutPasskeys)
+    #expect(context.exception == nil)
+    #expect(context.evaluateScript("typeof PublicKeyCredential").toString() == "undefined")
+    context.evaluateScript("""
+        navigator.credentials.get({ publicKey: {} }).catch((error) => { globalThis.refused = error.name; });
+        navigator.credentials.get({ password: true }).then((answer) => { globalThis.answered = answer; });
+        """)
+    #expect(context.evaluateScript("refused").toString() == "NotAllowedError")
+    #expect(context.evaluateScript("answered").toString() == "password")
+    context.evaluateScript("navigator.credentials.get = () => Promise.resolve('from the extension');")
+    #expect(context.evaluateScript("typeof PublicKeyCredential").toString() == "function")
 }
 
 /// Exports as Passwords and Chrome write them: quoted fields with commas,
