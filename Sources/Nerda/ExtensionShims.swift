@@ -900,7 +900,11 @@ enum ExtensionShims {
       };
       const pending = (map, key) => { const v = map.get(key); return !!v && Date.now() - v.at <= 5000 && v.n > 0; };
       let relayTo = null;
-      const relay = (message) => { if (channel) try { channel.postMessage({ relay: message, from: me, url: location.href }); } catch (e) {} };
+      // As JSON, the way WebKit carries a message (and Chrome): a structured
+      // clone keeps what JSON drops (a key left undefined, a Date as one),
+      // and NordPass, finding its item's copy unlike the one it fetched,
+      // fetched it again, forever.
+      const relay = (message) => { const text = channel && relayKey(message); if (text) try { channel.postMessage({ relay: text, from: me, url: location.href }); } catch (e) {} };
       const tell = (message, verdict, heard) => {
         const key = channel && keyOf(message);
         if (key) channel.postMessage({ key, from: background ? "worker" : me, verdict, heard, at: Date.now() });
@@ -916,12 +920,12 @@ enum ExtensionShims {
             return;
           }
           if (data.bye) { peers.delete(data.from); waiting.forEach((check) => check()); return; }
-          if (data.relay !== undefined) {
-            const key = relayKey(data.relay);
+          if (typeof data.relay === "string") {
+            const key = data.relay;
             if (!background && relayTo && listening) setTimeout(() => {
-              if (key && pending(heardNatively, key)) { count(heardNatively, key, -1); return; }
-              if (key) count(heardRelayed, key, 1);
-              relayTo(data.relay, { id: runtime.id, url: data.url, origin: location.origin }, () => {}, true);
+              if (pending(heardNatively, key)) { count(heardNatively, key, -1); return; }
+              count(heardRelayed, key, 1);
+              relayTo(JSON.parse(key), { id: runtime.id, url: data.url, origin: location.origin }, () => {}, true);
             }, 50);
             return;
           }

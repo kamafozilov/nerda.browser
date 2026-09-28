@@ -220,7 +220,9 @@ private let contentWorld = """
 
 /// A message the worker sends reaches one of the extension's pages once,
 /// whether WebKit brings it, the channel does, or both in either order; two
-/// alike are two, and a content script's alike one pairs with none.
+/// alike are two, and a content script's alike one pairs with none. It goes
+/// over the channel as JSON, as WebKit carries it: a copy that kept what
+/// JSON drops set NordPass fetching its item again without end.
 @Test func relayedMessagesReachAPageOnce() throws {
     let folder = try extensionFolder(["manifest.json": #"{"manifest_version": 3, "background": {"service_worker": "bg.js"}}"#, "bg.js": ""])
     defer { try? FileManager.default.removeItem(at: folder) }
@@ -249,7 +251,7 @@ private let contentWorld = """
         chrome.runtime.onMessage.addListener((m) => { heard.push(JSON.stringify(m)); });
         const worker = { id: "abc", url: "chrome-extension://abc/bg.js" };
         const native = (m, sender = worker) => listeners.forEach((f) => f(m, sender, () => {}));
-        const relayed = (m) => channels["nerda-messages"].onmessage({ data: { relay: m, from: "w", url: worker.url } });
+        const relayed = (m) => channels["nerda-messages"].onmessage({ data: { relay: JSON.stringify(m), from: "w", url: worker.url } });
         native({ a: 1 }); relayed({ a: 1 }); run();
         relayed({ b: 2 }); run(); native({ b: 2 });
         relayed({ c: 3 }); relayed({ c: 3 }); run();
@@ -260,9 +262,9 @@ private let contentWorld = """
     // What the page sends goes on the channel too; the shim's own envelopes don't.
     context.evaluateScript("""
         posted.length = 0;
-        chrome.runtime.sendMessage({ e: 5 }); chrome.runtime.sendMessage({ __nerdaCall: {} });
+        chrome.runtime.sendMessage({ e: 5, gone: undefined, at: new Date(0) }); chrome.runtime.sendMessage({ __nerdaCall: {} });
         """)
-    #expect(context.evaluateScript("JSON.stringify(posted.filter((m) => m.relay !== undefined).map((m) => m.relay))").toString() == #"[{"e":5}]"#)
+    #expect(context.evaluateScript("JSON.stringify(posted.filter((m) => m.relay !== undefined).map((m) => m.relay))").toString() == #"["{\"e\":5,\"at\":\"1970-01-01T00:00:00.000Z\"}"]"#)
 }
 
 /// A new copy takes an extension's place in one step: the old one ends up

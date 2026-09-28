@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Opening an item in a password manager's popup, as NordPass's, leaves it quick and still, where NordPass fetched the item again and again without end: its popup and pages slowed to a crawl and its process took more CPU and memory by the second.
+
 ## [0.0.11] - 2026-09-28
 
 ### Added
