@@ -20,7 +20,10 @@ final class Favicons {
     /// views showing that site, not every icon in every window.
     @Observable
     final class Icon {
-        fileprivate(set) var image: NSImage?
+        fileprivate(set) var image: NSImage? { didSet { dataURL = nil } }
+        /// The image as a small PNG in a data: URL, for extensions (a tab's
+        /// favIconUrl): made the first time one asks, kept with the image.
+        @ObservationIgnored fileprivate var dataURL: String?
         /// Its colours, for its site's pinned tile.
         fileprivate(set) var tint: Tint?
         fileprivate(set) var failed = false
@@ -54,6 +57,26 @@ final class Favicons {
         let icon = Icon()
         icons[site] = icon
         return icon
+    }
+
+    /// The site's icon as a data: URL, as Chrome may give a tab's favIconUrl;
+    /// nil until it has one. Drawn at 32 pixels once, then kept: extensions
+    /// ask for every tab's at each tabs.query.
+    func dataURL(_ site: String) -> String? {
+        let icon = icon(site)
+        guard let image = icon.image else { return nil }
+        if let known = icon.dataURL { return known }
+        let side = Int(Self.side * 2)
+        guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8,
+                                            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                            bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        image.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
+        NSGraphicsContext.restoreGraphicsState()
+        guard let png = bitmap.representation(using: .png, properties: [:]) else { return nil }
+        icon.dataURL = "data:image/png;base64," + png.base64EncodedString()
+        return icon.dataURL
     }
 
     /// The icons kept on disk for these sites, read at launch, side by side

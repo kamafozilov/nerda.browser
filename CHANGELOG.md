@@ -22,6 +22,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Passbolt's popup shows your passwords and Claude's extension starts, as in Chrome, where the popup stayed empty and Claude's did nothing. A side panel that names its tab in its address opens, where it failed to load.
 - A second click on an extension's button closes its popup, where it could open it again at once. A popup whose page sets its own width takes that width while open, narrower too, as Bitwarden's narrow setting asks.
 - An app on your Mac that set itself up for Vivaldi or Opera, as a password manager's desktop app does, answers its extension in Nerda too, where only apps set up for Chrome, Edge, Brave, Arc or Chromium did.
+- Tab managers such as OneTab, Session Buddy and Tab Session Manager see every tab's address, title and icon, as in Chrome, and hear when a tab's address or title changes, where tabs on sites they couldn't also run on showed no icon and their changes came blank. Private tabs and other extensions' pages stay hidden from them.
 
 ### Security
 
