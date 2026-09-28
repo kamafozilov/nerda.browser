@@ -7,6 +7,7 @@ import WebKit
 /// tab to go to it; End Process closes the tabs chosen.
 enum TaskManager {
     private static var window: NSWindow?
+    private static var closing: (any NSObjectProtocol)?
 
     static func show() {
         if window == nil {
@@ -19,8 +20,13 @@ enum TaskManager {
             if !window.setFrameUsingName("TaskManager") { window.center() }
             window.setFrameAutosaveName("TaskManager")
             // Let go of when closed, so nothing is measured while it isn't open.
-            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
-                MainActor.assumeIsolated { Self.window = nil }
+            // Taken off as it fires: each open makes a new window, and a new observer.
+            closing = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
+                MainActor.assumeIsolated {
+                    Self.window = nil
+                    if let closing = Self.closing { NotificationCenter.default.removeObserver(closing) }
+                    Self.closing = nil
+                }
             }
             Self.window = window
         }

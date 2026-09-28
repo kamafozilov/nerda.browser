@@ -95,6 +95,9 @@ enum Windows {
         app.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated {
                 lockTimer?.cancel()
+                // Watched for good once the first window opened; with none
+                // open now there is nothing to lock.
+                guard !incognito.isEmpty else { return }
                 lockTimer = Task {
                     try? await Task.sleep(for: lockAfter)
                     if !Task.isCancelled { lock() }

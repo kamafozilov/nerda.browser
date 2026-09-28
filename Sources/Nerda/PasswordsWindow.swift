@@ -7,7 +7,8 @@ import SwiftUI
 /// open or remove; more are added by hand with +. It opens after Touch ID or
 /// the Mac's password, and asks again the next time it opens.
 enum PasswordsWindow {
-    private static var window: NSWindow?
+    fileprivate static var window: NSWindow?
+    private static var closing: (any NSObjectProtocol)?
     /// Asking the person at the Mac who they are, before it opens.
     private static var asking = false
 
@@ -46,8 +47,13 @@ enum PasswordsWindow {
             window.setFrameAutosaveName("Passwords")
             // Let go of when closed: the passwords seen go with it, and it
             // asks again next time.
-            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
-                MainActor.assumeIsolated { Self.window = nil }
+            // Taken off as it fires: each open makes a new window, and a new observer.
+            closing = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
+                MainActor.assumeIsolated {
+                    Self.window = nil
+                    if let closing = Self.closing { NotificationCenter.default.removeObserver(closing) }
+                    Self.closing = nil
+                }
             }
             Self.window = window
         }
@@ -133,7 +139,9 @@ private struct PasswordsView: View {
             if !found.contains(where: { $0.account == selection }) { selection = found.first?.account }
         }
         // Saved from a page while the window was open.
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            // Only this window's: any other window becoming key isn't a reason to read the list again.
+            guard note.object as? NSWindow === PasswordsWindow.window else { return }
             Task { await reload() }
         }
         .sheet(item: $draft) { draft in
