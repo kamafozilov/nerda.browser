@@ -467,7 +467,10 @@ extension Browser: WKNavigationDelegate {
 
         // An extension's sign-in coming back: the address is its answer,
         // handed to the extension, and never loaded.
-        if ExtensionAuth.intercept(url, browser: self, from: webView) { return .cancel }
+        if ExtensionAuth.intercept(url, browser: self, from: webView)
+            || ExtensionAuth.handOver(url, mainFrame: action.targetFrame?.isMainFrame ?? true, browser: self, from: webView) {
+            return .cancel
+        }
         // An extension's page sending its tab to a website: the tab makes
         // itself a page for the web (see Tab.go).
         if ["http", "https"].contains(url.scheme?.lowercased() ?? ""), action.targetFrame?.isMainFrame ?? true,

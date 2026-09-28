@@ -1905,7 +1905,12 @@ enum ExtensionShims {
             const missing = mine.filter((m) => !have.has(m));
             if (missing.length && !(await native("permissions.request", [missing]))) return false;
           }
-          return theirs.length || origins.length ? request({ permissions: theirs, origins }) : true;
+          if (!theirs.length && !origins.length) return true;
+          // Asked from a click on the extension's button: when filling in
+          // the tab it was given (see mend) cost WebKit the click, Nerda
+          // knows it was one and asks the same question.
+          return Promise.resolve(request({ permissions: theirs, origins })).catch((e) =>
+            /user gesture/i.test(String(e && e.message)) ? native("permissions.afterClick", [theirs, origins]) : Promise.reject(e));
         }));
         put(p, "getAll", (callback) => {
           const pr = (async () => {
@@ -2799,7 +2804,7 @@ enum ExtensionShims {
     /// courtesy to honest code, the shim runs beside the extension's own,
     /// so the one that counts is here. The manifest is the one WebKit
     /// already holds, not the file read again on every call.
-    private static func allowed(_ id: String, context: WKWebExtensionContext) -> Set<String> {
+    static func allowed(_ id: String, context: WKWebExtensionContext) -> Set<String> {
         let asked = (context.webExtension.manifest["permissions"] as? [Any] ?? []).compactMap { $0 as? String }
         return Set(asked + (UserDefaults.standard.stringArray(forKey: "extensions.granted.\(id)") ?? []))
     }
@@ -3269,6 +3274,41 @@ enum ExtensionShims {
             let had = UserDefaults.standard.stringArray(forKey: "extensions.granted.\(id)") ?? []
             UserDefaults.standard.set(Array(Set(had + wanted)).sorted(), forKey: "extensions.granted.\(id)")
             return true
+        case "permissions.afterClick":
+            // permissions.request for WebKit's own permissions and sites,
+            // made from a click on the extension's button whose moment
+            // WebKit lost while the shim filled in the tab it was given
+            // (see mend). Only just after that click, once, and only what
+            // the manifest names, asked as WebKit would ask it.
+            guard Extensions.justUsed(id) else {
+                throw Unsupported(what: "Invalid call to permissions.request(). Must be called during a user gesture.")
+            }
+            Extensions.clicked[id] = nil
+            Extensions.touched[id] = nil
+            let found = context.webExtension
+            let wanted = ((first as? [String]) ?? []).map { WKWebExtension.Permission(rawValue: $0) }
+            let origins = ((args.dropFirst().first as? [String]) ?? []).compactMap { try? WKWebExtension.MatchPattern(string: $0) }
+            let named = found.requestedPermissions.union(found.optionalPermissions)
+            // Sites as the manifest names them, optional ones included,
+            // which allRequestedMatchPatterns leaves out; extension pages
+            // never (see Extensions.fence).
+            let places = Set(found.allRequestedMatchPatterns.union(found.optionalPermissionMatchPatterns).map(\.string))
+            guard wanted.allSatisfy(named.contains),
+                  origins.allSatisfy({ places.contains($0.string) && !Extensions.reachesExtensions($0) }) else {
+                throw Unsupported(what: "Only permissions specified in the manifest may be requested.")
+            }
+            let missing = wanted.filter { context.permissionStatus(for: $0) != .grantedExplicitly }
+            let unreached = origins.filter { context.permissionStatus(for: $0) != .grantedExplicitly }
+            guard !missing.isEmpty || !unreached.isEmpty else { return true }
+            let every = unreached.contains { $0.matchesAllHosts || $0.matchesAllURLs }
+            let sites = every ? "every website" : unreached.map(\.string).sorted().joined(separator: ", ")
+            let question = unreached.isEmpty ? "asks for more access" : "wants to read and change \(sites)"
+            let detail = missing.isEmpty ? "Until you remove the extension." : missing.map(\.rawValue).sorted().joined(separator: ", ")
+            guard await owner.ask(question, detail: detail, context: context) else { return false }
+            for permission in missing { context.setPermissionStatus(.grantedExplicitly, for: permission) }
+            for pattern in unreached { context.setPermissionStatus(.grantedExplicitly, for: pattern) }
+            Extensions.fence(context)
+            return true
         case "permissions.remove":
             let gone = Set((first as? [String]) ?? [])
             let had = UserDefaults.standard.stringArray(forKey: "extensions.granted.\(id)") ?? []
@@ -3650,9 +3690,7 @@ enum ExtensionAuth {
     /// tab the flow was started in may finish it, or a window that tab's
     /// page opened, since some providers finish the sign-in in a popup.
     static func intercept(_ url: URL, browser: Browser, from webView: WKWebView) -> Bool {
-        guard url.scheme?.lowercased() == "https", let host = url.host()?.lowercased(), host.hasSuffix(".chromiumapp.org") else { return false }
-        let id = String(host.dropLast(".chromiumapp.org".count))
-        guard let entry = waiting[id], let from = browser.tab(for: webView),
+        guard let id = returning(url), let entry = waiting[id], let from = browser.tab(for: webView),
               from.id == entry.tab || from.opener == entry.tab
         else { return false }
         waiting.removeValue(forKey: id)
@@ -3661,6 +3699,32 @@ enum ExtensionAuth {
         // left behind, it would hold a redirect that never loads.
         if from.id != entry.tab { browser.close(from.id) }
         browser.close(entry.tab)
+        return true
+    }
+
+    /// The extension an address is the sign-in answer of, when it is one:
+    /// https://<id>.chromiumapp.org/…
+    static func returning(_ url: URL) -> String? {
+        guard url.scheme?.lowercased() == "https", let host = url.host()?.lowercased(),
+              host.hasSuffix(".chromiumapp.org") else { return nil }
+        let id = String(host.dropLast(".chromiumapp.org".count))
+        return id.isEmpty || id.contains(".") ? nil : id
+    }
+
+    /// The same answer with no launchWebAuthFlow waiting for it. Some
+    /// extensions open the provider's page with tabs.create and watch that
+    /// tab's address until it reaches their chromiumapp.org one, then close
+    /// the tab (Figma's does). Chrome fails onto an error page that carries
+    /// the address, and tabs.onUpdated reports it; so does Nerda here, at
+    /// once and without asking the network, for an installed extension that
+    /// asked for identity. What each extension sees of it is WebKit's call,
+    /// as for any address.
+    static func handOver(_ url: URL, mainFrame: Bool, browser: Browser, from webView: WKWebView) -> Bool {
+        guard mainFrame, let id = returning(url), let context = Extensions.shared.contexts[id],
+              ExtensionShims.allowed(id, context: context).contains("identity"),
+              let tab = browser.tab(for: webView)
+        else { return false }
+        tab.failure = (url, "No site at that address.")
         return true
     }
 }
