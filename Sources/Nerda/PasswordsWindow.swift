@@ -4,13 +4,30 @@ import SwiftUI
 
 /// Passwords (the sidebar's menu, Window, ⌥⌘L): every saved sign-in down the
 /// left, to search, and the one picked on the right, to see, copy, change,
-/// open or remove; more are added by hand with +. A password is seen, copied
-/// or changed only after Touch ID or the Mac's password, asked once for the
-/// next five minutes while the window stays open.
+/// open or remove; more are added by hand with +. It opens after Touch ID or
+/// the Mac's password, and asks again the next time it opens.
 enum PasswordsWindow {
     private static var window: NSWindow?
+    /// Asking the person at the Mac who they are, before it opens.
+    private static var asking = false
 
     static func show() {
+        if let window { return window.makeKeyAndOrderFront(nil) }
+        guard !asking else { return }
+        asking = true
+        Task {
+            defer { asking = false }
+            let context = LAContext()
+            if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) {
+                guard (try? await context.evaluatePolicy(.deviceOwnerAuthentication,
+                                                         localizedReason: "show your saved passwords")) == true
+                else { return }
+            }
+            open()
+        }
+    }
+
+    private static func open() {
         if window == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 540),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -88,7 +105,6 @@ private struct PasswordsView: View {
     @State private var seen: [Account: String] = [:]
     @State private var draft: Draft?
     @State private var removing: Account?
-    @State private var unlocked: Date?
     @FocusState private var searching: Bool
 
     private var vault: Vault { .shared }
@@ -255,27 +271,15 @@ private struct PasswordsView: View {
         withPassword(of: account) { draft = Draft(old: account, site: account.host, user: account.user, password: $0) }
     }
 
-    /// Its password, once the person at the Mac has said it is them.
+    /// Its password, from the keychain. The window opened only once the
+    /// person at the Mac said it was them.
     private func withPassword(of account: Account, _ use: @escaping (String) -> Void) {
         Task {
-            guard await unlock() else { return }
             guard let password = await vault.password(for: account) else {
                 return Browser.tell("Couldn't read the password", "The keychain didn't hand it over.")
             }
             use(password)
         }
-    }
-
-    private func unlock() async -> Bool {
-        if let unlocked, Date.now.timeIntervalSince(unlocked) < 300 { return true }
-        let context = LAContext()
-        if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) {
-            guard (try? await context.evaluatePolicy(.deviceOwnerAuthentication,
-                                                     localizedReason: "see your saved passwords")) == true
-            else { return false }
-        }
-        unlocked = .now
-        return true
     }
 
     private func remove(_ account: Account) {

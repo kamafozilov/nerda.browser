@@ -9,7 +9,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Added
 
-- Passwords, in the sidebar's menu, in Window, or with ⌥⌘L: every saved password by site, to search, see or copy after Touch ID or your Mac's password, change, remove, or add by hand. A copied password stays on this Mac, out of clipboard managers, and leaves the clipboard after a minute and a half.
+- Passwords, in the sidebar's menu, in Window, or with ⌥⌘L: every saved password by site, behind Touch ID or your Mac's password, to search, see, copy, change, remove, or add by hand. A copied password stays on this Mac, out of clipboard managers, and leaves the clipboard after a minute and a half.
 - Window › Task Manager: every tab, extension and part of Nerda with the memory and CPU it takes, and whether a tab is on screen, asleep or playing sound. Double-click a tab to go to it; End Process closes the tabs you chose.
 
 ### Changed
