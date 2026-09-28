@@ -77,7 +77,10 @@ struct CommandBar: View {
             .sorted { $0.lastSeen > $1.lastSeen }
             .map { Suggestion(title: $0.title, detail: "Switch to Tab", url: $0.site!, tab: $0.id) }
         guard !text.isEmpty, let url = Address.url(from: text) else {
-            return Array(Self.unique(open + history.recentSites(6).map(Self.suggestion))
+            // Through `found` too: the switcher is drawn again for each arrow
+            // key and hover, and a new bar starts with a new one.
+            let recent = found.rows(for: text) { history.recentSites(6).map(Self.suggestion) }
+            return Array(Self.unique(open + recent)
                 .prefix(Self.maxRows))
         }
         var rows = found.rows(for: text) { Self.typed(text, url: url, history: history) }

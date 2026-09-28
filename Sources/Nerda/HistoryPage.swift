@@ -8,6 +8,8 @@ struct HistoryPage: View {
     let browser: Browser
 
     @State private var query = ""
+    /// The query `lines` were last found for.
+    @State private var searched = ""
     /// Worked out as the page opens, as what is typed changes, and as pages
     /// come or go: not as the page is drawn, which a tab naming its page
     /// anywhere asked for again, sorting thousands of pages each time.
@@ -84,12 +86,19 @@ struct HistoryPage: View {
         .onAppear(perform: refresh)
         // Not left to come up again over the next history page.
         .onDisappear { browser.clearingHistory = false }
-        .onChange(of: query, refresh)
+        // What is typed waits for a pause: each refresh goes through up to
+        // 20,000 pages, too slow to do at every key.
+        .task(id: query) {
+            guard query != searched else { return }
+            try? await Task.sleep(for: .milliseconds(150))
+            if !Task.isCancelled { refresh() }
+        }
     }
 
     private func refresh() {
         // Found in History's index, as the address bar's are: latest first,
         // with titles and addresses already folded to look through.
+        searched = query
         let found = History.shared.pages(containing: [query.trimmingCharacters(in: .whitespaces)])
         lines = Self.lines(of: Self.days(of: found))
         hasPages = !History.shared.visits.isEmpty
