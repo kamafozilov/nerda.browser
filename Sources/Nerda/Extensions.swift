@@ -1,4 +1,5 @@
 import AppKit
+import IOKit.pwr_mgt
 import SwiftUI
 import WebKit
 
@@ -98,6 +99,31 @@ final class Extensions: NSObject {
     static let folder = Edition.folder.appending(path: "Extensions", directoryHint: .isDirectory)
     private static var list: URL { folder.appending(path: "installed.json") }
     static func folder(for id: String) -> URL { folder.appending(path: id, directoryHint: .isDirectory) }
+    /// Where a new copy is unpacked before it takes an extension's place:
+    /// a name of its own each time, so one left by a crash is never in the way.
+    private static func staging(for id: String) -> URL {
+        folder.appending(path: ".staging-\(id)-\(UUID().uuidString)", directoryHint: .isDirectory)
+    }
+
+    /// Puts a new copy of an extension where the old one is in one step:
+    /// the two folders swap places, so if anything fails the copy that works
+    /// stays where it was. The old one is left at `staged`, to be removed.
+    nonisolated static func replace(_ staged: URL, at target: URL) throws {
+        func rename(_ flags: Int32) -> Int32? {
+            staged.withUnsafeFileSystemRepresentation { from in
+                target.withUnsafeFileSystemRepresentation { to in
+                    guard let from, let to else { return EINVAL }
+                    return renamex_np(from, to, UInt32(flags)) == 0 ? nil : errno
+                }
+            }
+        }
+        guard var failed = rename(RENAME_EXCL) else { return }
+        if failed == EEXIST {
+            guard let swapFailed = rename(RENAME_SWAP) else { return }
+            failed = swapFailed
+        }
+        throw POSIXError(POSIXErrorCode(rawValue: failed) ?? .EIO)
+    }
 
     /// An extension's pages are served from chrome-extension://<id>/, the
     /// address they have in Chrome, with the same ids: servers let their own
@@ -294,6 +320,10 @@ final class Extensions: NSObject {
         guard let context = contexts[id] else { return }
         if ExtensionPopup.shared.extensionID == id { ExtensionPopup.shared.close() }
         try? controller.unload(context)
+        // What it kept going outside WebKit goes with it: its offscreen
+        // page, and a Mac kept awake on its behalf.
+        ExtensionShims.offscreen[id] = nil
+        if let held = ExtensionShims.awake.removeValue(forKey: id) { IOPMAssertionRelease(held) }
         // Its ports read as gone only once WebKit has had a turn.
         DispatchQueue.main.async { ExtensionNative.stopOrphans() }
         contexts[id] = nil
@@ -326,7 +356,8 @@ final class Extensions: NSObject {
             defer { busy = nil }
             do {
                 let crx = try await Crx.fetch(id)
-                let staged = Self.folder.appending(path: ".staging-\(id)", directoryHint: .isDirectory)
+                let staged = Self.staging(for: id)
+                defer { try? FileManager.default.removeItem(at: staged) }
                 // Checked where it is unpacked, off the main thread: the
                 // check copies and hashes the whole package.
                 try await Task.detached(priority: .userInitiated) {
@@ -361,13 +392,14 @@ final class Extensions: NSObject {
             return fail("That folder has no manifest.json.")
         }
         let id = "local-" + UUID().uuidString.prefix(8).lowercased()
-        let staged = Self.folder.appending(path: ".staging-\(id)", directoryHint: .isDirectory)
+        let staged = Self.staging(for: id)
         do {
             try Self.copy(source, to: staged)
         } catch {
             return fail("The extension couldn't be copied.")
         }
         Task {
+            defer { try? FileManager.default.removeItem(at: staged) }
             do { try await admit(staged, as: id, fromStore: false, source: source) } catch { fail(error.localizedDescription) }
         }
     }
@@ -376,7 +408,6 @@ final class Extensions: NSObject {
     private static func copy(_ source: URL, to staged: URL) throws {
         let files = FileManager.default
         try files.createDirectory(at: folder, withIntermediateDirectories: true)
-        try? files.removeItem(at: staged)
         try files.copyItem(at: source, to: staged)
         do {
             try ExtensionShims.prepare(staged, fresh: true)
@@ -392,10 +423,9 @@ final class Extensions: NSObject {
     func reload(_ id: String) {
         guard let item = installed.first(where: { $0.id == id }), reloading.insert(id).inserted else { return }
         let target = Self.folder(for: id)
-        let files = FileManager.default
         var staged: URL?
         if let path = item.source {
-            let copy = Self.folder.appending(path: ".staging-\(id)", directoryHint: .isDirectory)
+            let copy = Self.staging(for: id)
             do {
                 try Self.copy(URL(fileURLWithPath: path, isDirectory: true), to: copy)
             } catch {
@@ -405,33 +435,30 @@ final class Extensions: NSObject {
             staged = copy
         }
         Task {
-            defer { reloading.remove(id) }
+            defer {
+                if let staged { try? FileManager.default.removeItem(at: staged) }
+                reloading.remove(id)
+            }
             let found = try? await WKWebExtension(resourceBaseURL: staged ?? target)
-            if found == nil, let staged {
-                try? files.removeItem(at: staged)
+            if found == nil, staged != nil {
                 return fail("\(item.name) wasn't reloaded: its manifest couldn't be read.")
             }
             if let found {
                 let wants = Set(Self.grants(found, in: staged ?? target))
                 if !wants.isSubset(of: Set(item.permissions)) {
                     let name = [found.displayName ?? item.name, found.version].compactMap { $0 }.joined(separator: " ")
-                    guard await ask(install: name, wants: Self.describe(found, in: staged ?? target), icon: found.icon(for: CGSize(width: 64, height: 64))) else {
-                        if let staged { try? files.removeItem(at: staged) }
-                        return
-                    }
+                    guard await ask(install: name, wants: Self.describe(found, in: staged ?? target), icon: found.icon(for: CGSize(width: 64, height: 64))) else { return }
+                }
+            }
+            if let staged {
+                do {
+                    try Self.replace(staged, at: target)
+                } catch {
+                    return fail("\(item.name) couldn't be copied again from its folder.")
                 }
             }
             unload(id)
             errors[id] = nil
-            if let staged {
-                do {
-                    try? files.removeItem(at: target)
-                    try files.moveItem(at: staged, to: target)
-                } catch {
-                    try? files.removeItem(at: staged)
-                    return fail("\(item.name) couldn't be copied again from its folder.")
-                }
-            }
             if let found, let index = installed.firstIndex(where: { $0.id == id }) {
                 installed[index].name = found.displayName ?? installed[index].name
                 installed[index].version = found.version ?? installed[index].version
@@ -500,24 +527,15 @@ final class Extensions: NSObject {
     }
 
     /// Reads what was unpacked, asks, and on yes moves it into place and
-    /// loads it. On no, nothing is left behind.
+    /// loads it. The caller removes what is left at `staged`.
     private func admit(_ staged: URL, as id: String, fromStore: Bool, source: URL? = nil) async throws {
-        let files = FileManager.default
-        let found: WKWebExtension
-        do {
-            found = try await WKWebExtension(resourceBaseURL: staged)
-        } catch {
-            try? files.removeItem(at: staged)
-            throw error
-        }
+        let found = try await WKWebExtension(resourceBaseURL: staged)
         let name = found.displayName ?? id
         guard await ask(install: name, wants: Self.describe(found, in: staged), icon: found.icon(for: CGSize(width: 64, height: 64))) else {
-            try? files.removeItem(at: staged)
             return
         }
         let target = Self.folder(for: id)
-        try? files.removeItem(at: target)
-        try files.moveItem(at: staged, to: target)
+        try Self.replace(staged, at: target)
         let item = InstalledExtension(
             id: id, name: name, version: found.version ?? "?", enabled: true, fromStore: fromStore,
             permissions: Self.grants(found, in: target), source: source?.path
@@ -663,7 +681,8 @@ final class Extensions: NSObject {
         guard let url = parts.url, let version = await Self.newerVersion(at: url, than: item.version) else { return }
         do {
             let crx = try await Crx.fetch(item.id)
-            let staged = Self.folder.appending(path: ".staging-\(item.id)", directoryHint: .isDirectory)
+            let staged = Self.staging(for: item.id)
+            defer { try? FileManager.default.removeItem(at: staged) }
             try await Task.detached(priority: .utility) {
                 let zip = try Crx.verifiedZip(crx, id: item.id)
                 try Crx.unpack(zip, into: staged)
@@ -675,15 +694,10 @@ final class Extensions: NSObject {
             let wants = Set(Self.grants(found, in: staged))
             if !wants.isSubset(of: Set(item.permissions)) {
                 guard await ask(install: "An update to \(item.name)", wants: Self.describe(found, in: staged),
-                                icon: found.icon(for: CGSize(width: 64, height: 64))) else {
-                    try? FileManager.default.removeItem(at: staged)
-                    return
-                }
+                                icon: found.icon(for: CGSize(width: 64, height: 64))) else { return }
             }
+            try Self.replace(staged, at: Self.folder(for: item.id))
             unload(item.id)
-            let target = Self.folder(for: item.id)
-            try? FileManager.default.removeItem(at: target)
-            try FileManager.default.moveItem(at: staged, to: target)
             if let index = installed.firstIndex(where: { $0.id == item.id }) {
                 installed[index].version = found.version ?? version
                 installed[index].permissions = wants.sorted()

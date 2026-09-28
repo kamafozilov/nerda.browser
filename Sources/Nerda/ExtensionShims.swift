@@ -3119,9 +3119,10 @@ enum ExtensionShims {
         // A worker with ports open, kept up (see the shim's `hold`). Asked
         // of a worker that runs, WebKit only puts off unloading it: the same
         // worker still answers four minutes on, where it is gone after two
-        // without this.
+        // without this. One turned off or removed is never started again by
+        // a keep that arrives after it went.
         case "background.keep":
-            if context.webExtension.hasBackgroundContent { context.loadBackgroundContent { _ in } }
+            if owner.contexts[id] === context, context.webExtension.hasBackgroundContent { context.loadBackgroundContent { _ in } }
             return nil
         // Whether this extension was loaded before in this run of the
         // browser — an "install" then is really a restart (see the shim).
