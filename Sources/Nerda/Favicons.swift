@@ -31,6 +31,9 @@ final class Favicons {
 
     private var icons: [String: Icon] = [:]
     private var inFlight: [String: Task<Void, Never>] = [:]
+    /// Icons pages named that failed, not asked again this run: the page
+    /// names the same one at every load.
+    private var failedNamed: Set<URL> = []
     /// How many views show each site's icon right now.
     private var shown: [String: Int] = [:]
     /// Sites no view shows any more, the longest gone first.
@@ -118,7 +121,9 @@ final class Favicons {
         shown[site] = count > 1 ? count - 1 : nil
         guard count == 1 else { return }
         gone.append(site)
-        if gone.count > Self.goneLimit { icons[gone.removeFirst()]?.image = nil }
+        // The whole entry, not just its image: a site's Icon is only watched
+        // by views that also show it, so none still holds this one.
+        if gone.count > Self.goneLimit { icons[gone.removeFirst()] = nil }
     }
 
     /// The site's /favicon.ico, or `icon` when the page names its own; that
@@ -129,7 +134,7 @@ final class Favicons {
         // Two rows asking for the same site share one fetch.
         if let task = inFlight[site] { await task.value }
         let icon = icon(site)
-        guard icon.image == nil, named != nil || !icon.failed,
+        guard icon.image == nil, named.map({ !failedNamed.contains($0) }) ?? !icon.failed,
               let url = named ?? URL(string: site + "/favicon.ico") else { return }
 
         let task = Task {
@@ -147,6 +152,7 @@ final class Favicons {
                 if keep, let file { await Self.write(found.smaller ?? data, to: file) }
             } else {
                 icon.failed = true
+                if let named { self.failedNamed.insert(named) }
                 // Kept on disk, as an empty file, only when the site answered
                 // without one: offline, it is asked again next time.
                 if keep, named == nil, fetched != nil, let file { await Self.write(Data(), to: file) }

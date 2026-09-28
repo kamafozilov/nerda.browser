@@ -94,6 +94,7 @@ final class Tab: Identifiable {
     @ObservationIgnored private var observations: [NSObject] = []
     /// The page's top edge, as last sampled (`recolor`): by WebKit, or here.
     @ObservationIgnored private var topColor: NSColor?
+    @ObservationIgnored private var recoloring: Task<Void, Never>?
     /// The address last put in history, so a page is counted once per visit,
     /// not again when it wakes or reloads.
     @ObservationIgnored private var recorded: URL?
@@ -217,6 +218,11 @@ final class Tab: Identifiable {
         // extension's configuration, and the web only outside one: going
         // from one kind to the other, the page is made anew.
         if let page, madeFor != Extensions.host(of: url) {
+            // Its PageSlot too, as in sleep(): the slot holds the page until
+            // PageView next updates, which a tab out of sight may not do for
+            // long, and its sound with it until then.
+            page.setAllMediaPlaybackSuspended(true)
+            page.superview?.superview?.removeFromSuperview()
             page.removeFromSuperview()
             observations = []
             self.page = nil
@@ -380,7 +386,13 @@ final class Tab: Identifiable {
     /// reach Nerda's own world too, where the page can't see the handler.
     private static let pageErrors = WKUserScript(source: """
         if (/^(localhost|.+\\.localhost|127(\\.\\d+){3}|\\[::1\\])$/.test(location.hostname)) {
-            const tell = () => webkit.messageHandlers.pageError.postMessage(null);
+            // Counted and told at most every 250 ms: a page throwing in its
+            // render loop would otherwise redraw the bar at every frame.
+            let count = 0;
+            const tell = () => {
+                if (count++) return;
+                setTimeout(() => { webkit.messageHandlers.pageError.postMessage(count); count = 0; }, 250);
+            };
             addEventListener('error', tell);
             addEventListener('unhandledrejection', tell);
         }
@@ -392,7 +404,7 @@ final class Tab: Identifiable {
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.frameInfo.isMainFrame, let page = message.webView,
                   let tab = (page.uiDelegate as? Browser)?.tab(for: page), tab.isOnThisMac else { return }
-            tab.errors += 1
+            tab.errors += message.body as? Int ?? 1
         }
     }
 
@@ -445,7 +457,12 @@ final class Tab: Identifiable {
         guard let page, topColor != nil, !page.isLoading else { return recolor() }
         let edge = WKSnapshotConfiguration()
         edge.rect = CGRect(x: 0, y: 0, width: page.bounds.width, height: 1)
-        Task {
+        // One at a time, and only once the colours settle: both keys change
+        // together, and a late snapshot could otherwise land after a newer one.
+        recoloring?.cancel()
+        recoloring = Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
             let strip = try? await page.takeSnapshot(configuration: edge)
             guard self.page === page else { return }
             topColor = strip.flatMap(Self.color(across:))
@@ -671,13 +688,16 @@ final class Tab: Identifiable {
     private static let findIcon = """
         const link = document.querySelector('link[rel~="icon"]');
         const href = link ? link.href : new URL('/favicon.ico', location.href).href;
+        // Only an icon the page names is worth trying again from outside it;
+        // a failed /favicon.ico has already failed there once.
+        const named = link ? href : null;
         try {
             const response = await fetch(href);
-            if (!response.ok) return href;
+            if (!response.ok) return named;
             let bytes = '';
             for (const byte of new Uint8Array(await response.arrayBuffer())) bytes += String.fromCharCode(byte);
             return 'data:;base64,' + btoa(bytes);
-        } catch { return href; }
+        } catch { return named; }
         """
 
     private static let processPool = WKWebViewConfiguration().value(forKey: "processPool")

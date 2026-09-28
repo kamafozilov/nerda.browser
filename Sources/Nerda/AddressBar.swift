@@ -71,7 +71,7 @@ struct AddressBar: View {
             }
             .padding(.leading, 4)
             if let tab, tab.isOnThisMac {
-                DevButtons(browser: browser, errors: tab.errors)
+                DevButtons(browser: browser)
                     .padding(.leading, 4)
             }
             if !browser.isPrivate {
@@ -208,10 +208,12 @@ private struct AddressField: View {
 /// the console, with the page's errors counted on it, picking an element,
 /// a reload past the cache, and Responsive Design Mode.
 private struct DevButtons: View {
+    /// Read from here, not handed in by the bar, as LoadLine's progress:
+    /// errors can come many times a second, and only this needs drawing again.
     let browser: Browser
-    let errors: Int
 
     var body: some View {
+        let errors = browser.selected?.errors ?? 0
         HStack(spacing: 2) {
             BarButton(icon: "terminal", help: "JavaScript Console  ⌥⌘J") { browser.selected?.inspect(.console) }
                 .overlay(alignment: .topTrailing) {
