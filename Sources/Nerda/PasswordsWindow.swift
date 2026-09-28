@@ -16,7 +16,11 @@ enum PasswordsWindow {
                                   backing: .buffered, defer: false)
             window.title = "Passwords"
             window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: PasswordList())
+            // As big as it was left, not as big as the list: a search that
+            // finds little would shrink it.
+            let content = NSHostingView(rootView: PasswordList())
+            content.sizingOptions = [.minSize]
+            window.contentView = content
             if !window.setFrameUsingName("Passwords") { window.center() }
             window.setFrameAutosaveName("Passwords")
             // Let go of when closed: the passwords seen go with it, and it
@@ -106,18 +110,26 @@ private struct PasswordList: View {
             if names.isEmpty {
                 ContentUnavailableView("No Saved Passwords", systemImage: "key",
                                        description: Text("Passwords you save as you sign in, or bring in with File › Import Passwords…, are kept here."))
+                    .frame(maxHeight: .infinity)
             } else if sites.isEmpty {
                 ContentUnavailableView.search(text: query)
+                    .frame(maxHeight: .infinity)
             } else {
+                // Each site's name heads its accounts as a row of the list,
+                // not a section header, which would stay stuck at the top.
                 List {
                     ForEach(sites, id: \.host) { site in
-                        Section(site.host) {
-                            ForEach(site.accounts, id: \.self) { account in row(account) }
-                        }
+                        Text(site.host)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, site.host == sites.first?.host ? 0 : 10)
+                            .listRowSeparator(.hidden)
+                        ForEach(site.accounts, id: \.self) { account in row(account) }
                     }
                 }
             }
         }
+        .frame(minWidth: 420, minHeight: 300)
         .task { await reload() }
         // Saved from a page while the window was open.
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
