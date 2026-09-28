@@ -142,7 +142,16 @@ enum ExtensionNative {
             let previous = pipe.onExit
             pipe.onExit = {
                 previous?()
-                DispatchQueue.main.async { pipes[ObjectIdentifier(pipe)] = nil }
+                // WebKit never clears a port's handlers, and they hold the
+                // pipe and the port, which hold them back: every ending
+                // (host exiting, disconnect, stopOrphans) comes through
+                // here, so the cycle is broken here.
+                DispatchQueue.main.async {
+                    pipes[ObjectIdentifier(pipe)] = nil
+                    port.messageHandler = nil
+                    port.disconnectHandler = nil
+                    pipe.onMessage = nil
+                }
             }
         }
     }
@@ -158,6 +167,9 @@ nonisolated final class HostPipe: @unchecked Sendable {
     var onMessage: ((Any) -> Void)?
     var onExit: (() -> Void)?
     private var waiters: [CheckedContinuation<Reply, Error>] = []
+    /// Messages that came before anyone asked: a one-shot reply can beat
+    /// `readOne` registering its waiter.
+    private var unread: [Any] = []
 
     /// JSON read from the host, handed on once: nothing else holds it.
     private struct Reply: @unchecked Sendable { let value: Any? }
@@ -206,8 +218,14 @@ nonisolated final class HostPipe: @unchecked Sendable {
     func readOne() async throws -> Any? {
         try await withCheckedThrowingContinuation { continuation in
             lock.lock()
-            waiters.append(continuation)
-            lock.unlock()
+            if unread.isEmpty {
+                waiters.append(continuation)
+                lock.unlock()
+            } else {
+                let message = unread.removeFirst()
+                lock.unlock()
+                continuation.resume(returning: Reply(value: message))
+            }
         }.value
     }
 
@@ -229,9 +247,13 @@ nonisolated final class HostPipe: @unchecked Sendable {
             handed.append((waiters.removeFirst(), message))
         }
         let rest = messages.dropFirst(handed.count)
+        let handler = onMessage
+        // ponytail: unread is unbounded, but only a one-shot pipe (no
+        // handler) keeps anything, and it is stopped after one reply.
+        if handler == nil { unread.append(contentsOf: rest) }
         lock.unlock()
         handed.forEach { $0.0.resume(returning: Reply(value: $0.1)) }
-        rest.forEach { onMessage?($0) }
+        if let handler { rest.forEach { handler($0) } }
     }
 
     private func finish() {

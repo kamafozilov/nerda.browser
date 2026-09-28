@@ -227,6 +227,16 @@ final class History {
         changed()
     }
 
+    /// Several pages taken out at once, for an extension's deleteRange: the
+    /// index is rebuilt once rather than updated per page.
+    func remove(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        settle()
+        for url in urls { visits.removeValue(forKey: url) }
+        built = nil
+        changed()
+    }
+
     /// Pages last visited from then on, for Delete browsing data.
     // ponytail: only a page's last visit is kept, so one visited before and
     // again since goes whole. Keep every visit's date if that matters.

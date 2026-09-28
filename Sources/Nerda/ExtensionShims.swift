@@ -896,7 +896,9 @@ enum ExtensionShims {
         const now = Date.now();
         for (const [k, v] of map) if (now - v.at > 5000) map.delete(k);
         const n = ((map.get(key) || {}).n || 0) + by;
-        if (n > 0) { if (map.size > 200) map.clear(); map.set(key, { n, at: now }); } else map.delete(key);
+        // The oldest pairing goes to make room, not all of them: clearing the
+        // lot in a burst would let a message be handled twice.
+        if (n > 0) { if (!map.has(key) && map.size >= 200) map.delete(map.keys().next().value); map.set(key, { n, at: now }); } else map.delete(key);
       };
       const pending = (map, key) => { const v = map.get(key); return !!v && Date.now() - v.at <= 5000 && v.n > 0; };
       let relayTo = null;
@@ -1044,6 +1046,8 @@ enum ExtensionShims {
           // A relayed copy's answer reaches no one: said to pass, so the pages
           // WebKit did bring it to don't leave the sender waiting on it.
           if (!inContent) tell(message, !viaRelay && (keep || settled) ? "answers" : "passes", true);
+          // A relayed copy has no one to answer, so nothing to wait for.
+          if (viaRelay) return undefined;
           if (keep || settled) return keep && !settled ? true : undefined;
           // Nothing here answers it. In Chrome that leaves the question to
           // the extension's other pages and its worker; WebKit takes the
@@ -1247,9 +1251,12 @@ enum ExtensionShims {
       // instead of a password, and without it the site's request failed. So
       // the worker hands it to those frames as well, and the first answer
       // from either wins.
+      // Only resources the manifest makes web accessible can be framed in a
+      // website; without any there are no frames worth asking about.
+      const framable = (() => { try { return (runtime.getManifest().web_accessible_resources || []).length > 0; } catch (e) { return false; } })();
       const alsoFramed = (answer, tabId, message, options) => {
         const nav = chrome.webNavigation;
-        if (!nav || typeof nav.getAllFrames !== "function" || typeof tabId !== "number") return answer;
+        if (!framable || !nav || typeof nav.getAllFrames !== "function" || typeof tabId !== "number") return answer;
         const own = runtime.getURL("");
         const wanted = options && typeof options.frameId === "number" ? options.frameId : null;
         const framed = Promise.resolve(nav.getAllFrames({ tabId })).then((frames) => {
@@ -1363,6 +1370,13 @@ enum ExtensionShims {
             state = now;
             for (const g of changed.listeners) try { g(now); } catch (e) { setTimeout(() => { throw e; }); }
           }).catch(() => {}), 15000);
+        };
+        // Asking stops when the last listener goes.
+        const drop = changed.removeListener;
+        changed.removeListener = (f) => {
+          const gone = drop(f);
+          if (timer && !changed.listeners.size) { clearInterval(timer); timer = null; }
+          return gone;
         };
         put(chrome.idle, "onStateChanged", changed);
         put(chrome.idle, "setDetectionInterval", (seconds) => { every = Math.max(15, Number(seconds) || 60); });
@@ -1812,12 +1826,23 @@ enum ExtensionShims {
         const seesTabs = (() => { try { return (runtime.getManifest().permissions || []).includes("tabs"); } catch (e) { return false; } })();
         const isTab = (t) => t && typeof t === "object" && typeof t.id === "number";
         // Mends in place; a promise only when the browser has to be asked.
+        // Every listener gets its own copies of an event's tabs, so the
+        // browser is asked once for all of them and each mends its own.
+        const describing = new Map();
         const mend = (list) => {
           const tabs = list.filter(isTab);
           for (const t of tabs) if (t.groupId === undefined) try { t.groupId = -1; } catch (e) {}
           const blind = seesTabs ? tabs.filter((t) => (!t.url || !t.favIconUrl) && t.index >= 0) : [];
           if (!blind.length) return null;
-          return native("tabs.describe", [blind.map((t) => t.index)]).then((info) => {
+          const key = blind.map((t) => t.index).join(",");
+          let asked = describing.get(key);
+          if (!asked) {
+            asked = native("tabs.describe", [blind.map((t) => t.index)]);
+            describing.set(key, asked);
+            const done = () => { describing.delete(key); };
+            asked.then(done, done);
+          }
+          return asked.then((info) => {
             blind.forEach((t, i) => {
               const d = info && info[i];
               if (!d) return;
@@ -1878,7 +1903,10 @@ enum ExtensionShims {
           fill("url", before ? before.url !== tab.url : info.status === "loading");
           fill("title", !!before && before.title !== tab.title);
           fill("favIconUrl", !!before && before.favIconUrl !== tab.favIconUrl);
+          // ponytail: the 200 tabs heard from last; older ones are forgotten.
+          state.delete(tab.id);
           state.set(tab.id, { url: tab.url, title: tab.title, favIconUrl: tab.favIconUrl });
+          if (state.size > 200) state.delete(state.keys().next().value);
         } : null;
         mendArgs(chrome.tabs.onUpdated, [2], told);
         mendArgs(chrome.action && chrome.action.onClicked, [0]);
@@ -2758,7 +2786,16 @@ enum ExtensionShims {
       // Errors in an extension's own pages and worker are told to the browser,
       // which lists them — the only window onto a worker there is.
       if (root.addEventListener) {
-        const tell = (text) => { try { native("debug.error", [String(text).slice(0, 2000)]).catch(() => {}); } catch (e) {} };
+        // Each text told once: a listener that throws on every event would
+        // otherwise ask the browser each time.
+        // ponytail: the first 100 distinct texts are remembered; past that, all are told.
+        const heard = new Set();
+        const tell = (text) => {
+          text = String(text).slice(0, 2000);
+          if (heard.has(text)) return;
+          if (heard.size < 100) heard.add(text);
+          try { native("debug.error", [text]).catch(() => {}); } catch (e) {}
+        };
         root.addEventListener("error", (e) => tell((e.message || "error") + " @ " + String(e.filename || "").split("/").slice(3).join("/") + ":" + e.lineno));
         root.addEventListener("unhandledrejection", (e) => tell("unhandled: " + (e.reason && ((e.reason.message || "") + " \u2014 " + (e.reason.stack || "")) || e.reason)));
         // In a test run, what the extension says went wrong, too.
@@ -2958,9 +2995,7 @@ enum ExtensionShims {
             let spec = first as? [String: Any] ?? [:]
             let start = Date(timeIntervalSince1970: (spec["startTime"] as? Double ?? 0) / 1000)
             let end = Date(timeIntervalSince1970: (spec["endTime"] as? Double ?? 0) / 1000)
-            for page in History.shared.visits.values where page.last >= start && page.last <= end {
-                History.shared.remove(page.url)
-            }
+            History.shared.remove(History.shared.visits.values.filter { $0.last >= start && $0.last <= end }.map(\.url))
             return nil
         case "history.deleteAll":
             History.shared.clear()

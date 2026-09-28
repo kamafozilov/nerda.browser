@@ -454,3 +454,22 @@ private let contentWorld = """
     #expect(blind.exception?.toString() == nil)
     #expect(blind.evaluateScript("JSON.stringify(heard)").toString() == #"[["",null,null,""]]"#)
 }
+
+/// A native host's one reply is kept even when it comes before anyone reads
+/// it: dropped, sendNativeMessage waited for ever and the host ran on.
+@Test func aHostsReplyBeforeTheReadIsKept() async throws {
+    // cat, given "-" where a host is given its caller, sends back what it reads.
+    let pipe = HostPipe(program: URL(fileURLWithPath: "/bin/cat"), origin: "-")
+    try pipe.start()
+    defer { pipe.stop() }
+    try pipe.write(["a": 1])
+    try await Task.sleep(for: .milliseconds(300))
+    let reply = try await withThrowingTaskGroup(of: Int?.self) { group in
+        group.addTask { (try await pipe.readOne() as? [String: Int])?["a"] }
+        // Stopped, a host that never answers ends the read with an error.
+        group.addTask { try await Task.sleep(for: .seconds(5)); pipe.stop(); return nil }
+        defer { group.cancelAll() }
+        return try await group.next() ?? nil
+    }
+    #expect(reply == 1)
+}

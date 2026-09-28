@@ -32,9 +32,16 @@ enum ExtensionSocket {
         connection.onEnd = { open[key] = nil }
     }
 
+    /// An unloaded extension leaves its ports disconnected without calling
+    /// their disconnect handlers (see ExtensionNative.stopOrphans); their
+    /// sockets are closed here.
+    static func stopOrphans() {
+        for connection in open.values where connection.port.isDisconnected { connection.end(tellingPort: false) }
+    }
+
     @MainActor
     final class Connection: NSObject, URLSessionWebSocketDelegate {
-        private let port: WKWebExtension.MessagePort
+        let port: WKWebExtension.MessagePort
         private let origin: String
         private var task: URLSessionWebSocketTask?
         private var ended = false
@@ -116,7 +123,9 @@ enum ExtensionSocket {
         }
 
         private func post(_ message: [String: Any]) {
-            guard !port.isDisconnected else { return }
+            // A port gone without its disconnect handler (an unloaded
+            // extension) would otherwise keep the socket open for nothing.
+            guard !port.isDisconnected else { end(tellingPort: false); return }
             port.sendMessage(message, completionHandler: nil)
         }
 
@@ -126,7 +135,7 @@ enum ExtensionSocket {
             end(tellingPort: true)
         }
 
-        private func end(tellingPort: Bool) {
+        func end(tellingPort: Bool) {
             guard !ended else { return }
             ended = true
             task?.cancel(with: .goingAway, reason: nil)

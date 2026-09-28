@@ -129,7 +129,12 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         guard measuring == nil else { return }
         if !shown { firstMeasure() }
         ticks = 0
-        measuring = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+        measure(every: 0.25)
+    }
+
+    private func measure(every interval: TimeInterval) {
+        measuring?.invalidate()
+        measuring = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.grow() }
         }
     }
@@ -274,7 +279,13 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// page that settles doesn't set it rocking.
     private var ticks = 0
     private func grow() {
-        guard shown, let web, let popover else { return }
+        guard let web, let popover else {
+            // Closed: nothing left to follow.
+            measuring?.invalidate()
+            measuring = nil
+            return
+        }
+        guard shown else { return }
         ticks += 1
         if ticks <= 8 {
             web.evaluateJavaScript("(\(ExtensionPopup.preferred))()") { [weak self] value, _ in
@@ -287,8 +298,10 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
             }
             return
         }
-        // After its first six seconds, once a second is enough to follow it.
-        if ticks > 24, ticks % 4 != 0 { return }
+        // After its first six seconds, once a second is enough to follow
+        // it: the timer slows down rather than waking four times a second
+        // for nothing while the popup stays open.
+        if ticks == 24 { measure(every: 1) }
         // A width the page names for itself, remembered as the first
         // measure does, is followed both ways: Bitwarden's narrow setting
         // shrinks it.
@@ -307,7 +320,12 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
 
     func webViewDidClose(_ webView: WKWebView) { close() }
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { follow() }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // An old popup's page finishing as it closes would start the
+        // measuring again for a popup that's gone.
+        guard webView === web else { return }
+        follow()
+    }
 
     /// A link that asks for a new window becomes a tab, and the popup goes —
     /// the way it does in Chrome when you follow a link out of one.

@@ -344,6 +344,11 @@ final class Extensions: NSObject {
         for id in order where !current.contains(id) {
             if let adapter = adapters[id] { controller.didCloseTab(adapter, windowIsClosing: false) }
             adapters[id] = nil
+            // A closed tab's own popups (action.setPopup with a tabId)
+            // would otherwise stay for as long as the browser runs.
+            if !ExtensionShims.popups.isEmpty {
+                for key in ExtensionShims.popups.keys { ExtensionShims.popups[key]?[id.uuidString] = nil }
+            }
         }
         for tab in now where !before.contains(tab.id) {
             controller.didOpenTab(adapter(for: tab))
@@ -461,7 +466,7 @@ final class Extensions: NSObject {
         ExtensionShims.offscreen[id] = nil
         if let held = ExtensionShims.awake.removeValue(forKey: id) { IOPMAssertionRelease(held) }
         // Its ports read as gone only once WebKit has had a turn.
-        DispatchQueue.main.async { ExtensionNative.stopOrphans() }
+        DispatchQueue.main.async { ExtensionNative.stopOrphans(); ExtensionSocket.stopOrphans() }
         contexts[id] = nil
         actionsChanged += 1
     }
@@ -696,6 +701,7 @@ final class Extensions: NSObject {
     func remove(_ id: String) {
         unload(id)
         errors[id] = nil
+        ExtensionShims.popups[id] = nil
         Self.setSettings([:], for: id)
         UserDefaults.standard.removeObject(forKey: "extensions.granted.\(id)")
         UserDefaults.standard.removeObject(forKey: Self.newTabKey(id))
