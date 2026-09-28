@@ -11,6 +11,12 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - Window › Task Manager: every tab, extension and part of Nerda with the memory and CPU it takes, and whether a tab is on screen, asleep or playing sound. Double-click a tab to go to it; End Process closes the tabs you chose.
 
+### Fixed
+
+- Extensions that keep a line open to their background, as password managers do, go on answering after a moment unused, and their button opens at the first click, where after two minutes their pages and the icons they add to sign-in fields stopped doing anything.
+- A site that takes more than a minute to answer opens once it answers, where Nerda gave up after a minute and left the page blank.
+- A secure (https) site can send you to an extension's page that the extension lets it open, as a sign-in done on the extension maker's site does, where the page failed to load.
+
 ## [0.0.10] - 2026-09-26
 
 ### Added

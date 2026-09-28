@@ -1942,8 +1942,15 @@ enum ExtensionShims {
       // never mentions still take late listeners without throwing — they
       // just aren't heard. (Request events are left alone: a listener for
       // all of them would wake the worker for every request.)
+      //
+      // A click that woke the worker can come before the extension's
+      // listener for it: NordPass adds its button's once it has read its
+      // state, and its first click after a sleep went nowhere. So a click,
+      // a key or a menu item nobody heard yet is kept a few seconds and
+      // handed to the first listener that joins.
       if (background) {
         const mentioned = new Set(__NERDA_EVENTS__);
+        const clicks = /^((action|browserAction|pageAction|contextMenus|menus)\.onClicked|commands\.onCommand)$/;
         for (const space of Object.keys(chrome)) {
           if (space === "webRequest") continue;
           let ns; try { ns = chrome[space]; } catch (e) { continue; }
@@ -1956,9 +1963,17 @@ enum ExtensionShims {
             if (!target || typeof target.addListener !== "function" || target.listeners) continue;
             const add = target.addListener.bind(target), remove = target.removeListener.bind(target);
             const late = new Set();
+            const keeps = clicks.test(space + "." + key);
+            const direct = new Set();
+            let held = [];
             if (mentioned.has(space + "." + key)) {
               try {
                 add(function (...args) {
+                  if (keeps && !late.size && !direct.size) {
+                    held.push(args);
+                    setTimeout(() => { held = held.filter((a) => a !== args); }, 5000);
+                    return;
+                  }
                   let answer;
                   for (const f of [...late]) { try { const r = f(...args); if (r !== undefined) answer = r; } catch (e) { setTimeout(() => { throw e; }); } }
                   return answer;
@@ -1966,10 +1981,13 @@ enum ExtensionShims {
               } catch (e) {}
             }
             put(target, "addListener", (listener, ...rest) => {
-              try { return add(listener, ...rest); }
+              try { add(listener, ...rest); direct.add(listener); }
               catch (e) { if (/startup/i.test(String(e && e.message))) late.add(listener); else throw e; }
+              const kept = held;
+              held = [];
+              for (const args of kept) setTimeout(() => listener(...args));
             });
-            put(target, "removeListener", (listener) => { late.delete(listener); try { remove(listener); } catch (e) {} });
+            put(target, "removeListener", (listener) => { late.delete(listener); direct.delete(listener); try { remove(listener); } catch (e) {} });
           }
         }
       }
@@ -2030,10 +2048,27 @@ enum ExtensionShims {
         const wrapped = new WeakMap();
         // The worker's sender is the bare origin, with no slash after it.
         const fromOwn = (port) => !!port && !!port.sender && (String(port.sender.url) + "/").startsWith(own);
+        // WebKit unloads a worker with ports open to it once it hasn't posted
+        // on one for two minutes. NordPass's pages and content scripts each
+        // hold one for its state, and nothing on them answered any more. So
+        // a worker with ports open asks the browser to keep it up, which
+        // doesn't start it over. (A message of its own on the ports would
+        // keep it too, but a content script would hear it.)
+        const open = new Set();
+        let keeping = null;
+        const hold = (port) => {
+          if (!background || !port || open.has(port) || !port.onDisconnect) return;
+          open.add(port);
+          port.onDisconnect.addListener(() => {
+            open.delete(port);
+            if (!open.size) { clearInterval(keeping); keeping = null; }
+          });
+          if (!keeping) keeping = setInterval(() => native("background.keep", []).catch(() => {}), 20000);
+        };
         put(onConnect, "addListener", (listener, ...rest) => {
           if (typeof listener !== "function") return add.call(onConnect, listener, ...rest);
           let w = wrapped.get(listener);
-          if (!w) { w = (port) => listener(fromOwn(port) ? number(port) : port); wrapped.set(listener, w); }
+          if (!w) { w = (port) => { hold(port); return listener(fromOwn(port) ? number(port) : port); }; wrapped.set(listener, w); }
           return add.call(onConnect, w, ...rest);
         });
         put(onConnect, "removeListener", (listener) => remove.call(onConnect, wrapped.get(listener) || listener));
@@ -2960,6 +2995,13 @@ enum ExtensionShims {
                 if attempt < 2 { try? await Task.sleep(for: .milliseconds(400)) }
             }
             owner.revive(id, because: "its worker wouldn't start")
+            return nil
+        // A worker with ports open, kept up (see the shim's `hold`). Asked
+        // of a worker that runs, WebKit only puts off unloading it: the same
+        // worker still answers four minutes on, where it is gone after two
+        // without this.
+        case "background.keep":
+            if context.webExtension.hasBackgroundContent { context.loadBackgroundContent { _ in } }
             return nil
         // Whether this extension was loaded before in this run of the
         // browser — an "install" then is really a restart (see the shim).
