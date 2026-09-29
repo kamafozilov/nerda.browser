@@ -251,6 +251,46 @@ private let somewhere = URL(string: "https://example.com")!
     #expect(page == nil)
 }
 
+/// A stale UI action can retain a closed tab, but must not retain its page.
+@MainActor
+@Test func aRetainedClosedTabLetsItsPageGo() {
+    let browser = Browser()
+    let tab = browser.open(URL(string: "about:blank")!)
+    browser.close(tab.id)
+    #expect(tab.page == nil)
+    #expect(tab.isAsleep)
+}
+
+/// Switching reuses the stages; sleeping and closing release their whole slot.
+@MainActor
+@Test func pageSlotsFollowTheOpenAwakeTabs() {
+    let browser = Browser()
+    let first = Tab(url: URL(string: "about:blank")!)
+    let second = Tab(url: URL(string: "about:blank")!)
+    browser.add([first, second])
+    let view = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    func show(_ selected: Nerda.Tab?) {
+        PageView(tabs: browser.tabs, selected: selected, takesFocus: false).updatePages(in: view)
+    }
+    show(first)
+    let firstPage = first.webView, secondPage = second.webView
+    let firstStage = firstPage.superview, secondStage = secondPage.superview
+    #expect(view.subviews.count == 2)
+    #expect(!firstPage.isHiddenOrHasHiddenAncestor)
+    #expect(secondPage.isHiddenOrHasHiddenAncestor)
+    show(second)
+    #expect(firstPage.superview === firstStage && secondPage.superview === secondStage)
+    #expect(firstPage.isHiddenOrHasHiddenAncestor)
+    #expect(!secondPage.isHiddenOrHasHiddenAncestor)
+    first.sleep()
+    show(second)
+    #expect(view.subviews.count == 1)
+    browser.close(second.id)
+    show(nil)
+    #expect(view.subviews.isEmpty)
+    #expect(secondPage.superview == nil)
+}
+
 /// …also from the window, where the sidebar's rows showed it.
 @MainActor
 @Test func closedTabsAreFreedFromTheWindow() async throws {
@@ -259,7 +299,7 @@ private let somewhere = URL(string: "https://example.com")!
                           styleMask: [.titled, .resizable], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
     window.contentView = NSHostingView(rootView: BrowserView(browser: browser, window: window))
-    window.orderFront(nil)
+    window.orderBack(nil)
     defer { window.close() }
     weak var tab: Nerda.Tab?
     weak var page: WKWebView?
@@ -285,7 +325,7 @@ private let somewhere = URL(string: "https://example.com")!
                           styleMask: [.titled, .resizable], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
     window.contentView = NSHostingView(rootView: BrowserView(browser: browser, window: window))
-    window.orderFront(nil)
+    window.orderBack(nil)
     defer { window.close() }
     weak var page: WKWebView?
     autoreleasepool {
@@ -297,6 +337,40 @@ private let somewhere = URL(string: "https://example.com")!
     autoreleasepool { browser.tabs.first { $0.page === page }?.sleep() }
     for _ in 0..<50 where page != nil { try await Task.sleep(for: .milliseconds(100)) }
     #expect(page == nil)
+}
+
+/// Switching tabs costs about the same with hundreds in the sidebar as with
+/// ten: only the rows in sight are made again. Made all at once, 400 took
+/// fifteen times as long as ten, 45 ms a switch.
+@MainActor
+@Test func switchingTabsDoesNotSlowWithManyTabs() async throws {
+    var medians: [Double] = []
+    for count in [10, 400] {
+        let browser = Browser()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: BrowserView(browser: browser, window: window))
+        window.orderBack(nil)
+        defer { window.close() }
+        browser.add((0..<count).map { n in
+            Nerda.Tab(restoring: Session.Tab(url: URL(string: "https://site\(n).example")!, title: "Page \(n)",
+                                             state: nil, zoom: 1, pinned: nil, home: nil))
+        })
+        let a = browser.open(URL(string: "data:text/html,a")!), b = browser.open(URL(string: "data:text/html,b")!)
+        try await Task.sleep(for: .seconds(1))
+        var times: [Double] = []
+        for n in 0..<40 {
+            let start = Date.now
+            browser.select(n.isMultiple(of: 2) ? a.id : b.id)
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            times.append(Date.now.timeIntervalSince(start))
+            await Task.yield()
+        }
+        medians.append(times.sorted()[times.count / 2])
+    }
+    #expect(medians[1] < medians[0] * 3)
 }
 
 /// A closed tab's page goes quiet at once, even while something still holds it.
@@ -1561,7 +1635,7 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     let window = NSWindow()
     window.isReleasedWhenClosed = false
     browser.window = window
-    window.orderFront(nil)
+    window.orderBack(nil)
     browser.open(somewhere)
     browser.close(browser.tabs[0].id)
     #expect(!window.isVisible && browser.tabs.isEmpty)

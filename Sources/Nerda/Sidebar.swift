@@ -136,7 +136,10 @@ struct Sidebar: View {
 
             ScrollViewReader { list in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: Self.rowGap) {
+                    // Rows made as they come into sight: made all at once, every
+                    // switch made them all again, 45 ms with 400 tabs. Rows are one
+                    // height, so `rowFrame` places those out of sight all the same.
+                    LazyVStack(alignment: .leading, spacing: Self.rowGap) {
                         ForEach(rest) { tab in
                             // The buttons hold only the id: SwiftUI keeps their actions a
                             // while after the row goes, and a tab held there keeps its page,
@@ -296,13 +299,14 @@ struct Sidebar: View {
     /// some, a tab dragged over them opens a gap between them where it goes.
     private var tiles: some View {
         let pins = pins, gap = gap
+        let byID = Dictionary(uniqueKeysWithValues: pins.map { ($0.id, $0) })
         var items: [Tab.ID?] = pins.map(\.id)
         if pins.isEmpty { items = [nil] } else if let gap { items.insert(nil, at: gap) }
         return TileGrid {
             // One list, whatever row each is in, so a tile keeps its drag moving from one to another.
             ForEach(items, id: \.self) { id in
                 if let id {
-                    if let tab = browser.tabs.first(where: { $0.id == id }) {
+                    if let tab = byID[id] {
                         PinnedTile(site: tab.site, loading: tab.isLoading, title: tab.title,
                                    selected: id == browser.selectedID, asleep: tab.isAsleep,
                                    press: { browser.select(id) }) {

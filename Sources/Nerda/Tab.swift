@@ -490,6 +490,8 @@ final class Tab: Identifiable {
     /// 100 KB, of the hundreds of MB let go.
     func sleep(keeping look: NSImage? = nil) {
         guard let page else { return }
+        recoloring?.cancel()
+        recoloring = nil
         // Packed off the main thread: a few ms each, and under memory
         // pressure every tab out of sight sleeps at once.
         packedLook = nil
@@ -641,12 +643,22 @@ final class Tab: Identifiable {
     /// for good. Suspended rather than paused, so the page can't start them again.
     func silence() {
         guard let page else { return }
+        recoloring?.cancel()
+        recoloring = nil
+        page.stopLoading()
         page.setAllMediaPlaybackSuspended(true)
         page.setCameraCaptureState(.none)
         page.setMicrophoneCaptureState(.none)
         // Out of its stage: WebKit holds the stage as where its inspector
         // docks, so a page left in it holds itself, and its process runs on.
+        page.superview?.superview?.removeFromSuperview()
         page.removeFromSuperview()
+        observations = []
+        self.page = nil
+        loading = nil
+        slept = nil
+        packedLook = nil
+        isLoading = false
         Self.endServiceWorkers()
     }
 
@@ -902,16 +914,23 @@ struct PageView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { NSView() }
 
     func updateNSView(_ view: NSView, context: Context) {
+        updatePages(in: view)
+    }
+
+    func updatePages(in view: NSView) {
         // First, so that a sleeping tab's page is woken and among the rest. A
         // new tab has none to show, and none is made for it.
         let shown = selected.flatMap { $0.hasPage ? $0.webView : nil }
         let awake = tabs.compactMap(\.page)
+        let awakeIDs = Set(awake.map(ObjectIdentifier.init))
         // Closed tabs' pages go (sleeping ones take themselves out), their
         // inspectors with them.
         var slots = view.subviews.compactMap { $0 as? PageSlot }
-        for slot in slots where !awake.contains(where: { $0 === slot.page }) {
+        for slot in slots where !awakeIDs.contains(ObjectIdentifier(slot.page)) {
             slot.removeFromSuperview()
         }
+        slots.removeAll { !awakeIDs.contains(ObjectIdentifier($0.page)) }
+        var byPage = Dictionary(uniqueKeysWithValues: slots.map { (ObjectIdentifier($0.page), $0) })
         // A page in WebKit's full screen, or on its way in or out, is WebKit's
         // to place: put back here, its video would go black, its sound playing on.
         let pages = awake.filter { $0.fullscreenState == .notInFullscreen }
@@ -923,10 +942,11 @@ struct PageView: NSViewRepresentable {
             pages.first { responder === $0 || responder.isDescendant(of: $0) }
         }
         for page in pages {
-            let slot = slots.first { $0.page === page } ?? {
+            let slot = byPage[ObjectIdentifier(page)] ?? {
                 let slot = PageSlot(page, frame: view.bounds)
                 view.addSubview(slot)
                 slots.append(slot)
+                byPage[ObjectIdentifier(page)] = slot
                 return slot
             }()
             // In its own full screen (a bare `<video controls>`), WebKit
@@ -937,20 +957,22 @@ struct PageView: NSViewRepresentable {
             guard page === shown else { continue }
             slot.stage.device = selected?.responsive?.size
             slot.stage.resized = { [weak selected] in selected?.resize(width: $0.width, height: $0.height) }
-            slot.isHidden = false
-            page.isHidden = false
+            if slot.isHidden { slot.isHidden = false }
+            if page.isHidden { page.isHidden = false }
             guard arriving, takesFocus else { continue }
             if let window, focused != nil {
                 window.makeFirstResponder(page)
             } else {
-                DispatchQueue.main.async { page.window?.makeFirstResponder(page) }
+                DispatchQueue.main.async {
+                    if !page.isHiddenOrHasHiddenAncestor { page.window?.makeFirstResponder(page) }
+                }
             }
         }
         // With no page on screen (a new tab, the settings), the keyboard
         // leaves the one hidden behind: Space would pause its video unseen.
         if shown == nil, focused != nil { window?.makeFirstResponder(nil) }
-        for page in pages where page !== shown { page.isHidden = true }
-        for slot in slots where slot.page !== shown { slot.isHidden = true }
+        for page in pages where page !== shown && !page.isHidden { page.isHidden = true }
+        for slot in slots where slot.page !== shown && !slot.isHidden { slot.isHidden = true }
     }
 }
 

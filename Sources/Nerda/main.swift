@@ -92,6 +92,14 @@ struct BrowserView: View {
                 if !pageFullscreen {
                     TabStrip(browser: browser, downloadsShown: $downloadsShown, menuShown: $menuShown)
                         .frame(maxHeight: .infinity, alignment: .top)
+                        // Read here, over the whole window as the strip is, and
+                        // not around it all: there every view's preference is
+                        // gathered on each change, the sidebar's rows included.
+                        .overlayPreferenceValue(SelectedTabKey.self) { tab in
+                            GeometryReader { window in
+                                cardEdge(gap: tab.map { window[$0].insetBy(dx: -TabStrip.flare, dy: 0) })
+                            }
+                        }
                 }
             } else {
                 // Always there, slid off to the left when not wanted, rather than
@@ -113,13 +121,6 @@ struct BrowserView: View {
                         .frame(width: 6)
                         .contentShape(Rectangle())
                         .onHover { if $0 { withAnimation(.slide) { peeking = true } } }
-                }
-            }
-        }
-        .overlayPreferenceValue(SelectedTabKey.self) { tab in
-            if horizontal, !pageFullscreen {
-                GeometryReader { window in
-                    cardEdge(gap: tab.map { window[$0].insetBy(dx: -TabStrip.flare, dy: 0) })
                 }
             }
         }

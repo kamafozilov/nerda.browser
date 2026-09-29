@@ -14,6 +14,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Fixed
 
+- Switching tabs stays quick with hundreds of tabs in the sidebar, where it slowed with each one, and closing a tab releases its page straight away, even while its menu or preview still holds the tab.
 - Slow disk reads of site icons no longer hold up the window opening; icons appear when their reads finish.
 - An extension waiting on an app that has already quit hears that it has gone, where it could wait forever. Loaded extensions' background connections survive another tab closing or sleeping.
 

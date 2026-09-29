@@ -161,6 +161,7 @@ struct TabStrip: View {
     /// shows where to drop it, lit once it is over it.
     private var pinned: some View {
         let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+        let byID = Dictionary(uniqueKeysWithValues: pins.map { ($0.id, $0) })
         var items: [Tab.ID?] = pins.map(\.id)
         if case .pins(let index) = landing, draggedTab != nil, !items.isEmpty { items.insert(nil, at: min(index, items.count)) }
         return HStack(spacing: Self.iconGap) {
@@ -173,7 +174,7 @@ struct TabStrip: View {
             }
             // One list, the gap in it, so the icons make way for it.
             ForEach(items, id: \.self) { id in
-                if let id, let tab = browser.tabs.first(where: { $0.id == id }) {
+                if let id, let tab = byID[id] {
                     PinnedIcon(site: tab.site, loading: tab.isLoading, title: tab.title,
                                selected: id == browser.selectedID, asleep: tab.isAsleep, press: { browser.select(id) }) {
                         browser.select(id)
@@ -201,13 +202,14 @@ struct TabStrip: View {
     /// the last. A pinned site dragged over them opens a gap where it would go.
     private func tabs(room: CGFloat) -> some View {
         let items = items
+        let byID = Dictionary(uniqueKeysWithValues: browser.tabs.map { ($0.id, $0) })
         let room = max(room - 34, 0)
         let width = min(max(room / CGFloat(max(items.count, 1)), Self.widths.lowerBound), Self.widths.upperBound)
         let selected = items.firstIndex { $0 == browser.selectedID }
         return HStack(spacing: 0) {
             HStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element) { index, id in
-                    if let id, let tab = browser.tabs.first(where: { $0.id == id }) {
+                    if let id, let tab = byID[id] {
                         // A line between two tabs, unless one is on screen, or the gap.
                         row(tab, width: width, separated: index > 0 && items[index - 1] != nil
                             && selected != index && selected != index - 1)
