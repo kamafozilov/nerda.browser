@@ -1222,10 +1222,11 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     #expect(after.icon(site).image != nil)
     #expect(after.icon(site).tint?.colors.count == 1)
 
-    // At launch, read at once for the tabs coming back, before any frame.
+    // At launch, icons arrive from disk even while their tabs stay asleep.
     let launch = Favicons()
     launch.folder = before.folder
     launch.preload([URL(string: site + "/some/page")!])
+    for _ in 0..<100 where launch.icon(site).image == nil { try await Task.sleep(for: .milliseconds(10)) }
     #expect(launch.icon(site).image != nil)
 }
 

@@ -11,6 +11,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - Pinned sites sit four to a row at the top of the sidebar, where they sat three, so more fit before the tabs.
 
+### Fixed
+
+- Slow disk reads of site icons no longer hold up the window opening; icons appear when their reads finish.
+
 ## [0.0.13] - 2026-09-28
 
 ### Fixed

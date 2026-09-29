@@ -41,7 +41,7 @@ final class Favicons {
     /// How many icons no view shows are kept, to come back at once (the
     /// history page scrolled back up): a few screens of it, a megabyte or so.
     static let goneLimit = 200
-    /// The icons `preload` is reading, until the first view asks for one.
+    /// The icons `preload` is reading, until the reads finish.
     private var preloading: (reads: DispatchGroup, read: OSAllocatedUnfairLock<[String: Found]>)?
 
     /// The key an icon is kept under: scheme, host and port, so a local server
@@ -85,24 +85,24 @@ final class Favicons {
     /// The icons kept on disk for these sites, read at launch, side by side
     /// off the main thread, while the window is made: the tabs come back with
     /// their icons in their first frame.
-    func preload(_ sites: [URL]) {
+    func preload(_ sites: [URL], on queue: DispatchQueue = .global(qos: .userInitiated)) {
         guard let folder else { return }
         let reads = DispatchGroup(), read = OSAllocatedUnfairLock(initialState: [String: Found]())
         for site in Set(sites.compactMap(Self.origin(of:))) where icons[site]?.image == nil {
             let file = Self.file(for: site, in: folder)
-            DispatchQueue.global(qos: .userInitiated).async(group: reads) {
+            queue.async(group: reads) {
                 if case .icon(let found) = Self.read(file) { read.withLock { $0[site] = found } }
             }
         }
         preloading = (reads, read)
+        reads.notify(queue: .main) { [weak self] in self?.finishPreload() }
     }
 
-    /// Waits for what `preload` is reading, as the first frame is drawn, and
-    /// a moment at most: a slow one comes as its view asks for it (`load`).
+    /// Uses finished reads immediately, without holding up a frame for disk.
+    /// Slow reads arrive through the completion above and redraw their icons.
     private func finishPreload() {
-        guard let (reads, read) = preloading else { return }
+        guard let (reads, read) = preloading, reads.wait(timeout: .now()) == .success else { return }
         preloading = nil
-        _ = reads.wait(timeout: .now() + .milliseconds(100))
         for (site, found) in read.withLock({ $0 }) { keep(found, for: site) }
     }
 

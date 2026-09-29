@@ -25,6 +25,28 @@ private func pixels(_ image: NSImage?) -> [Int] {
     (image?.representations ?? []).map(\.pixelsWide).sorted()
 }
 
+/// Slow disk reads must not hold up the first frame of the browser.
+@MainActor
+@Test func aSlowIconPreloadDoesNotBlockTheWindow() async throws {
+    let root = try folder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let site = "https://slow.invalid"
+    let file = root.appending(path: site.addingPercentEncoding(withAllowedCharacters: .alphanumerics)!)
+    try png(16).write(to: file)
+    let icons = Favicons()
+    icons.folder = root
+    let disk = DispatchQueue(label: "test.slow-icons")
+    disk.suspend()
+    icons.preload([URL(string: site)!], on: disk)
+    let start = ContinuousClock.now
+    _ = icons.icon(site)
+    let elapsed = start.duration(to: .now)
+    disk.resume()
+    #expect(elapsed < .milliseconds(50))
+    for _ in 0..<150 where icons.icon(site).image == nil { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(icons.icon(site).image != nil)
+}
+
 /// A big icon is kept as big as it is shown, 16 points, with a version for
 /// 1× and 2× screens, in memory and on disk; one kept big by an earlier
 /// version is written back small the next time it is read. A small one is
