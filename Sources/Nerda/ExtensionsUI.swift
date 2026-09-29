@@ -152,7 +152,8 @@ private struct ExtensionMenu: View {
                 Divider().padding(.horizontal, 12).padding(.vertical, 4)
             }
             if buttons.isEmpty {
-                Text(extensions.installed.isEmpty ? "No extensions yet. Add them from the Chrome Web Store." : "None of your extensions is on.")
+                Text(!Extensions.enabledAtLaunch ? "Extensions are paused. Enable them in Settings and restart Nerda."
+                     : extensions.installed.isEmpty ? "No extensions yet. Add them from the Chrome Web Store." : "None of your extensions is on.")
                     .font(.system(size: 12.5))
                     .foregroundStyle(Palette.muted)
                     .fixedSize(horizontal: false, vertical: true)

@@ -317,9 +317,15 @@ private struct ExtensionsSettings: View {
     let browser: Browser
 
     @State private var link = ""
+    @AppStorage(Extensions.enabledKey) private var enabled = false
     private var extensions: Extensions { .shared }
 
     var body: some View {
+        SettingsGroup(title: "Extensions") {
+            SettingsRow(title: "Enable extensions", detail: "Off by default for speed and reliability. Restart Nerda to apply", icon: "puzzlepiece.extension") {
+                SettingsToggle(title: "Enable extensions", isOn: $enabled)
+            }
+        }
         SettingsGroup(title: "Add extensions") {
             SettingsLink(title: "Chrome Web Store", detail: "Find one, and press Add to Nerda on its page", icon: "bag") {
                 browser.open(WebStore.home)
@@ -428,7 +434,8 @@ private struct InstalledRow: View {
         _ = extensions.settingsChanged
         var parts = ["Version \(item.version)", item.fromStore ? "Chrome Web Store"
                      : item.source.map { "From “\(URL(fileURLWithPath: $0).lastPathComponent)”" } ?? "From a folder"]
-        if item.enabled, context == nil { parts.append("couldn't start") }
+        if !Extensions.enabledAtLaunch { parts.append("paused") }
+        else if item.enabled, context == nil { parts.append("couldn't start") }
         if context?.overrideNewTabPageURL != nil, extensions.showsNewTab(item.id) { parts.append("shows in new tabs") }
         let warnings = extensions.errors[item.id]?.count ?? 0
         if warnings > 0 { parts.append(warnings == 1 ? "1 warning" : "\(warnings) warnings") }

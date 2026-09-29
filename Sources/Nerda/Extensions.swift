@@ -67,7 +67,23 @@ nonisolated struct InstalledExtension: Codable, Identifiable, Equatable, Sendabl
 final class Extensions: NSObject {
     static let shared = Extensions()
 
-    @ObservationIgnored let controller: WKWebExtensionController
+    nonisolated static let enabledKey = "extensionsEnabled"
+    static let enabledAtLaunch = UserDefaults.standard.bool(forKey: enabledKey)
+
+    /// No extension engine, workers or injected scripts until explicitly enabled.
+    @ObservationIgnored private(set) lazy var controller: WKWebExtensionController = {
+        WKWebExtension.MatchPattern.registerCustomURLScheme(Extensions.scheme)
+        let configuration = WKWebExtensionController.Configuration.default()
+        configuration.defaultWebsiteDataStore = .default()
+        let views = configuration.webViewConfiguration ?? WKWebViewConfiguration()
+        views.websiteDataStore = .default()
+        // Changing the user agent can strand running extension workers.
+        views.applicationNameForUserAgent = Tab.applicationName
+        configuration.webViewConfiguration = views
+        let controller = WKWebExtensionController(configuration: configuration)
+        controller.delegate = self
+        return controller
+    }()
     private(set) var installed: [InstalledExtension] = [] {
         didSet { tellStores() }
     }
@@ -216,7 +232,7 @@ final class Extensions: NSObject {
     /// The configuration an extension's page has to be made with, as only a
     /// view made from its extension's is served its pages; nil for the web.
     static func configuration(for url: URL) -> WKWebViewConfiguration? {
-        guard host(of: url) != nil, let context = shared.controller.extensionContext(for: url) else { return nil }
+        guard enabledAtLaunch, host(of: url) != nil, let context = shared.controller.extensionContext(for: url) else { return nil }
         return configuration(for: context)
     }
 
@@ -260,21 +276,7 @@ final class Extensions: NSObject {
     }
 
     private override init() {
-        WKWebExtension.MatchPattern.registerCustomURLScheme(Extensions.scheme)
-        let configuration = WKWebExtensionController.Configuration.default()
-        configuration.defaultWebsiteDataStore = .default()
-        let views = configuration.webViewConfiguration ?? WKWebViewConfiguration()
-        views.websiteDataStore = .default()
-        // The same user agent as the tabs, to the letter. WebKit gives
-        // workers the user agent of the last page that loaded and, when it
-        // differs, stops the running workers to apply it, and extension
-        // workers it then never starts again. Extensions are told they run in
-        // Chrome by the shim instead.
-        views.applicationNameForUserAgent = Tab.applicationName
-        configuration.webViewConfiguration = views
-        controller = WKWebExtensionController(configuration: configuration)
         super.init()
-        controller.delegate = self
         installed = (try? JSONDecoder().decode([InstalledExtension].self, from: Data(contentsOf: Self.list))) ?? []
     }
 
@@ -288,8 +290,9 @@ final class Extensions: NSObject {
     /// extension takes the main thread for tens of milliseconds, and the
     /// first frame shouldn't wait for it.
     func start(for browser: Browser) {
-        Self.started = true
         self.browser = browser
+        guard Self.enabledAtLaunch, !Self.started else { return }
+        Self.started = true
         controller.didOpenWindow(window)
         follow(browser)
         Task {
@@ -396,6 +399,7 @@ final class Extensions: NSObject {
 
     @discardableResult
     private func load(_ item: InstalledExtension) async -> Bool {
+        guard Self.enabledAtLaunch else { return false }
         // The shim this build carries, in place of whatever the build that
         // installed it carried: away from the main thread, as the first
         // launch after an update reads and rewrites every script and page.
@@ -443,6 +447,8 @@ final class Extensions: NSObject {
                 talksToApps.remove(item.id)
             }
             Self.watchTouches()
+            // Disabled or removed while its files were being read.
+            guard installed.contains(where: { $0.id == item.id && $0.enabled }), contexts[item.id] == nil else { return false }
             try controller.load(context)
             watch(context)
             if contexts[item.id] == nil, loadsThisRun.contains(item.id) { loadedBefore.insert(item.id) }
@@ -458,6 +464,7 @@ final class Extensions: NSObject {
     }
 
     private func unload(_ id: String) {
+        if let watcher = errorWatchers.removeValue(forKey: id) { NotificationCenter.default.removeObserver(watcher) }
         guard let context = contexts[id] else { return }
         if ExtensionPopup.shared.extensionID == id { ExtensionPopup.shared.close() }
         try? controller.unload(context)
@@ -676,6 +683,7 @@ final class Extensions: NSObject {
     /// Reads what was unpacked, asks, and on yes moves it into place and
     /// loads it. The caller removes what is left at `staged`.
     private func admit(_ staged: URL, as id: String, fromStore: Bool, source: URL? = nil) async throws {
+        WKWebExtension.MatchPattern.registerCustomURLScheme(Self.scheme)
         let found = try await WKWebExtension(resourceBaseURL: staged)
         let name = found.displayName ?? id
         guard await ask(install: name, wants: Self.describe(found, in: staged), icon: found.icon(for: CGSize(width: 64, height: 64))) else {
@@ -690,7 +698,8 @@ final class Extensions: NSObject {
         installed.removeAll { $0.id == id }
         installed.append(item)
         save()
-        if await load(item) {
+        let loaded = Self.enabledAtLaunch ? await load(item) : true
+        if loaded {
             // Where it is now, as Chrome shows it once added.
             menuOpen = true
         } else {
@@ -809,6 +818,7 @@ final class Extensions: NSObject {
     /// a newer version; if so it is fetched, checked and swapped in. One that
     /// asks for more than it was installed with is asked about first.
     func checkForUpdates() {
+        guard Self.enabledAtLaunch else { return }
         let key = "extensions.checked"
         let last = UserDefaults.standard.object(forKey: key) as? Date ?? .distantPast
         guard Date().timeIntervalSince(last) > 20 * 60 * 60 else { return }

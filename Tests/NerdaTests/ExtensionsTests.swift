@@ -4,6 +4,14 @@ import WebKit
 import Testing
 @testable import Nerda
 
+/// Ordinary pages carry no extension engine when extensions are paused.
+@MainActor
+@Test func pagesOnlyAttachAnExtensionEngineWhenEnabled() {
+    let tab = Tab(url: URL(string: "about:blank")!)
+    #expect((tab.webView.configuration.webExtensionController != nil) == Extensions.enabledAtLaunch)
+    tab.silence()
+}
+
 /// An extension folder of the files given, in a folder of its own.
 private func extensionFolder(_ files: [String: String]) throws -> URL {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent("nerda-ext-\(UUID().uuidString)", isDirectory: true)
@@ -387,6 +395,7 @@ private let contentWorld = """
 /// file, no reach into other extensions' pages, and from a store page only
 /// the extension that page is about.
 @MainActor @Test func extensionsGetNoMoreThanChromeGives() throws {
+    WKWebExtension.MatchPattern.registerCustomURLScheme(Extensions.scheme)
     #expect(throws: (any Error).self) { try Extensions.mayOpen(URL(string: "javascript:alert(1)")!) }
     #expect(throws: (any Error).self) { try Extensions.mayOpen(URL(string: "JavaScript:alert(1)")!) }
     #expect(throws: (any Error).self) { try Extensions.mayOpen(URL(fileURLWithPath: "/etc/hosts")) }
@@ -472,4 +481,20 @@ private let contentWorld = """
         return try await group.next() ?? nil
     }
     #expect(reply == 1)
+}
+
+/// A host may exit before readOne starts; that read must fail immediately.
+@MainActor
+@Test func aHostThatAlreadyExitedDoesNotLeaveAReadWaiting() async throws {
+    let pipe = HostPipe(program: URL(fileURLWithPath: "/usr/bin/true"), origin: "-")
+    try pipe.start()
+    defer { pipe.stop() }
+    try await Task.sleep(for: .milliseconds(200))
+    var answered = false
+    let reader = Task {
+        do { _ = try await pipe.readOne() } catch { answered = true }
+    }
+    defer { reader.cancel() }
+    for _ in 0..<50 where !answered { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(answered)
 }

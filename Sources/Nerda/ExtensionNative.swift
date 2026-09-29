@@ -170,6 +170,7 @@ nonisolated final class HostPipe: @unchecked Sendable {
     /// Messages that came before anyone asked: a one-shot reply can beat
     /// `readOne` registering its waiter.
     private var unread: [Any] = []
+    private var ended = false
 
     /// JSON read from the host, handed on once: nothing else holds it.
     private struct Reply: @unchecked Sendable { let value: Any? }
@@ -198,11 +199,16 @@ nonisolated final class HostPipe: @unchecked Sendable {
             self.take(chunk)
         }
         process.terminationHandler = { [weak self] _ in self?.finish() }
-        try process.run()
+        do { try process.run() } catch {
+            output.fileHandleForReading.readabilityHandler = nil
+            finish()
+            throw error
+        }
     }
 
     func stop() {
         output.fileHandleForReading.readabilityHandler = nil
+        finish()
         if process.isRunning { process.terminate() }
     }
 
@@ -218,13 +224,16 @@ nonisolated final class HostPipe: @unchecked Sendable {
     func readOne() async throws -> Any? {
         try await withCheckedThrowingContinuation { continuation in
             lock.lock()
-            if unread.isEmpty {
-                waiters.append(continuation)
-                lock.unlock()
-            } else {
+            if !unread.isEmpty {
                 let message = unread.removeFirst()
                 lock.unlock()
                 continuation.resume(returning: Reply(value: message))
+            } else if ended {
+                lock.unlock()
+                continuation.resume(throwing: ExtensionNative.Refused(why: "Native host has exited."))
+            } else {
+                waiters.append(continuation)
+                lock.unlock()
             }
         }.value
     }
@@ -258,11 +267,14 @@ nonisolated final class HostPipe: @unchecked Sendable {
 
     private func finish() {
         lock.lock()
+        guard !ended else { lock.unlock(); return }
+        ended = true
         let pending = waiters
         waiters = []
+        let exit = onExit
+        onExit = nil
         lock.unlock()
         pending.forEach { $0.resume(throwing: ExtensionNative.Refused(why: "Native host has exited.")) }
-        onExit?()
-        onExit = nil
+        exit?()
     }
 }

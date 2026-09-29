@@ -9,11 +9,13 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Changed
 
+- Extensions are paused by default for speed and reliability. Turn on Enable extensions in Settings › Extensions and restart Nerda to use them; installed extensions and their settings are kept.
 - Pinned sites sit four to a row at the top of the sidebar, where they sat three, so more fit before the tabs.
 
 ### Fixed
 
 - Slow disk reads of site icons no longer hold up the window opening; icons appear when their reads finish.
+- An extension waiting on an app that has already quit hears that it has gone, where it could wait forever. Loaded extensions' background connections survive another tab closing or sleeping.
 
 ## [0.0.13] - 2026-09-28
 

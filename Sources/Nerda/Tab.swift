@@ -11,13 +11,13 @@ final class Tab: Identifiable {
     /// Where the page is now, which is not where it started once links are followed.
     // Extensions are told what changes (see Extensions.changed).
     private(set) var url: URL? {
-        didSet { if url != oldValue { Extensions.shared.changed(self, .URL) } }
+        didSet { if url != oldValue, Extensions.started { Extensions.shared.changed(self, .URL) } }
     }
     private var pageTitle = "" {
-        didSet { if pageTitle != oldValue { Extensions.shared.changed(self, .title) } }
+        didSet { if pageTitle != oldValue, Extensions.started { Extensions.shared.changed(self, .title) } }
     }
     private(set) var isLoading = false {
-        didSet { if isLoading != oldValue { Extensions.shared.changed(self, .loading) } }
+        didSet { if isLoading != oldValue, Extensions.started { Extensions.shared.changed(self, .loading) } }
     }
     /// For the address bar's buttons, and the line under it that fills as the page loads.
     private(set) var canGoBack = false
@@ -30,13 +30,13 @@ final class Tab: Identifiable {
     /// instead, and Reload tries that address again. Extensions are told of
     /// the address, as Chrome tells of its error page's.
     var failure: (url: URL, message: String)? {
-        didSet { if failure?.url != oldValue?.url { Extensions.shared.changed(self, .URL) } }
+        didSet { if failure?.url != oldValue?.url, Extensions.started { Extensions.shared.changed(self, .URL) } }
     }
     /// Kept at the top of the sidebar as a tile, and never put to sleep for
     /// being idle: the sites always open. ⌘W lets its page go, tile and all
     /// kept (`Browser.closeSelectedTab`). See `Browser.setPinned`.
     var isPinned = false {
-        didSet { if isPinned != oldValue { Extensions.shared.changed(self, .pinned) } }
+        didSet { if isPinned != oldValue, Extensions.started { Extensions.shared.changed(self, .pinned) } }
     }
     /// Where a pinned tab was when pinned; double-clicking its tile goes back there.
     var home: URL?
@@ -661,13 +661,18 @@ final class Tab: Identifiable {
     /// start again at its next request: a short wait, once, for what would
     /// otherwise keep hundreds of MB. Worth it after a sleep as after a
     /// close: the page's process goes either way, its worker's wouldn't.
+    /// With an extension loaded, WebKit manages workers itself: ending all
+    /// of them would also break the extension's background and live ports.
     // WebKit SPI: should it go, workers end when WebKit sees fit, as they did.
     static func endServiceWorkers() {
         endingWorkers?.cancel()
         endingWorkers = Task {
             try? await Task.sleep(for: .seconds(30))
             let end = NSSelectorFromString("_terminateServiceWorkers")
-            guard !Task.isCancelled, let pool = processPool as? NSObject, pool.responds(to: end) else { return }
+            // This SPI stops every worker, including extensions' workers.
+            // Keep their live ports intact while extensions are running.
+            guard !Task.isCancelled, Extensions.shared.contexts.isEmpty,
+                  let pool = processPool as? NSObject, pool.responds(to: end) else { return }
             pool.perform(end)
         }
     }
@@ -727,7 +732,7 @@ final class Tab: Identifiable {
         // Chrome extensions see the pages of the regular window, not an
         // incognito one's, as in Chrome. The controller has to be there when
         // the page is made; it can't be added after.
-        if dataStore.isPersistent { configuration.webExtensionController = Extensions.shared.controller }
+        if dataStore.isPersistent, Extensions.enabledAtLaunch { configuration.webExtensionController = Extensions.shared.controller }
         Selection.install(in: configuration.userContentController)
         // The first page made starts the blocker: WebKit is being started for
         // it anyway. Cached rules arrive asynchronously; navigation never waits.
