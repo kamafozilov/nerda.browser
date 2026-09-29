@@ -165,18 +165,24 @@ enum Bench {
         }
         results["memoryAsleep"] = asleep
 
-        // Until it is drawn (what is seen), and until it is loaded.
+        // Until it is drawn (what is seen), and until it is loaded. Each of
+        // the nine: three sites were too few for a median to mean anything.
+        // `overhead` is Nerda's and the new process's part, before the page's
+        // own clock starts, as for `loads`; `fcp` on is WebKit's and the network's.
         var wakes: [[String: Double]] = []
-        for tab in tabs.dropFirst().prefix(3) {
+        for tab in tabs.dropFirst() {
             let start = Date.now
             browser.select(tab.id)
             let loaded = await load(tab)
             var sample = await timings(of: tab.webView)
             sample["open"] = (loaded ?? .now).timeIntervalSince(start) * 1000
+            if let age = sample.removeValue(forKey: "age") {
+                sample["overhead"] = Date.now.timeIntervalSince(start) * 1000 - age
+            }
             wakes.append(sample)
         }
-        say(String(format: "  waking a sleeping tab: median %.0f ms drawn, %.0f ms loaded",
-                    median(wakes, "fcp") ?? 0, median(wakes, "open") ?? 0))
+        say(String(format: "  waking a sleeping tab: median %.0f ms drawn, %.0f ms loaded, %.0f ms before the page's clock",
+                    median(wakes, "fcp") ?? 0, median(wakes, "open") ?? 0, median(wakes, "overhead") ?? 0))
         results["wake"] = wakes
 
         // For ./bench.sh's launches that open these tabs again.
@@ -238,12 +244,13 @@ enum Bench {
         let count = "return window.n"
         let before = try? await tab.webView.callAsyncJavaScript(count, contentWorld: .page) as? Double
         let start = Date.now
-        let busy = await cpu(over: 10)
+        // Split by process, as at rest: Nerda's own share apart from the page's and the graphics'.
+        let busy = await cpu(over: 10, naming: tab.pid.map { [$0: "page"] } ?? [:])
         let after = try? await tab.webView.callAsyncJavaScript(count, contentWorld: .page) as? Double
         let perSecond = ((after ?? 0) - (before ?? 0)) / (since(start) / 1000)
-        say(String(format: "A page drawing from script, on screen: %.0f frames/s, %.1f%% CPU, %.0f wake-ups/s\n",
-                   perSecond, busy.percent, busy.wakeups))
-        results["frames"] = ["perSecond": perSecond, "cpuPercent": busy.percent, "wakeupsPerSecond": busy.wakeups]
+        say(String(format: "A page drawing from script, on screen: %.0f frames/s, %.1f%% CPU, %.0f wake-ups/s", perSecond, busy.percent, busy.wakeups))
+        say("  " + busy.by.sorted { $0.value > $1.value }.prefix(4).map { String(format: "%@ %.1f%%", $0.key, $0.value) }.joined(separator: ", ") + "\n")
+        results["frames"] = ["perSecond": perSecond, "cpuPercent": busy.percent, "wakeupsPerSecond": busy.wakeups, "by": busy.by]
         browser.close(tab.id)
     }
 
