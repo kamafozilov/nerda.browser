@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Nerda has a new icon: two cream blocks that form an N, on a black tile.
+
 ## [0.0.15] - 2026-09-30
 
 ### Added
