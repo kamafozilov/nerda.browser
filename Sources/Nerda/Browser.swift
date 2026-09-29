@@ -66,9 +66,15 @@ final class Browser: NSObject {
     private(set) var fullscreenTab: Tab.ID?
     /// This session's downloads, newest first.
     private(set) var downloads: [Download] = []
+    @ObservationIgnored var downloadFolder = URL.downloadsDirectory
+    var recentlyClosed: [Session.ClosedTab] = []
+    @ObservationIgnored private var closing: Set<Tab.ID> = []
+    let siteSettings: SiteSettings
     /// Find in page (⌘F): the bar, what it looks for, and whether the last look found it.
     var findBarOpen = false
     var findQuery = ""
+    /// The page last looked in, whose match is still selected.
+    @ObservationIgnored private weak var foundOn: WKWebView?
     private(set) var findMissing = false
     /// Counts ⌘Fs, so one with the bar already open still puts the keyboard in it.
     var findRequests = 0
@@ -121,6 +127,7 @@ final class Browser: NSObject {
 
     init(dataStore: WKWebsiteDataStore = .default()) {
         self.dataStore = dataStore
+        siteSettings = dataStore.isPersistent ? .shared : SiteSettings(defaults: nil)
         super.init()
         // Checked each minute, loosely, so the system can fold it in with other wake-ups.
         sleepTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
@@ -167,7 +174,7 @@ final class Browser: NSObject {
                 // Asked of the page, so it may have come on screen in the meantime.
                 guard await !tab.isBusy(), tab.id != selectedID else { return }
                 let look = await tab.snapshot()
-                if tab.id != selectedID { tab.sleep(keeping: look) }
+                if tab.id != selectedID, !tab.hasUnsavedWork { tab.sleep(keeping: look) }
             }
         }
     }
@@ -256,8 +263,24 @@ final class Browser: NSObject {
     /// tab, unless you went elsewhere since. With none seen before it (just
     /// after launch), to the one that slides into its place, or to the one
     /// above when there is none below.
-    func close(_ id: Tab.ID) {
+    func close(_ id: Tab.ID, discarding: Bool = false) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let tab = tabs[index]
+        if tab.hasUnsavedWork, !discarding {
+            guard let page = tab.page, closing.insert(id).inserted else { return }
+            // The question waits for its tab to be on screen (`ask`), as
+            // Chrome shows the tab that asks.
+            select(id)
+            Task {
+                defer { closing.remove(id) }
+                if await confirmDiscarding(on: page) { close(id, discarding: true) }
+            }
+            return
+        }
+        if !isPrivate, let saved = tab.saved, saved.url != nil {
+            recentlyClosed.append(Session.ClosedTab(tab: saved, index: index))
+            recentlyClosed = Array(recentlyClosed.suffix(25))
+        }
         tabs.remove(at: index)
         if passwordOffer?.tab == id { passwordOffer = nil }
         if selectedID == id {
@@ -266,8 +289,34 @@ final class Browser: NSObject {
         // With nothing left, the window goes, as in other browsers: an
         // incognito one, and incognito with it. Without a window, a new tab.
         if tabs.isEmpty {
-            if let window { window.close() } else { add(Tab()) }
+            if downloads.contains(where: \.needsSession) { add(Tab()) }
+            else if let window { window.close() }
+            else { add(Tab()) }
         }
+    }
+
+    func reopenClosedTab(_ id: Session.ClosedTab.ID? = nil) {
+        guard !isPrivate, let index = id.flatMap({ wanted in recentlyClosed.firstIndex { $0.id == wanted } })
+            ?? (id == nil ? recentlyClosed.indices.last : nil) else { return }
+        let closed = recentlyClosed.remove(at: index)
+        if let bookmark = closed.tab.bookmark, let existing = tab(of: bookmark) {
+            select(existing.id)
+        } else {
+            let tab = Tab(restoring: closed.tab)
+            if tab.bookmark.map({ bookmarks.item($0) == nil }) == true { tab.bookmark = nil }
+            tab.dataStore = dataStore
+            tab.delegate = self
+            let position = tab.isPinned ? min(max(closed.index, 0), pinnedCount)
+                : min(max(closed.index, pinnedCount), tabs.count)
+            tabs.insert(tab, at: position)
+            selectedID = tab.id
+        }
+        sessionChanged()
+    }
+
+    func confirmDiscarding(on page: WKWebView) async -> Bool {
+        await ask("Leave this page?", "Changes you made may not be saved.", over: page,
+                  buttons: ["Stay", "Leave"]) == .alertSecondButtonReturn
     }
 
     /// Closing the window closes its tabs, as Safari does: nothing keeps
@@ -277,6 +326,7 @@ final class Browser: NSObject {
     func closeAll() {
         saveSession()
         sessionFile = nil
+        for download in downloads where download.needsSession { download.cancel() }
         tabs.removeAll()
         selectedID = nil
         commandBarOpen = false
@@ -312,7 +362,12 @@ final class Browser: NSObject {
 
     /// The next match on the page, or the one before; round to the start past the end.
     func find(backwards: Bool = false) {
-        guard let page = selected?.page, !findQuery.isEmpty else { return findMissing = false }
+        guard let page = selected?.page, !findQuery.isEmpty else {
+            clearFound()
+            return findMissing = false
+        }
+        if foundOn !== page { clearFound() }
+        foundOn = page
         let configuration = WKFindConfiguration()
         configuration.backwards = backwards
         let query = findQuery
@@ -320,6 +375,14 @@ final class Browser: NSObject {
             let found = (try? await page.find(query, configuration: configuration))?.matchFound ?? false
             if query == findQuery { findMissing = !found }
         }
+    }
+
+    /// WebKit leaves the match it found selected, highlighted on the page
+    /// after the bar is gone; it goes with the bar, or the query.
+    func clearFound() {
+        // ponytail: the top frame's selection; a match found inside a frame stays selected.
+        foundOn?.evaluateJavaScript("getSelection().removeAllRanges()", in: nil, in: .defaultClient)
+        foundOn = nil
     }
 
     /// A page going full screen, or coming back. Only the page on screen, and
@@ -348,7 +411,11 @@ final class Browser: NSObject {
 
     /// Those done, or only those started from `since` on (Delete browsing data).
     func clearDownloads(since: Date = .distantPast) {
-        downloads.removeAll { $0.state != .running && $0.started >= since }
+        downloads.removeAll { item in
+            guard item.state != .running, item.state != .paused, item.started >= since else { return false }
+            if item.state != .finished { item.cancel() }
+            return true
+        }
     }
 
     func tab(for webView: WKWebView) -> Tab? {
@@ -360,6 +427,14 @@ final class Browser: NSObject {
 /// open as tabs; one that closes itself closes its tab. A page's alerts, and
 /// its file pickers, come up as sheets over it.
 extension Browser: WKUIDelegate {
+    // WebKit's beforeunload delegate on the supported macOS versions is SPI.
+    @objc(_webView:runBeforeUnloadConfirmPanelWithMessage:initiatedByFrame:completionHandler:)
+    func beforeUnload(_ page: WKWebView, message: String, frame: WKFrameInfo,
+                      completionHandler: @escaping (Bool) -> Void) {
+        if tab(for: page)?.departureApproved == true { completionHandler(true); return }
+        Task { completionHandler(await confirmDiscarding(on: page)) }
+    }
+
     func webView(
         _ webView: WKWebView,
         createWebViewWith configuration: WKWebViewConfiguration,
@@ -453,17 +528,42 @@ extension Browser: WKUIDelegate {
 }
 
 extension Browser: WKNavigationDelegate {
+    nonisolated static func onlyChangesFragment(from previous: URL?, to next: URL) -> Bool {
+        guard let previous, previous != next,
+              var old = URLComponents(url: previous, resolvingAgainstBaseURL: false),
+              var new = URLComponents(url: next, resolvingAgainstBaseURL: false) else { return false }
+        old.fragment = nil
+        new.fragment = nil
+        return old == new
+    }
+
     /// Each load, a frame's too, runs the page's scripts unless its tab has
     /// them off (Develop › Disable JavaScript).
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  preferences: WKWebpagePreferences) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
         preferences.allowsContentJavaScript = tab(for: webView)?.javaScriptOff != true
-        return (await policy(for: action, in: webView), preferences)
+        if action.targetFrame?.isMainFrame ?? true {
+            siteSettings.applyBlocking(to: preferences, for: action.request.url)
+        }
+        let policy = await policy(for: action, in: webView)
+        // A departure asked about but not taken asks again next time.
+        if policy != .allow, action.targetFrame?.isMainFrame == true { tab(for: webView)?.departureApproved = false }
+        return (policy, preferences)
     }
 
     private func policy(for action: WKNavigationAction, in webView: WKWebView) async -> WKNavigationActionPolicy {
         guard let url = action.request.url else { return .cancel }
         if action.shouldPerformDownload { return .download }
+        // Back, Forward and Reload leave an edited page from the browser; an
+        // address typed is asked in `Tab.go`. Links and the page's own
+        // navigations (a sign-in's redirect) are the page's to ask about,
+        // with beforeunload, as in Chrome and Safari.
+        if action.targetFrame?.isMainFrame == true, [.backForward, .reload].contains(action.navigationType),
+           let tab = tab(for: webView), tab.hasUnsavedWork, !tab.departureApproved,
+           !Self.onlyChangesFragment(from: webView.url, to: url) {
+            guard await confirmDiscarding(on: webView) else { return .cancel }
+            tab.departureApproved = true
+        }
 
         // An extension's sign-in coming back: the address is its answer,
         // handed to the extension, and never loaded.
@@ -588,6 +688,34 @@ extension Browser: WKNavigationDelegate {
         withAnimation(.slide) { downloads.insert(Download(download), at: 0) }
     }
 
+    func resume(_ item: Download) {
+        guard downloads.contains(where: { $0 === item }), item.canResume || item.canRetry else { return }
+        let data = item.resumeData
+        let request = item.task.originalRequest
+        // Reserve the item before awaiting WebKit so a second click cannot
+        // start another download. Keep the same row and extension ownership.
+        item.restart(with: item.task, resuming: data != nil)
+        Task {
+            // A page awake already, or one of this window's store (an
+            // incognito download keeps its cookies), never woken for this.
+            let page = selected?.page ?? tabs.lazy.compactMap(\.page).first ?? {
+                let configuration = WKWebViewConfiguration()
+                configuration.websiteDataStore = dataStore
+                return WKWebView(frame: .zero, configuration: configuration)
+            }()
+            let task: WKDownload
+            if let data { task = await page.resumeDownload(fromResumeData: data) }
+            else if let request { task = await page.startDownload(using: request) }
+            else { return }
+            guard item.state == .running, downloads.contains(where: { $0 === item }) else {
+                _ = await task.cancel()
+                return
+            }
+            task.delegate = self
+            item.restart(with: task, resuming: data != nil)
+        }
+    }
+
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         retried = nil
         guard let tab = tab(for: webView) else { return }
@@ -624,6 +752,7 @@ extension Browser: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        tab(for: webView)?.departureApproved = false
         let error = error as NSError
         // Stopped, overtaken by another load, or turned into a download: nothing went wrong.
         if error.code == NSURLErrorCancelled || (error.domain == "WebKitErrorDomain" && error.code == 102) { return }
@@ -675,7 +804,8 @@ extension Browser: WKNavigationDelegate {
 extension Browser: WKDownloadDelegate {
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                   suggestedFilename: String) async -> URL? {
-        let destination = Downloads.destination(for: suggestedFilename, in: .downloadsDirectory)
+        if let item = item(for: download), item.isResuming, let file = item.file { return file }
+        let destination = Downloads.destination(for: suggestedFilename, in: downloadFolder)
         item(for: download)?.file = destination
         return destination
     }
@@ -689,7 +819,7 @@ extension Browser: WKDownloadDelegate {
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        item(for: download)?.fail()
+        item(for: download)?.fail(error, resumeData: resumeData)
     }
 
     private func item(for download: WKDownload) -> Download? {

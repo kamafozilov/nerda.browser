@@ -644,6 +644,7 @@ extension Browser {
     /// Puts the find bar away, and the keyboard back on the page.
     func hideFindBar() {
         withAnimation(.easeOut(duration: 0.14)) { findBarOpen = false }
+        clearFound()
         focusPage()
     }
 
@@ -656,10 +657,16 @@ extension Browser {
     /// all, as Arc's does: a click on the tile opens it again. The screen goes
     /// back to the last tab below the tiles you were on, the first there, or
     /// a new tab.
-    func closeSelectedTab() {
+    func closeSelectedTab(discarding: Bool = false) {
         if commandBarOpen { return hideCommandBar() }
         guard let selected else { return }
         if selected.isPinned {
+            if selected.hasUnsavedWork, !discarding, let page = selected.page {
+                Task {
+                    if await confirmDiscarding(on: page), selectedID == selected.id { closeSelectedTab(discarding: true) }
+                }
+                return
+            }
             if let next = recent.last(where: { !$0.isPinned }) ?? tabs.first(where: { !$0.isPinned }) {
                 selectedID = next.id
             } else {
@@ -667,7 +674,7 @@ extension Browser {
             }
             Task {
                 let look = await selected.snapshot()
-                if selected.id != selectedID { selected.sleep(keeping: look) }
+                if selected.id != selectedID { selected.sleep(keeping: look, discarding: discarding) }
             }
             return
         }

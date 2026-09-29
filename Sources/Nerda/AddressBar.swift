@@ -49,6 +49,9 @@ struct AddressBar: View {
                 if tab.isLoading { tab.page?.stopLoading() } else { tab.reload() }
             }
             CopyButton(enabled: tab?.site != nil, copy: browser.copyLink)
+            if let url = tab?.site, SiteSettings.origin(url) != nil {
+                SiteControls(browser: browser, url: url).id(tab?.id)
+            }
             Group {
                 if browser.editingAddress, let tab {
                     CommandBar(

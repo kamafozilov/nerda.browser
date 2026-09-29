@@ -567,7 +567,14 @@ struct DeleteDataDialog: View {
 
     private func delete(since: Date) async {
         deleting = true
-        if history { History.shared.remove(since: since) }
+        if history {
+            History.shared.remove(since: since)
+            for window in NSApp.windows {
+                guard let browser = (window as? BrowserWindow)?.browser else { continue }
+                browser.recentlyClosed.removeAll { $0.date >= since }
+                browser.sessionChanged()
+            }
+        }
         if downloads {
             for window in NSApp.windows { (window as? BrowserWindow)?.browser.clearDownloads(since: since) }
         }
@@ -825,6 +832,7 @@ private struct ShortcutsSettings: View {
         ("Tabs", [
             ("New Tab", "Open a new tab", "⌘T"),
             ("Close Tab", "Close the tab on screen. A pinned site keeps its tile", "⌘W"),
+            ("Reopen Closed Tab", "Restore the last closed tab", "⇧⌘T"),
             ("Search Tabs", "Find an open tab, or a site from your history", "⇧⌘A"),
             ("Next Tab", "Go to the next tab, round from the last to the first", "⌃Tab"),
             ("Previous Tab", "Go to the tab before", "⌃⇧Tab"),

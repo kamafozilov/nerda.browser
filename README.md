@@ -62,13 +62,15 @@ Nerda is a browser that stays out of the way. It is a native Mac app written in 
 
 - **A sidebar of tabs**, newest first, on the system's glass. Collapse it with ⌘S and it slides out over the page from the window's edge. Or put the tabs **across the top**, as in Chrome.
 - **Pinned sites** sit as tiles above your tabs, load when Nerda opens and never sleep.
-- **Bookmarks as in Arc**: drag a tab above the line to keep it. It opens in its own place and stays when you close it. Folders nest, and File › Import Bookmarks… brings yours from Chrome, Safari, Firefox or Arc.
+- **Bookmarks as in Arc**: drag a tab above the line to keep it. It opens in its own place and stays when you close it. Folders nest; File › Import Bookmarks… brings yours from Chrome, Safari, Firefox or Arc, and Export Bookmarks… saves them for another browser.
 - **Rest the pointer on a tab** for a card with a picture of its page and how much memory it takes. Double-click a tab to give it a name of your own.
 - **Your tabs come back** after you quit, after an update and after a crash, with their history, scroll position and zoom.
+- **Reopen closed tabs** with ⇧⌘T or History › Recently Closed, including after a restart. The last 25 are kept; incognito tabs are not.
 
 ### Quick, and easy on the battery
 
 - **Sleeping tabs**: a tab out of sight for 30 minutes, or any tab when memory runs short, frees its memory and wakes when you come back to it. A hidden tab that keeps the processor busy (an ad gone wrong) is put to sleep.
+- **Edited pages stay awake** until you leave them. Leaving or closing one asks first; this conservatively includes forms a site may have saved already.
 - **120 frames a second** on a ProMotion screen, where WebKit holds pages near 60; back to 60 in Low Power Mode.
 - **Sites start connecting while you type** their address, or when the pointer rests on a link to one, so they open sooner.
 - Measured, not guessed: `./bench.sh` times launch, tab switches, typing and memory before and after each change.
@@ -79,6 +81,7 @@ Nerda is a browser that stays out of the way. It is a native Mac app written in 
 - **Incognito windows** (⇧⌘N) keep no history and forget their cookies once the last one closes. They lock when the Mac sleeps or after a minute away, and open again with Touch ID.
 - **Delete browsing data** from the last 15 minutes to all time, choosing what goes: history, cache, downloads, cookies, site storage.
 - **Passwords** are offered for saving and filled in from the login keychain. File › Import Passwords… reads the CSV from Passwords, Safari or Chrome.
+- **Site settings** beside the address controls ads, camera, microphone and location for that site's scheme, host and port. Reload to apply an ad-blocking change; macOS permissions still apply.
 - A page can't open tabs on its own, only after a click or a key.
 
 ### Chrome extensions
@@ -97,6 +100,7 @@ Open an extension's page in the Chrome Web Store and press **Add to Nerda**. Dar
 - A new tab opens on a photo, blurring into the window. Pick another, take a new one each day, or add your own.
 - Auto Picture in Picture, in Settings › General: a playing video floats over your windows when you switch tabs, or apps.
 - Swipe back and forward with two fingers, as in Chrome; a mouse's side buttons work too.
+- Pause and resume downloads, or retry an interrupted download. Resume needs the server's support and lasts for this running session.
 - Nerda updates itself: a card in the sidebar shows the new version, and What's New shows what it brings.
 
 ## Install

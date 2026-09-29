@@ -96,11 +96,19 @@ If the release step fails after the push, the script prints the `gh release crea
 
 `NERDA_NOTARIZE=0 ./release.sh` publishes a release signed with Developer ID but not notarized, for while Apple's notary service leaves submissions In Progress. Updates install as usual (the updater checks the signature, not the ticket), but a first install from the disk image is refused until System Settings › Privacy & Security › Open Anyway.
 
+## Native passkeys
+
+Notarization does not grant the browser's passkey capability. The Apple Developer account must separately receive approval for `com.apple.developer.web-browser.public-key-credential` and issue a provisioning profile for the app's bundle id and signing team.
+
+Set `NERDA_PASSKEYS_PROFILE` to that profile's path when building or releasing. `build.sh` checks the capability and bundle id, embeds the profile and signs `Nerda.entitlements` with the passkey entitlement, app id and team added. The profile for `dev.nerda.browser` does not authorize the separate Dev or Test bundle ids.
+
+The running app enables native WebAuthn only when its signature carries the entitlement. Without it, sites use the existing password or extension fallback. The current release process can continue with `NERDA_NOTARIZE=0`; the passkey profile is optional.
+
 ## Installing the first time
 
 Download `Nerda.dmg` from the [latest release](https://github.com/kamafozilov/nerda.browser/releases/latest), open it and drag Nerda onto Applications. From then on, Nerda updates itself.
 
-Nerda is signed with Developer ID and notarized, so it opens like any app from the internet: macOS asks once whether to open something downloaded, and that's all. It runs on macOS 15.4 or later, on Apple silicon and on Intel (the Intel half was run under Rosetta, not yet on an Intel Mac).
+Nerda is signed with Developer ID. A notarized release opens after macOS's usual first-open question; a release made with `NERDA_NOTARIZE=0` needs Open Anyway in System Settings › Privacy & Security. It runs on macOS 15.4 or later, on Apple silicon and on Intel (the Intel half was run under Rosetta, not yet on an Intel Mac).
 
 The first release build asks once for the login keychain password when it reaches the saved passwords, if they were saved by an earlier build signed by another team (Nerda Dev, or a local `./build.sh`). "Always Allow" settles it for every later release.
 

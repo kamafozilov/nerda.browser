@@ -49,6 +49,7 @@ struct PasswordChoices: Equatable {
     /// box there: a click that was already on its way is not a choice, so
     /// the list takes none for its first half second, as Chrome's does.
     var shown = Date.now
+    var frame: WKFrameInfo? = nil
 
     var takesClicks: Bool { Date.now.timeIntervalSince(shown) > 0.5 }
 }
@@ -426,20 +427,24 @@ nonisolated enum PasswordsFile {
     }
 }
 
-/// The page's side, in a script world of its own: the page can't see it, call
-/// it, or talk to the browser in its name. Only the page's own frame, never
-/// the frames inside it, which are often other sites'.
+/// The page's side, in Nerda's own script world: the page can't see it, call
+/// it, or talk to the browser in its name. That world is in every frame
+/// already; one of its own would be another in each frame, ads' included.
+/// Each frame is checked against its own security origin, and a picked
+/// password goes back to that frame only.
 enum Passwords {
-    static let world = WKContentWorld.world(name: "passwords")
+    static let world = WKContentWorld.defaultClient
     static let messages = Messages()
 
-    static func install(in controller: WKUserContentController) {
-        controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: world))
+    static func install(in controller: WKUserContentController, nativePasskeys: Bool = Passkeys.available) {
+        controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: false, in: world))
         controller.add(messages, contentWorld: world, name: "passwords")
-        controller.addUserScript(WKUserScript(source: withoutPasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+        if !nativePasskeys {
+            controller.addUserScript(WKUserScript(source: withoutPasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+        }
     }
 
-    /// Passkeys take an Apple entitlement Nerda doesn't have: WebKit then
+    /// Without Apple's browser entitlement, WebKit
     /// says no passkey is to be had, yet leaves the passkey object there, so
     /// sites go for the passkey first and leave you stuck on it. Without the
     /// object they ask for the password straight away. navigator.credentials
@@ -506,11 +511,11 @@ enum Passwords {
     final class Messages: NSObject, WKScriptMessageHandler {
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
             let origin = message.frameInfo.securityOrigin
-            guard message.frameInfo.isMainFrame, ["http", "https"].contains(origin.protocol), !origin.host.isEmpty,
+            guard ["http", "https"].contains(origin.protocol), !origin.host.isEmpty,
                   let page = message.webView, let body = message.body as? [String: Any],
                   let kind = body["kind"] as? String else { return }
             (page.uiDelegate as? Browser)?.page(page, passwords: kind, body, host: Site.key(origin.host),
-                                                clear: origin.protocol == "http")
+                                                clear: origin.protocol == "http", frame: message.frameInfo)
         }
     }
 
@@ -687,11 +692,12 @@ enum Passwords {
 extension Browser {
     /// What a page's sign-in boxes say, from `Passwords.Messages`.
     /// `clear`: the page came over plain http.
-    func page(_ page: WKWebView, passwords kind: String, _ body: [String: Any], host: String, clear: Bool) {
+    func page(_ page: WKWebView, passwords kind: String, _ body: [String: Any], host: String, clear: Bool,
+              frame: WKFrameInfo? = nil) {
         guard let tab = tab(for: page) else { return }
         switch kind {
         case "focus":
-            guard let spot = Self.spot(body, on: page) else { return }
+            guard let spot = Self.spot(body, on: page, frame: frame) else { return }
             choicesAsked += 1
             let asked = choicesAsked
             Task {
@@ -699,10 +705,11 @@ extension Browser {
                 // Gone meanwhile: the caret moved on, or the tab did.
                 guard asked == choicesAsked, tab.id == selectedID else { return }
                 passwordChoices = accounts.isEmpty ? nil
-                    : PasswordChoices(tab: tab.id, site: host, clear: clear, spot: spot, accounts: Array(accounts.prefix(6)))
+                    : PasswordChoices(tab: tab.id, site: host, clear: clear, spot: spot, accounts: Array(accounts.prefix(6)), frame: frame)
             }
         case "move":
-            guard passwordChoices?.tab == tab.id, let spot = Self.spot(body, on: page) else { return }
+            guard passwordChoices?.tab == tab.id, passwordChoices?.site == host,
+                  let spot = Self.spot(body, on: page, frame: frame) else { return }
             passwordChoices?.spot = spot
         case "blur", "typing":
             hideChoices(on: tab)
@@ -785,6 +792,7 @@ extension Browser {
             let filled = try? await page.callAsyncJavaScript(
                 "return nerdaFill(user, password, site, secure)",
                 arguments: ["user": account.user, "password": password, "site": choices.site, "secure": !choices.clear],
+                in: choices.frame,
                 contentWorld: Passwords.world
             ) as? Bool
             page.window?.makeFirstResponder(page)
@@ -836,7 +844,10 @@ extension Browser {
     }
 
     /// Where the box is, from the page's CSS pixels to points.
-    private static func spot(_ body: [String: Any], on page: WKWebView) -> CGRect? {
+    private static func spot(_ body: [String: Any], on page: WKWebView, frame: WKFrameInfo? = nil) -> CGRect? {
+        // A cross-origin frame cannot reveal its position. Keep its account
+        // picker in the browser's page corner, labelled with the frame's site.
+        if frame?.isMainFrame == false { return CGRect(x: 12, y: 12, width: 280, height: 0) }
         guard let spot = body["spot"] as? [String: Double], let x = spot["x"], let y = spot["y"],
               let width = spot["width"], let height = spot["height"] else { return nil }
         let zoom = page.pageZoom

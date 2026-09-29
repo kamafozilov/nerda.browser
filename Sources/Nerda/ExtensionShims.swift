@@ -3011,20 +3011,26 @@ enum ExtensionShims {
         case "downloads.search":
             let all = Array(browser.downloads.reversed())
             return all.enumerated().map { index, item in
-                let states: [Download.State: String] = [.running: "in_progress", .finished: "complete", .failed: "interrupted", .cancelled: "interrupted"]
+                let states: [Download.State: String] = [.running: "in_progress", .paused: "in_progress", .finished: "complete", .failed: "interrupted", .cancelled: "interrupted"]
                 return ["id": index + 1, "url": item.task.originalRequest?.url?.absoluteString ?? "",
                         "finalUrl": item.task.originalRequest?.url?.absoluteString ?? "",
                         "filename": item.file?.path ?? "", "state": states[item.state] ?? "complete",
                         "exists": item.file.map { FileManager.default.fileExists(atPath: $0.path) } ?? false,
-                        "bytesReceived": item.received, "totalBytes": item.total, "paused": false,
+                        "bytesReceived": item.received, "totalBytes": item.total, "paused": item.state == .paused,
                         "startTime": ISO8601DateFormatter().string(from: item.started), "mime": ""] as [String: Any]
             }
-        case "downloads.open", "downloads.show", "downloads.cancel":
+        case "downloads.open", "downloads.show", "downloads.cancel", "downloads.pause", "downloads.resume":
             let all = Array(browser.downloads.reversed())
             guard let index = first as? Int, all.indices.contains(index - 1) else { return nil }
             let item = all[index - 1]
             switch api {
-            case "downloads.cancel": if item.state == .running { item.cancel() }
+            case "downloads.cancel": if item.state != .finished { item.cancel() }
+            case "downloads.pause":
+                guard item.state == .running else { throw Unsupported(what: "This download is not running") }
+                item.pause()
+            case "downloads.resume":
+                guard item.canResume else { throw Unsupported(what: "This download cannot be resumed") }
+                browser.resume(item)
             case "downloads.open":
                 // As in Chrome: its own permission, only just after you did
                 // something in the extension, never on its own from its
@@ -3047,7 +3053,7 @@ enum ExtensionShims {
             return nil
         case "downloads.erase":
             return []
-        case "downloads.pause", "downloads.resume", "downloads.removeFile", "downloads.getFileIcon":
+        case "downloads.removeFile", "downloads.getFileIcon":
             throw Unsupported(what: "\(api) isn't available in Nerda yet")
 
         // MARK: side panel — a tab of its own, since this window has one column
@@ -3472,7 +3478,7 @@ enum ExtensionShims {
             try await clear(what, options: options, browser: browser)
             return nil
 
-        // MARK: sessions — Nerda keeps no closed tabs to give back
+        // MARK: sessions — extension restoration is not yet supported
         case "sessions.getRecentlyClosed", "sessions.getDevices":
             return []
         case "sessions.restore":

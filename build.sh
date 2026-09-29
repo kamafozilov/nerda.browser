@@ -105,6 +105,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
        for the camera or microphone. -->
   <key>NSCameraUsageDescription</key><string>A website you open wants to use the camera.</string>
   <key>NSMicrophoneUsageDescription</key><string>A website you open wants to use the microphone.</string>
+  <key>NSLocationUsageDescription</key><string>A website you open wants to use your location.</string>
+  <key>NSLocationWhenInUseUsageDescription</key><string>A website you open wants to use your location.</string>
   <!-- A browser opens what it is given, http: too (t.co links often end on
        one); otherwise App Transport Security refuses it. The page's icon is
        fetched outside the page, so web content alone isn't enough. -->
@@ -121,12 +123,41 @@ PLIST
 # once for the login password. The updater needs the team too: it only puts
 # in a build signed by the same team as the one running.
 IDENTITY="${NERDA_SIGN_IDENTITY:-$(security find-identity -v -p codesigning | grep -o '"Apple Development: [^"]*"' | head -1 | tr -d '"' || true)}"
+ENTITLEMENTS=Nerda.entitlements
+# Native passkeys need Apple's managed browser capability, independently of
+# notarization. Only an approved profile can turn them on.
+if [ -n "${NERDA_PASSKEYS_PROFILE:-}" ]; then
+  [ -n "$IDENTITY" ] || { echo "Passkeys require a signing identity" >&2; exit 1; }
+  PASSKEYS_WORK="$(mktemp -d)"
+  trap 'rm -rf "$PASSKEYS_WORK"' EXIT
+  security cms -D -i "$NERDA_PASSKEYS_PROFILE" > "$PASSKEYS_WORK/profile.plist"
+  /usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.web-browser.public-key-credential' "$PASSKEYS_WORK/profile.plist" | grep -qx true \
+    || { echo "The profile does not authorize browser passkeys" >&2; exit 1; }
+  PROFILE_ID="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' "$PASSKEYS_WORK/profile.plist")"
+  PROFILE_TEAM="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.team-identifier' "$PASSKEYS_WORK/profile.plist")"
+  case "$PROFILE_ID" in
+    "$PROFILE_TEAM.$ID"|"$PROFILE_TEAM.*") ;;
+    *) echo "The passkey profile does not match $ID" >&2; exit 1 ;;
+  esac
+  # Nerda's own entitlements and what the profile grants, not the profile's
+  # whole list: that is what it allows, wildcards included, not what to sign.
+  cp Nerda.entitlements "$PASSKEYS_WORK/entitlements.plist"
+  /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $PROFILE_TEAM.$ID" \
+    -c "Add :com.apple.developer.team-identifier string $PROFILE_TEAM" \
+    -c "Add :com.apple.developer.web-browser.public-key-credential bool true" "$PASSKEYS_WORK/entitlements.plist"
+  cp "$NERDA_PASSKEYS_PROFILE" "$APP/Contents/embedded.provisionprofile"
+  ENTITLEMENTS="$PASSKEYS_WORK/entitlements.plist"
+fi
 if [ "$CONFIG" = release ] && [ -n "$IDENTITY" ]; then
   # The hardened runtime notarization insists on, a timestamp so the
   # signature outlives the certificate, and the one thing pages need that the
   # runtime would refuse otherwise: Nerda.entitlements.
-  codesign --force --options runtime --timestamp --entitlements Nerda.entitlements --sign "$IDENTITY" "$APP"
+  codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$APP"
 else
-  codesign --force --timestamp=none --sign "${IDENTITY:--}" "$APP"
+  if [ -n "${NERDA_PASSKEYS_PROFILE:-}" ]; then
+    codesign --force --timestamp=none --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$APP"
+  else
+    codesign --force --timestamp=none --sign "${IDENTITY:--}" "$APP"
+  fi
 fi
 echo "$APP"

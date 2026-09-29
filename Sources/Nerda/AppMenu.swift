@@ -68,6 +68,7 @@ final class AppMenu: NSObject {
             ]),
             submenu("File", [
                 item("New Tab", #selector(newTab), "t", target: self),
+                item("Reopen Closed Tab", #selector(reopenClosedTab), "t", [.command, .shift], target: self),
                 item("New Incognito Window", #selector(newIncognitoWindow), "n", [.command, .shift], target: self),
                 // ⌘⇧A, as Chrome's Search Tabs: a key sites leave to the browser,
                 // where ⌘K is often a site's own.
@@ -78,6 +79,7 @@ final class AppMenu: NSObject {
                 .separator(),
                 item("Import Passwords…", #selector(importPasswords), target: self),
                 item("Import Bookmarks…", #selector(importBookmarks), target: self),
+                item("Export Bookmarks…", #selector(exportBookmarks), target: self),
             ]),
             submenu("Edit", [
                 item("Undo", Selector(("undo:")), "z"),
@@ -176,7 +178,7 @@ final class AppMenu: NSObject {
               NSApp.modalWindow == nil, let typed = event.charactersIgnoringModifiers?.lowercased() else { return false }
         let key = typed.allSatisfy(\.isASCII) ? typed : latinKeys[event.keyCode] ?? typed
         let reserved = modifiers == .command && ["t", "w", "l", "q", "d", ","].contains(key)
-            || modifiers == [.command, .shift] && ["w", "a", "n"].contains(key)
+            || modifiers == [.command, .shift] && ["t", "w", "a", "n"].contains(key)
             || modifiers == [.command, .option] && ["i", "j", "c", "r", "u"].contains(key)
         return reserved && NSApp.mainMenu?.performKeyEquivalent(with: event) == true
     }
@@ -201,6 +203,11 @@ final class AppMenu: NSObject {
     @objc private func searchTabs() { shown.showCommandBar() }
     @objc private func openLocation() { shown.editAddress() }
     @objc private func closeTab() { browser.closeSelectedTab() }
+    @objc private func reopenClosedTab() { shown.reopenClosedTab() }
+    @objc private func reopenTab(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? Session.ClosedTab.ID else { return }
+        shown.reopenClosedTab(id)
+    }
     @objc private func toggleSidebar() { browser.toggleSidebar() }
     @objc private func reload() { browser.selected?.reload() }
     @objc private func hardReload() { browser.selected?.reload(fromOrigin: true) }
@@ -212,6 +219,7 @@ final class AppMenu: NSObject {
     @objc private func previousTab() { browser.selectTab(after: -1) }
     @objc private func importPasswords() { browser.importPasswords() }
     @objc private func importBookmarks() { regular.importBookmarks() }
+    @objc private func exportBookmarks() { regular.exportBookmarks() }
     @objc private func toggleBookmark() { browser.toggleBookmark() }
     @objc private func toggleResponsive() { browser.toggleResponsive() }
     @objc private func viewSource() { browser.viewSource() }
@@ -297,7 +305,7 @@ extension AppMenu: NSMenuItemValidation {
         // regular window, or unlocks first (a new incognito window), is not.
         if browser.locked {
             return [#selector(openSettings), #selector(openHistory), #selector(newIncognitoWindow),
-                    #selector(checkForUpdates), #selector(importPasswords), #selector(importBookmarks), #selector(openBookmark(_:)),
+                    #selector(checkForUpdates), #selector(importPasswords), #selector(importBookmarks), #selector(exportBookmarks), #selector(openBookmark(_:)),
                     #selector(choosePicture), #selector(useOwnPictures)].contains(item.action)
         }
         switch item.action {
@@ -307,6 +315,8 @@ extension AppMenu: NSMenuItemValidation {
             return TabStyle.current == .vertical
         case #selector(closeTab):
             return browser.commandBarOpen || browser.selectedID != nil
+        case #selector(reopenClosedTab):
+            return !browser.isPrivate && !browser.recentlyClosed.isEmpty
         case #selector(reload), #selector(hardReload), #selector(zoom(_:)):
             // Actual Size only once there is a zoom to undo.
             guard let tab = browser.selected, tab.hasPage else { return false }
@@ -350,6 +360,15 @@ extension AppMenu: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu.title != "Bookmarks" else { return fillBookmarks(menu) }
         while menu.items.count > 3 { menu.removeItem(at: 3) }
+        if !browser.isPrivate, !browser.recentlyClosed.isEmpty {
+            let closed = browser.recentlyClosed.reversed().map { closed in
+                let item = item(closed.tab.name ?? (closed.tab.title.isEmpty ? closed.tab.url?.host() ?? "Closed tab" : closed.tab.title),
+                                #selector(reopenTab(_:)), target: self)
+                item.representedObject = closed.id
+                return item
+            }
+            menu.addItem(submenu("Recently Closed", closed))
+        }
         menu.addItem(.separator())
         for visit in History.shared.recent(15) {
             let title = visit.title.isEmpty ? visit.url.absoluteString : visit.title
@@ -414,6 +433,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if browser.isPrivate { Windows.closed(self) }
     }
 
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard browser.tabs.contains(where: \.hasUnsavedWork) || browser.downloads.contains(where: \.needsSession) else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Close this window?"
+        alert.informativeText = "Unsaved changes may be lost and unfinished downloads will be lost."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Close")
+        alert.beginSheetModal(for: sender) { answer in
+            if answer == .alertSecondButtonReturn { sender.close() }
+        }
+        return false
+    }
+
     /// The window comes back with the tabs it closed with.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows {
@@ -440,7 +472,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // With no tabs there is nothing to lose.
-        guard QuitConfirmation.isWanted, !browser.tabs.isEmpty, !QuitConfirmation.systemIsQuitting,
+        let hasWork = NSApp.windows.compactMap { ($0 as? BrowserWindow)?.browser }.contains {
+            $0.tabs.contains(where: \.hasUnsavedWork) || $0.downloads.contains(where: \.needsSession)
+        }
+        guard (QuitConfirmation.isWanted && !browser.tabs.isEmpty) || hasWork, !QuitConfirmation.systemIsQuitting,
               !Updater.shared.relaunching
         else {
             return .terminateNow

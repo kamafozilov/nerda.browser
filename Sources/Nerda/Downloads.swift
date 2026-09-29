@@ -6,11 +6,19 @@ import WebKit
 /// A file on its way to ~/Downloads, and how far along it is.
 @Observable
 final class Download: Identifiable {
-    enum State { case running, finished, failed, cancelled }
+    enum State { case running, paused, finished, failed, cancelled }
 
     let id = UUID()
     let started = Date.now
-    @ObservationIgnored let task: WKDownload
+    @ObservationIgnored private(set) var task: WKDownload
+    private(set) var resumeData: Data?
+    private(set) var error: String?
+    var isResuming = false
+    var canResume: Bool { (state == .failed || state == .paused) && resumeData != nil }
+    var canRetry: Bool {
+        (state == .failed || state == .cancelled) && Downloads.canRetry(task.originalRequest)
+    }
+    var needsSession: Bool { state == .running || state == .paused || canResume }
     /// Where it is being saved; nil until WebKit asks.
     var file: URL?
     private(set) var state = State.running
@@ -30,17 +38,34 @@ final class Download: Identifiable {
 
     init(_ task: WKDownload) {
         self.task = task
+        observe(task)
+    }
+
+    func restart(with task: WKDownload, resuming: Bool) {
+        self.task = task
+        isResuming = resuming
+        resumeData = nil
+        error = nil
+        state = .running
+        if !resuming { received = 0; total = -1; file = nil }
+        observe(task)
+    }
+
+    private func observe(_ task: WKDownload) {
         // Every chunk reports in; only those that move what is drawn go on
         // to the main thread, not one hop per chunk.
         let drawn = OSAllocatedUnfairLock(initialState: (received: Int64(0), total: Int64(-1)))
-        observation = task.progress.observe(\.completedUnitCount) { [weak self] progress, _ in
+        observation = task.progress.observe(\.completedUnitCount) { [weak self, weak task] progress, _ in
             let received = progress.completedUnitCount, total = progress.totalUnitCount
             guard drawn.withLock({ drawn in
                 guard Self.moves(received: received, total: total, from: drawn) else { return false }
                 drawn = (received, total)
                 return true
             }) else { return }
-            Task { @MainActor in self?.update(received: received, total: total) }
+            Task { @MainActor in
+                guard let self, self.task === task else { return }
+                self.update(received: received, total: total)
+            }
         }
     }
 
@@ -58,26 +83,49 @@ final class Download: Identifiable {
     }
 
     func finish() {
+        resumeData = nil
         state = .finished
         if total < received { total = received }
         received = total
     }
 
-    func fail() {
-        if state == .running { state = .failed }
+    func fail(_ error: Error, resumeData: Data?) {
+        guard state == .running else { return }
+        self.error = error.localizedDescription
+        self.resumeData = resumeData
+        state = .failed
+    }
+
+    func pause() {
+        guard state == .running else { return }
+        state = .paused
+        task.cancel { [weak self] data in
+            guard let self, state == .paused else { return }
+            resumeData = data
+            if data == nil {
+                state = .failed
+                error = "This download cannot be resumed. Retry starts it again."
+            }
+        }
     }
 
     /// Stops it and takes away the part already saved.
     func cancel() {
+        let wasRunning = state == .running
         state = .cancelled
+        resumeData = nil
         let file = file
-        task.cancel { _ in
-            if let file { try? FileManager.default.removeItem(at: file) }
-        }
+        if wasRunning { task.cancel { _ in if let file { try? FileManager.default.removeItem(at: file) } } }
+        else if let file { try? FileManager.default.removeItem(at: file) }
     }
 }
 
 nonisolated enum Downloads {
+    static func canRetry(_ request: URLRequest?) -> Bool {
+        guard let request, ["http", "https"].contains(request.url?.scheme),
+              ["GET", "HEAD"].contains(request.httpMethod?.uppercased() ?? "GET") else { return false }
+        return request.httpBody == nil && request.httpBodyStream == nil
+    }
     /// `name` in `folder`, as "name (1).ext", "name (2).ext"… when taken.
     /// Only the last path component: a site's name can't reach other folders.
     static func destination(for name: String, in folder: URL) -> URL {
@@ -305,7 +353,7 @@ struct DownloadsList: View {
                     NSWorkspace.shared.open(.downloadsDirectory)
                 }
                 Spacer()
-                if browser.downloads.contains(where: { $0.state != .running }) {
+                if browser.downloads.contains(where: { $0.state != .running && $0.state != .paused }) {
                     FooterButton(title: "Clear") {
                         withAnimation(.easeOut(duration: 0.2)) { browser.clearDownloads() }
                     }
@@ -318,7 +366,7 @@ struct DownloadsList: View {
 
     private var rows: some View {
         VStack(spacing: 2) {
-            ForEach(browser.downloads) { DownloadRow(download: $0) }
+            ForEach(browser.downloads) { DownloadRow(download: $0, browser: browser) }
         }
         .padding(6)
     }
@@ -326,6 +374,7 @@ struct DownloadsList: View {
 
 private struct DownloadRow: View {
     let download: Download
+    let browser: Browser
 
     static let height: CGFloat = 52
 
@@ -357,13 +406,21 @@ private struct DownloadRow: View {
 
             switch download.state {
             case .running:
+                RowButton(symbol: "pause.circle.fill", label: "Pause", action: download.pause)
                 RowButton(symbol: "xmark.circle.fill", label: "Cancel", action: download.cancel)
             case .finished:
                 RowButton(symbol: "magnifyingglass.circle.fill", label: "Show in Finder") {
                     if let file = download.file { NSWorkspace.shared.activateFileViewerSelecting([file]) }
                 }
-            case .failed, .cancelled:
-                EmptyView()
+            case .paused, .failed, .cancelled:
+                if download.canResume {
+                    RowButton(symbol: "play.circle.fill", label: "Resume") { browser.resume(download) }
+                } else if download.canRetry {
+                    RowButton(symbol: "arrow.clockwise.circle.fill", label: "Retry") { browser.resume(download) }
+                }
+                if download.state == .paused {
+                    RowButton(symbol: "xmark.circle.fill", label: "Cancel", action: download.cancel)
+                }
             }
         }
         .padding(.horizontal, 10)
@@ -391,7 +448,8 @@ private struct DownloadRow: View {
             guard download.total > 0 else { return received }
             return "\(received) of \(download.total.formatted(.byteCount(style: .file)))"
         case .finished: return received
-        case .failed: return "Failed"
+        case .paused: return "Paused · \(received)"
+        case .failed: return download.error ?? "Failed"
         case .cancelled: return "Cancelled"
         }
     }

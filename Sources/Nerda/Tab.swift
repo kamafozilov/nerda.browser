@@ -138,6 +138,8 @@ final class Tab: Identifiable {
     /// The page's uncaught JavaScript errors since it loaded, on this Mac
     /// only (`isOnThisMac`), for the address bar's Console button.
     var errors = 0
+    var hasUnsavedWork = false
+    @ObservationIgnored var departureApproved = false
 
     /// The page's own title; until it has one, the site's name, or for an
     /// address without one (file:, about:blank), the address itself.
@@ -212,6 +214,15 @@ final class Tab: Identifiable {
 
     /// Takes the tab to `url`, a new one included.
     func go(to url: URL) {
+        // An address typed, a bookmark: the browser leaving the page asks.
+        if let page, hasUnsavedWork, !departureApproved, let browser = delegate as? Browser {
+            Task {
+                guard await browser.confirmDiscarding(on: page), self.page === page else { return }
+                departureApproved = true
+                go(to: url)
+            }
+            return
+        }
         settings = nil
         showsHistory = false
         // An extension's page is only served to a view made from its
@@ -488,8 +499,11 @@ final class Tab: Identifiable {
     /// ends with it, and with that the memory, which is most of a tab's cost.
     /// `look`, the page's top (`snapshot`), stays for its hover card: some
     /// 100 KB, of the hundreds of MB let go.
-    func sleep(keeping look: NSImage? = nil) {
+    func sleep(keeping look: NSImage? = nil, discarding: Bool = false) {
+        guard discarding || !hasUnsavedWork else { return }
         guard let page else { return }
+        hasUnsavedWork = false
+        departureApproved = false
         recoloring?.cancel()
         recoloring = nil
         // Packed off the main thread: a few ms each, and under memory
@@ -558,6 +572,8 @@ final class Tab: Identifiable {
     /// site that gives none, as it means to be. WebKit holds the new page back
     /// until it has something to show, so the ground under it never shows through.
     func pageDidCommit() {
+        hasUnsavedWork = false
+        departureApproved = false
         if let page { Self.set(page, "_setDrawsBackground:", true) }
         errors = 0
     }
@@ -634,6 +650,7 @@ final class Tab: Identifiable {
     /// Something the user would notice stopping: sound or video playing, or
     /// the camera or microphone on. A page like that is never put to sleep.
     func isBusy() async -> Bool {
+        if hasUnsavedWork { return true }
         guard let page else { return false }
         if page.cameraCaptureState != .none || page.microphoneCaptureState != .none { return true }
         return await page.requestMediaPlaybackState() == .playing
@@ -740,6 +757,7 @@ final class Tab: Identifiable {
         configuration.userContentController.addUserScript(Fullscreen.bridge)
         configuration.userContentController.add(Fullscreen.messages, contentWorld: .defaultClient, name: "fullscreen")
         Passwords.install(in: configuration.userContentController)
+        PageActivity.install(in: configuration.userContentController)
         WebStore.install(in: configuration.userContentController)
         // Chrome extensions see the pages of the regular window, not an
         // incognito one's, as in Chrome. The controller has to be there when

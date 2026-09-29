@@ -7,6 +7,22 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- Reopen Closed Tab (⇧⌘T) brings back the last 25 closed tabs with their history, zoom and names, including after restarting Nerda. Pick an older one in History › Recently Closed; incognito tabs are never kept.
+- Site settings, beside the address, lets you allow ads for one site, choose Ask, Allow or Block for its camera, microphone and location, and clear its data. Reload to apply an ad-blocking change.
+- Downloads can be paused and resumed. An interrupted download offers Resume when the server supports it, or Retry for a download that can safely start again.
+- File › Export Bookmarks… saves your bookmarks and folders as an HTML file other browsers can import.
+
+### Changed
+
+- Pages you edit stay awake, including forms inside frames, so an automatic sleep cannot throw away your work. Closing or leaving an edited page asks first, and quitting or restarting for an update warns about unsaved work and unfinished downloads.
+
+### Fixed
+
+- Saved passwords fill sign-in forms inside frames, using the frame's own site and filling only that frame.
+- Closing Find on Page no longer leaves the last match highlighted.
+
 ## [0.0.14] - 2026-09-30
 
 ### Changed

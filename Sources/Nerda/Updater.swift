@@ -154,6 +154,24 @@ final class Updater {
     /// From the card: fetches the release found, then relaunches as it.
     func install() {
         guard let release = found, !state.isBusy else { return }
+        // Asked before the download, so Later costs nothing and a Restart
+        // isn't followed by a second download of the same release.
+        let hasWork = NSApp.windows.compactMap { ($0 as? BrowserWindow)?.browser }.contains {
+            $0.tabs.contains(where: \.hasUnsavedWork) || $0.downloads.contains(where: \.needsSession)
+        }
+        guard hasWork else { return download(release) }
+        let alert = NSAlert()
+        alert.messageText = "Restart to update Nerda?"
+        alert.informativeText = "Unsaved changes may be lost and unfinished downloads will be lost."
+        alert.addButton(withTitle: "Later")
+        alert.addButton(withTitle: "Restart")
+        present(alert) { answer in
+            if answer == .alertSecondButtonReturn { self.download(release) }
+        }
+    }
+
+    private func download(_ release: Release) {
+        guard !state.isBusy else { return }
         state = .downloading(0)
         Task {
             do {

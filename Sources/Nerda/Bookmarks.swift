@@ -243,6 +243,24 @@ final class Bookmarks {
         String(text).replacing("&lt;", with: "<").replacing("&gt;", with: ">").replacing("&quot;", with: "\"")
             .replacing("&#39;", with: "'").replacing("&amp;", with: "&")
     }
+
+    /// Netscape HTML, understood by the same browsers we import from.
+    nonisolated static func html(_ items: [Item]) -> String {
+        func escaped(_ value: String) -> String {
+            value.replacing("&", with: "&amp;").replacing("<", with: "&lt;")
+                .replacing(">", with: "&gt;").replacing("\"", with: "&quot;")
+        }
+        func list(_ items: [Item]) -> String {
+            "<DL><p>\n" + items.map { item in
+                if let children = item.children {
+                    return "<DT><H3>\(escaped(item.title))</H3>\n" + list(children)
+                }
+                guard let url = item.url, ["http", "https", "file"].contains(url.scheme) else { return "" }
+                return "<DT><A HREF=\"\(escaped(url.absoluteString))\">\(escaped(item.title))</A>\n"
+            }.joined() + "</DL><p>\n"
+        }
+        return "<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=UTF-8\">\n<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n" + list(items)
+    }
 }
 
 /// See `Browser.openBookmarks`.
@@ -353,5 +371,14 @@ extension Browser {
         withAnimation(.slide) { bookmarks.add(Bookmarks.Item(title: "Imported", children: found)) }
         Self.tell(count == 1 ? "1 bookmark imported" : "\(count) bookmarks imported",
                   "They are in the Imported folder, at the end of your bookmarks.")
+    }
+
+    func exportBookmarks() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.html]
+        panel.nameFieldStringValue = "Nerda Bookmarks.html"
+        guard panel.runModal() == .OK, let file = panel.url else { return }
+        do { try Bookmarks.html(bookmarks.items).write(to: file, atomically: true, encoding: .utf8) }
+        catch { Self.tell("Couldn't export bookmarks", error.localizedDescription) }
     }
 }

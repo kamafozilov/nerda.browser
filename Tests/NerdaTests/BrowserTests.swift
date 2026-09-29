@@ -706,6 +706,28 @@ func iconsAreKeptPerOrigin(url: String, origin: String?) {
     #expect(try await run("return scrollY") as? Int == 2800)
 }
 
+/// A match found stays highlighted only while the find bar is up.
+@MainActor
+@Test func putAwayFindLeavesNoHighlight() async throws {
+    let browser = Browser()
+    let tab = Tab()
+    browser.add(tab)
+    let page = tab.webView
+    page.loadHTMLString("<p>needle in a haystack</p>", baseURL: somewhere)
+    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    func selected() async throws -> String? {
+        try await page.callAsyncJavaScript("return getSelection().toString()", contentWorld: .page) as? String
+    }
+    browser.showFindBar()
+    browser.findQuery = "needle"
+    browser.find()
+    for _ in 0..<100 where try await selected() != "needle" { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(try await selected() == "needle")
+    browser.hideFindBar()
+    for _ in 0..<100 where try await selected() != "" { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(try await selected() == "")
+}
+
 /// Pages see nothing of Nerda that Safari doesn't show them: no
 /// `window.webkit`, the mark of an app's web view, which Google answers
 /// with CAPTCHAs.

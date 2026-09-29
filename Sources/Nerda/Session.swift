@@ -29,6 +29,14 @@ nonisolated struct Session: Codable, Equatable, Sendable {
     var tabs: [Tab]
     /// Which of them was on screen.
     var selected: Int?
+    var closed: [ClosedTab]? = nil
+
+    struct ClosedTab: Codable, Equatable, Sendable, Identifiable {
+        var id = UUID()
+        let tab: Tab
+        let index: Int
+        var date = Date.now
+    }
 
     static let file = Edition.folder.appending(path: "session.json")
 
@@ -53,6 +61,7 @@ extension Browser {
             try? data.write(to: file.deletingLastPathComponent().appending(path: "session-unreadable.json"))
             return
         }
+        if !isPrivate { recentlyClosed = Array((session.closed ?? []).suffix(25)) }
         add(session.tabs.map(Tab.init(restoring:)))
         guard !tabs.isEmpty else { return }
         // A bookmark taken away since (in another window, before a crash): its tab joins the list.
@@ -72,7 +81,7 @@ extension Browser {
 
     /// The tabs now, as they would be saved.
     var session: Session {
-        var session = Session(tabs: [])
+        var session = Session(tabs: [], closed: recentlyClosed.isEmpty ? nil : recentlyClosed)
         for tab in tabs {
             guard let saved = tab.saved else { continue }
             if tab.id == selectedID { session.selected = session.tabs.count }

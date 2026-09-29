@@ -73,7 +73,7 @@ private struct QuitDialog: View {
                 .font(.system(size: 18, weight: .bold))
                 .foregroundStyle(Palette.ink)
                 .padding(.top, 14)
-            Text("You may lose unsaved work in your tabs.")
+            Text("Unsaved changes and unfinished downloads may be lost.")
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.muted)
                 .padding(.top, 8)
