@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.16] - 2026-09-30
+
 ### Changed
 
 - Nerda has a new icon: two cream blocks that form an N, on a black tile.
@@ -276,7 +278,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.15...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.16...HEAD
+[0.0.16]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.15...v0.0.16
 [0.0.15]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.14...v0.0.15
 [0.0.14]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.13...v0.0.14
 [0.0.13]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.12...v0.0.13
