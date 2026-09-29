@@ -144,7 +144,7 @@ private struct ExtensionMenu: View {
             // A store page whose own button Nerda couldn't find: the way in.
             if let id = WebStore.extensionID(on: extensions.browser?.selected?.site),
                !extensions.installed.contains(where: { $0.id == id }) {
-                MenuRow(symbol: extensions.busy == id ? "hourglass" : "plus.circle", title: extensions.busy == id ? "Adding…" : "Add This Extension to Nerda") {
+                PopoverRow(symbol: extensions.busy == id ? "hourglass" : "plus.circle", title: extensions.busy == id ? "Adding…" : "Add This Extension to Nerda") {
                     extensions.install(from: id)
                 }
                 .disabled(extensions.busy != nil)
@@ -171,11 +171,11 @@ private struct ExtensionMenu: View {
             }
             Divider().padding(.horizontal, 12).padding(.vertical, 4)
             VStack(spacing: 2) {
-                MenuRow(symbol: "bag", title: "Chrome Web Store") {
+                PopoverRow(symbol: "bag", title: "Chrome Web Store") {
                     extensions.menuOpen = false
                     extensions.browser?.open(WebStore.home)
                 }
-                MenuRow(symbol: "gearshape", title: "Manage Extensions") {
+                PopoverRow(symbol: "gearshape", title: "Manage Extensions") {
                     extensions.menuOpen = false
                     extensions.browser?.openSettings(.extensions)
                 }
@@ -247,7 +247,8 @@ private struct PinButton: View {
     }
 }
 
-private struct MenuRow: View {
+/// A row of a popover list that does something: an icon, then what it does.
+struct PopoverRow: View {
     let symbol: String
     let title: String
     let action: () -> Void

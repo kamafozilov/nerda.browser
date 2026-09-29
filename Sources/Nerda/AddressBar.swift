@@ -50,7 +50,7 @@ struct AddressBar: View {
             }
             CopyButton(enabled: tab?.site != nil, copy: browser.copyLink)
             if let url = tab?.site, SiteSettings.origin(url) != nil {
-                SiteControls(browser: browser, url: url).id(tab?.id)
+                SiteControls(browser: browser, url: url, scheme: scheme).id(tab?.id)
             }
             Group {
                 if browser.editingAddress, let tab {

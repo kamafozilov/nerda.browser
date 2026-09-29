@@ -177,6 +177,24 @@ struct ReadinessTests {
         #expect(SiteSettings(defaults: nil).options(for: url) == .init())
     }
 
+    @Test func siteSettingsSavedBeforeNotificationsKeepTheirChoices() throws {
+        let saved = #"{"https://example.com:443":{"blocksAds":false,"camera":"allow","microphone":"block","location":"ask"}}"#
+        let defaults = try #require(UserDefaults(suiteName: "nerda-site-settings-\(UUID())"))
+        defaults.set(Data(saved.utf8), forKey: "siteSettings")
+        let settings = SiteSettings(defaults: defaults)
+        let url = URL(string: "https://example.com")!
+        let options = settings.options(for: url)
+        #expect(!options.blocksAds && options.camera == .allow && options.microphone == .block && options.notifications == .ask)
+        #expect(settings.notificationPermissions.isEmpty)
+        var allowed = options
+        allowed.notifications = .allow
+        settings.set(allowed, for: url)
+        var blocked = SiteSettings.Options()
+        blocked.notifications = .block
+        settings.set(blocked, for: URL(string: "http://localhost:8080")!)
+        #expect(settings.notificationPermissions == ["https://example.com": true, "http://localhost:8080": false])
+    }
+
     @Test func nativePasskeysAreMaskedOnlyWithoutAuthorization() {
         let authorized = WKUserContentController(), fallback = WKUserContentController()
         Passwords.install(in: authorized, nativePasskeys: true)

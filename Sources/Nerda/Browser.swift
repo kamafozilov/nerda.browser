@@ -70,6 +70,8 @@ final class Browser: NSObject {
     var recentlyClosed: [Session.ClosedTab] = []
     @ObservationIgnored private var closing: Set<Tab.ID> = []
     let siteSettings: SiteSettings
+    /// A site's question waiting for an answer (`askPermission`).
+    var permissionRequest: PermissionRequest?
     /// Find in page (⌘F): the bar, what it looks for, and whether the last look found it.
     var findBarOpen = false
     var findQuery = ""
@@ -511,7 +513,7 @@ extension Browser: WKUIDelegate {
     /// Looked at again each time the tab on screen, the lock or the tabs
     /// change, rather than every moment. A tab that sleeps meanwhile is let go
     /// of at the next of those, as sleeping changes none of them.
-    private func window(showing webView: WKWebView) async -> NSWindow? {
+    func window(showing webView: WKWebView) async -> NSWindow? {
         guard let tab = tab(for: webView) else { return nil }
         while tab.id != selectedID || locked {
             await withCheckedContinuation { changed in

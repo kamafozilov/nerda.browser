@@ -745,6 +745,7 @@ final class Tab: Identifiable {
         // By key: Apple deprecated the property as having no effect, which it
         // still has (measured on macOS 27).
         configuration.setValue(processPool, forKey: "processPool")
+        WebNotifications.start(pool: processPool)
         configuration.applicationNameForUserAgent = applicationName
         // A window a page opens only from a click or a key, as in Safari: on
         // the Mac, WebKit otherwise lets a page open them whenever it likes,

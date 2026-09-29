@@ -7,6 +7,15 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- Sites can send you notifications. When a site asks, Nerda asks you under Site Settings, beside the address: Allow shows its notifications as the Mac's own, and clicking one takes you to its tab; Block stops it asking. Change your mind in Site Settings › Notifications. Incognito windows never ask.
+
+### Changed
+
+- Site Settings is laid out as Nerda's other menus: each permission has its icon and a small Ask, Allow or Block menu, Reload to Apply shows only after an ad-blocking change, and a note says when macOS itself keeps the camera, microphone, location or notifications from Nerda.
+- A site asking for your camera, microphone or location asks in the same way as notifications, and your answer is kept for the site, where WebKit asked each time.
+
 ### Fixed
 
 - Sign-in pages that check for passkeys before showing, such as Stencil's, load instead of stopping at "Something went wrong".
