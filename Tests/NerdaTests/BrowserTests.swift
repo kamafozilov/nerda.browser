@@ -1438,6 +1438,8 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     context.evaluateScript(Passwords.withoutPasskeys)
     #expect(context.exception == nil)
     #expect(context.evaluateScript("typeof PublicKeyCredential").toString() == "undefined")
+    // Not there by name either: a site that finds it with `in` reads it next.
+    #expect(!context.evaluateScript("'PublicKeyCredential' in window").toBool())
     context.evaluateScript("""
         navigator.credentials.get({ publicKey: {} }).catch((error) => { globalThis.refused = error.name; });
         navigator.credentials.get({ password: true }).then((answer) => { globalThis.answered = answer; });
@@ -1446,6 +1448,7 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     #expect(context.evaluateScript("answered").toString() == "password")
     context.evaluateScript("navigator.credentials.get = () => Promise.resolve('from the extension');")
     #expect(context.evaluateScript("typeof PublicKeyCredential").toString() == "function")
+    #expect(context.evaluateScript("Object.hasOwn(navigator.credentials, 'get')").toBool())
 }
 
 /// Exports as Passwords and Chrome write them: quoted fields with commas,

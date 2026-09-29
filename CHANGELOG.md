@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Sign-in pages that check for passkeys before showing, such as Stencil's, load instead of stopping at "Something went wrong".
+
 ## [0.0.16] - 2026-09-30
 
 ### Changed
