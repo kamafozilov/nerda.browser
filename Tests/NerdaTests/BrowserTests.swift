@@ -2079,3 +2079,24 @@ func errorsAreCountedOnThisMacOnly(address: String, counted: Int) async throws {
     try await Task.sleep(for: .milliseconds(300))
     #expect(tab.errors == counted)
 }
+
+/// A page out of sight (a link opened behind) plays nothing until it is shown.
+@MainActor
+@Test func aPageOutOfSightWaitsToPlay() async throws {
+    let browser = Browser()
+    let tab = Tab()
+    browser.add(tab)
+    let page = tab.webView
+    page.loadHTMLString("<video></video>", baseURL: somewhere)
+    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    let result = try await page.callAsyncJavaScript("""
+        const video = document.querySelector('video');
+        let settled = false;
+        video.play().finally(() => { settled = true; });
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return [document.visibilityState, video.paused, settled];
+        """, contentWorld: .page) as? [Any]
+    #expect(result?[0] as? String == "hidden")
+    #expect(result?[1] as? Bool == true)
+    #expect(result?[2] as? Bool == false)
+}
