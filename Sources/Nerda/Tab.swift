@@ -391,6 +391,52 @@ final class Tab: Identifiable {
         })();
         """, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient)
 
+    /// A page loaded out of sight (a link opened behind, ⌘-click) plays no
+    /// video or sound until its tab is first shown, as in Chrome: WebKit lets
+    /// a YouTube video start in a tab you have not looked at yet. Its play()
+    /// waits, the promise with it, and one playing of itself (autoplay) is
+    /// paused until then; a pause() meanwhile cancels the wait. Once shown,
+    /// the page has WebKit's own again, and plays on when you leave it.
+    // ponytail: per document; a page that loads another while out of sight
+    // (not a single-page app) waits again, until its tab is shown.
+    private static let unseenMedia = WKUserScript(source: """
+        if (document.visibilityState === 'hidden') (() => {
+            const media = HTMLMediaElement.prototype, { play, pause } = media;
+            const waiting = new Map();
+            const aborted = () => new DOMException('The play() request was interrupted by a call to pause().', 'AbortError');
+            media.play = function () {
+                return new Promise((resolve, reject) => {
+                    if (!waiting.has(this)) waiting.set(this, []);
+                    waiting.get(this).push([resolve, reject]);
+                });
+            };
+            media.pause = function () {
+                for (const [, reject] of waiting.get(this) ?? []) reject(aborted());
+                waiting.delete(this);
+                return pause.call(this);
+            };
+            const autoplay = event => {
+                if (!(event.target instanceof HTMLMediaElement)) return;
+                pause.call(event.target);
+                if (!waiting.has(event.target)) waiting.set(event.target, []);
+            };
+            addEventListener('play', autoplay, true);
+            document.addEventListener('visibilitychange', function shown() {
+                if (document.visibilityState !== 'visible') return;
+                document.removeEventListener('visibilitychange', shown);
+                removeEventListener('play', autoplay, true);
+                media.play = play;
+                media.pause = pause;
+                for (const [element, asks] of waiting) {
+                    const started = element.isConnected ? play.call(element) : Promise.reject(aborted());
+                    started.catch(() => {});
+                    for (const [resolve, reject] of asks) started.then(resolve, reject);
+                }
+                waiting.clear();
+            });
+        })();
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
+
     /// An uncaught error, or a promise rejected with nothing to catch it, on
     /// a page from this Mac: counted for its tab (`errors`). Only listened
     /// for, so the console still says where each one came from. The events
@@ -776,6 +822,7 @@ final class Tab: Identifiable {
         configuration.userContentController.addUserScript(middleClick)
         configuration.userContentController.add(middleClicks, contentWorld: .defaultClient, name: "middleClick")
         configuration.userContentController.addUserScript(keepFocus)
+        configuration.userContentController.addUserScript(unseenMedia)
         configuration.userContentController.addUserScript(pageErrors)
         configuration.userContentController.add(pageErrorCounts, contentWorld: .defaultClient, name: "pageError")
         configuration.userContentController.addUserScript(JSONViewer.script)

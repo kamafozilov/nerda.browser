@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- A video or sound in a tab opened behind (⌘-click) waits until you go to that tab, instead of starting unseen.
+
 ## [0.0.17] - 2026-09-30
 
 ### Added
