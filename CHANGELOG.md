@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.19] - 2026-10-01
+
 ### Added
 
 - A page zoomed in or out (⌘+, ⌘−) shows its zoom, such as 125%, at the top of the sidebar. Click it to go back to actual size.
@@ -307,7 +309,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.18...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.19...HEAD
+[0.0.19]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.18...v0.0.19
 [0.0.18]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.17...v0.0.18
 [0.0.17]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.16...v0.0.17
 [0.0.16]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.15...v0.0.16
