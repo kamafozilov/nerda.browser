@@ -66,7 +66,8 @@ final class Browser: NSObject {
     private(set) var fullscreenTab: Tab.ID?
     /// This session's downloads, newest first.
     private(set) var downloads: [Download] = []
-    @ObservationIgnored var downloadFolder = URL.downloadsDirectory
+    /// Where this window's downloads go instead of `Downloads.folder` (tests).
+    @ObservationIgnored var downloadFolder: URL?
     var recentlyClosed: [Session.ClosedTab] = []
     @ObservationIgnored private var closing: Set<Tab.ID> = []
     let siteSettings: SiteSettings
@@ -92,10 +93,6 @@ final class Browser: NSObject {
     /// The same for bookmarks.
     @ObservationIgnored var bookmarks = Bookmarks.shared
 
-    /// How long a tab can go unseen before it sleeps.
-    // ponytail: fixed; a setting once there are settings. Edge's default is 2 hours,
-    // this is shorter because staying light is the point.
-    static let sleepAfter: TimeInterval = 30 * 60
     /// A tab taking more than `heavy` sleeps after this long unseen, pinned
     /// or not. Most pages take 100–400 MB; x.com and Gmail kept 650–750 MB
     /// each, pinned and never seen, and a WebGL site GBs. Woken, it loads
@@ -134,7 +131,7 @@ final class Browser: NSObject {
         // Checked each minute, loosely, so the system can fold it in with other wake-ups.
         sleepTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.sleepIdleTabs(unseenFor: Self.sleepAfter)
+                if let after = TabSleep.current.interval { self?.sleepIdleTabs(unseenFor: after) }
                 self?.sleepIdleTabs(unseenFor: Self.heavyAfter, pinsToo: true, over: Self.heavy)
             }
         }
@@ -801,13 +798,27 @@ extension Browser: WKNavigationDelegate {
     }
 }
 
-/// Downloads go to ~/Downloads under the name the site gives, numbered when
-/// that is taken, and bounce the Downloads stack in the Dock when done.
+/// Downloads go to the folder chosen in Settings (~/Downloads) under the name
+/// the site gives, numbered when that is taken, or where each is saved when
+/// Nerda is to ask; and bounce the Downloads stack in the Dock when done.
 extension Browser: WKDownloadDelegate {
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                   suggestedFilename: String) async -> URL? {
         if let item = item(for: download), item.isResuming, let file = item.file { return file }
-        let destination = Downloads.destination(for: suggestedFilename, in: downloadFolder)
+        if downloadFolder == nil, Downloads.asks, let window {
+            let panel = NSSavePanel()
+            panel.directoryURL = Downloads.folder
+            panel.nameFieldStringValue = Downloads.destination(for: suggestedFilename, in: Downloads.folder).lastPathComponent
+            guard await panel.beginSheetModal(for: window) == .OK, let file = panel.url else {
+                withAnimation(.slide) { downloads.removeAll { $0.task === download } }
+                return nil
+            }
+            // Replacing was agreed to in the panel; WebKit won't write over a file.
+            try? FileManager.default.removeItem(at: file)
+            item(for: download)?.file = file
+            return file
+        }
+        let destination = Downloads.destination(for: suggestedFilename, in: downloadFolder ?? Downloads.folder)
         item(for: download)?.file = destination
         return destination
     }
@@ -872,7 +883,7 @@ nonisolated enum Address {
     /// under its own field; nothing when it can't be reached.
     static func suggestions(for text: String) async -> [String] {
         // ["query", ["suggestion", …], …]
-        guard let request = SearchEngine.current.guesses(text),
+        guard SearchSuggestions.isOn, let request = SearchEngine.current.guesses(text),
               let (data, _) = try? await URLSession.shared.data(from: request),
               let reply = try? JSONSerialization.jsonObject(with: data) as? [Any],
               reply.count > 1, let suggestions = reply[1] as? [String]

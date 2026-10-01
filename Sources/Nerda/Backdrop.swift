@@ -177,7 +177,7 @@ final class Backdrop {
     /// Makes small copies of the pictures for the picker, those not made
     /// yet, before it is opened: it opens with them all there. Handed over
     /// together, so the tiles don't fill in one by one.
-    private func loadThumbnails() {
+    func loadThumbnails() {
         let files = (Self.own + chosen).filter { !thumbnailsAsked.contains($0) }
         guard !files.isEmpty else { return }
         thumbnailsAsked.formUnion(files)

@@ -4,7 +4,7 @@ import WebKit
 /// The pages of Nerda's settings, listed down the settings tab's left. Only
 /// what works is listed: a page comes once it has something in it.
 enum SettingsPage: String, CaseIterable, Identifiable, Codable {
-    case general, appearance, privacy, extensions, shortcuts, releaseNotes
+    case general, appearance, tabs, passwords, siteSettings, privacy, extensions, shortcuts, releaseNotes
 
     var id: Self { self }
 
@@ -12,6 +12,9 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .general: "General"
         case .appearance: "Appearance"
+        case .tabs: "Tabs"
+        case .passwords: "Passwords"
+        case .siteSettings: "Site Settings"
         case .privacy: "Security & Privacy"
         case .extensions: "Extensions"
         case .shortcuts: "Keyboard Shortcuts"
@@ -23,6 +26,9 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .general: "gearshape"
         case .appearance: "circle.lefthalf.filled"
+        case .tabs: "square.on.square"
+        case .passwords: "key"
+        case .siteSettings: "slider.horizontal.3"
         case .privacy: "lock"
         case .extensions: "puzzlepiece.extension"
         case .shortcuts: "keyboard"
@@ -33,7 +39,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
     /// The heading it is listed under.
     var section: String {
         switch self {
-        case .general, .appearance, .privacy, .extensions, .shortcuts: "Personal"
+        case .general, .appearance, .tabs, .passwords, .siteSettings, .privacy, .extensions, .shortcuts: "Personal"
         case .releaseNotes: "Nerda"
         }
     }
@@ -41,9 +47,15 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
     /// What the page holds, so a search finds it by a setting as well as by its name.
     private var keywords: [String] {
         switch self {
-        case .general: ["default browser", "search engine", "google", "picture in picture", "video", "screenshot", "language", "spell", "quit", "warn", "about", "version", "updates"]
-        case .appearance: ["theme", "dark", "light", "zoom", "tab style", "vertical", "horizontal", "sidebar", "transparency", "tinted", "transparent", "glass"]
-        case .privacy: ["security", "history", "delete", "clear", "cookies", "cache", "site data", "ads", "trackers", "adblock", "blocking", "filters", "easylist", "ublock", "adguard"]
+        case .general: ["default browser", "search engine", "google", "suggestions", "picture in picture", "video", "screenshot", "language", "spell",
+                        "downloads", "folder", "ask where to save", "bookmarks", "import", "export", "quit", "warn", "about", "version", "updates", "automatically"]
+        case .appearance: ["theme", "dark", "light", "zoom", "tab style", "vertical", "horizontal", "sidebar", "transparency", "tinted", "transparent", "glass",
+                           "new tab", "wallpaper", "picture", "background", "ai chats", "chatgpt", "claude"]
+        case .tabs: ["sleep", "memory", "performance", "inactive", "pinned", "launch", "startup", "preview", "hover", "card"]
+        case .passwords: ["autofill", "fill", "save", "never saved", "import", "keychain", "touch id", "accounts", "sign in", "login"]
+        case .siteSettings: ["permissions", "camera", "microphone", "location", "notifications", "sites", "allow", "block", "ads"]
+        case .privacy: ["security", "history", "keep history", "delete", "clear", "cookies", "cache", "site data", "ads", "trackers", "adblock", "blocking",
+                        "filters", "easylist", "ublock", "adguard", "incognito", "private", "lock"]
         case .extensions: ["chrome web store", "add-ons", "plugins", "unpacked", "developer"] + Extensions.shared.installed.map(\.name)
         case .shortcuts: ["keyboard", "keys", "hotkeys"] + ShortcutsSettings.groups.flatMap { $0.shortcuts.map(\.title) }
         case .releaseNotes: ["what's new", "changelog", "changes", "version", "updates"]
@@ -120,6 +132,12 @@ struct SettingsView: View {
                                         openReleaseNotes: { tab.settings = .releaseNotes })
                     case .appearance:
                         AppearanceSettings()
+                    case .tabs:
+                        TabsSettings()
+                    case .passwords:
+                        PasswordsSettings(browser: browser)
+                    case .siteSettings:
+                        SitePermissionsSettings()
                     case .privacy:
                         PrivacySettings(browser: browser) { deletingData = true }
                     case .extensions:
@@ -176,15 +194,21 @@ private struct GeneralSettings: View {
     @AppStorage(Screenshot.key) private var screenshot = true
     @AppStorage(SpellCheck.key) private var spellCheck = true
     @AppStorage(QuitConfirmation.key) private var warnsBeforeQuitting = true
-    @AppStorage(Session.loadsPinsKey) private var loadsPins = true
+    @AppStorage(SearchSuggestions.key) private var suggestions = true
+    @AppStorage(Downloads.folderKey) private var downloadFolder: String?
+    @AppStorage(Downloads.asksKey) private var asksWhereToSave = false
 
     var body: some View {
         DefaultBrowserCard()
-        SettingsGroup(title: "Preferences") {
+        SettingsGroup(title: "Search") {
             SettingsRow(title: "Default search engine", detail: "Used for searches from the address bar", icon: "magnifyingglass") {
                 DropdownButton(label: engine.name, site: engine.site,
                                options: SearchEngine.allCases.map { DropdownOption(id: $0.rawValue, title: $0.name, site: $0.site) },
                                selected: engine.rawValue) { engine = SearchEngine(rawValue: $0) ?? .google }
+            }
+            SettingsRow(title: "Search suggestions", detail: "\(engine.name) suggests searches as you type. Off, nothing leaves your Mac until Return",
+                        icon: "text.magnifyingglass") {
+                SettingsToggle(title: "Search suggestions", isOn: $suggestions)
             }
         }
         SettingsGroup {
@@ -218,12 +242,31 @@ private struct GeneralSettings: View {
             }
         }
         SettingsGroup {
-            SettingsRow(title: "Load pinned tabs at launch", detail: "Off, Nerda opens on a new tab and loads a pinned tab when you open it",
-                        icon: "pin") {
-                SettingsToggle(title: "Load pinned tabs at launch", isOn: $loadsPins)
-            }
             SettingsRow(title: "Warn before quitting", detail: "Ask before ⌘Q closes every window", icon: "power") {
                 SettingsToggle(title: "Warn before quitting", isOn: $warnsBeforeQuitting)
+            }
+        }
+        SettingsGroup(title: "Downloads") {
+            SettingsRow(title: "Download location", detail: (Downloads.folder.path(percentEncoded: false) as NSString).abbreviatingWithTildeInPath,
+                        icon: "folder") {
+                Button("Change…", action: chooseDownloadFolder)
+                    .buttonStyle(SettingsButtonStyle())
+                    .fixedSize()
+            }
+            SettingsRow(title: "Ask where to save each file", detail: "Choose a folder and a name before a download starts",
+                        icon: "questionmark.folder") {
+                SettingsToggle(title: "Ask where to save each file", isOn: $asksWhereToSave)
+            }
+        }
+        SettingsGroup(title: "Bookmarks") {
+            SettingsRow(title: "Import and export", detail: "From Chrome, Safari, Firefox or Arc, or yours to a file",
+                        icon: "book") {
+                HStack(spacing: 8) {
+                    Button("Import…") { Windows.regular.browser.importBookmarks() }
+                    Button("Export…") { Windows.regular.browser.exportBookmarks() }
+                }
+                .buttonStyle(SettingsButtonStyle())
+                .fixedSize()
             }
         }
         AboutSettings(openReleaseNotes: openReleaseNotes)
@@ -234,6 +277,19 @@ private struct GeneralSettings: View {
         let names = languages.map(PreferredLanguage.name).joined(separator: ", ")
         return languages.first == PreferredLanguage.current ? names : "\(names), once Nerda restarts"
     }
+
+    /// ~/Downloads chosen again is no choice at all: it follows the Mac's.
+    private func chooseDownloadFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.directoryURL = Downloads.folder
+        panel.message = "Choose where downloads go."
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let folder = panel.url?.standardizedFileURL else { return }
+        downloadFolder = folder == URL.downloadsDirectory.standardizedFileURL ? nil : folder.path(percentEncoded: false)
+    }
 }
 
 /// How Nerda looks, in System Settings' own order: the theme, the zoom pages
@@ -243,28 +299,45 @@ private struct AppearanceSettings: View {
     @AppStorage(PageZoom.key) private var zoom = 1.0
     @AppStorage(TabStyle.key) private var tabStyle = TabStyle.vertical
     @AppStorage(Transparency.key) private var transparency = Transparency.transparent
+    @AppStorage(AIChatsButton.key) private var showsAIChats = true
 
     var body: some View {
         SettingsGroup {
-            SettingsRow(title: "Theme", detail: "Light, dark, or the same as macOS") {
+            SettingsRow(title: "Theme", detail: "Light, dark, or the same as macOS", icon: "circle.lefthalf.filled") {
                 DropdownButton(label: theme.name, symbol: theme.symbol,
                                options: Theme.allCases.map { DropdownOption(id: $0.rawValue, title: $0.name, symbol: $0.symbol) },
                                selected: theme.rawValue) { theme = Theme(rawValue: $0) ?? .system }
             }
-            SettingsRow(title: "Zoom level", detail: "The size pages open at. ⌘+ and ⌘− change it for one page") {
+            SettingsRow(title: "Zoom level", detail: "The size pages open at. ⌘+ and ⌘− change it for one page", icon: "plus.magnifyingglass") {
                 DropdownButton(label: PageZoom.name(zoom),
                                options: PageZoom.levels.map { DropdownOption(id: "\($0)", title: PageZoom.name($0)) },
                                selected: "\(CGFloat(zoom))") { zoom = Double($0) ?? 1 }
             }
             SettingsRow(title: "Tab style", detail: "Tabs in a sidebar down the side, or in a row across the top",
-                        alignment: .top) {
+                        icon: "sidebar.left", alignment: .top) {
                 PicturePicker(options: TabStyle.allCases, selection: $tabStyle, name: \.name) { TabStylePicture(style: $0) }
             }
             SettingsRow(title: "Transparency", detail: "How much of your desktop shows through around the page",
-                        alignment: .top) {
+                        icon: "square.on.square.dashed", alignment: .top) {
                 PicturePicker(options: Transparency.allCases, selection: $transparency, name: \.name) {
                     TransparencyPicture(transparency: $0)
                 }
+            }
+        }
+        SettingsGroup(title: "New tab") {
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsRow(title: "Picture", detail: "Shown behind the search field. Daily brings a new one of Nerda's each day, and + adds your own",
+                            icon: "photo") { EmptyView() }
+                WallpaperStrip(backdrop: .shared, glass: false)
+                    .padding(.horizontal, 3)
+                    .padding(.bottom, 4)
+            }
+        }
+        .onAppear { Backdrop.shared.loadThumbnails() }
+        SettingsGroup(title: "Sidebar") {
+            SettingsRow(title: "AI chats", detail: "The button at the bottom of the sidebar that opens ChatGPT, Claude and the others",
+                        icon: "sparkles") {
+                SettingsToggle(title: "AI chats", isOn: $showsAIChats)
             }
         }
         .onChange(of: theme) { Theme.apply() }
@@ -282,6 +355,8 @@ private struct PrivacySettings: View {
     let deleteData: () -> Void
 
     @Bindable private var blocker = Blocker.shared
+    @AppStorage(HistoryKeep.key) private var keep = HistoryKeep.threeMonths
+    @AppStorage(IncognitoAutoLock.key) private var lock = IncognitoAutoLock.minute
 
     var body: some View {
         SettingsGroup(title: "Browsing history") {
@@ -290,8 +365,14 @@ private struct PrivacySettings: View {
                     .buttonStyle(SettingsButtonStyle())
                     .fixedSize()
             }
+            SettingsRow(title: "Keep history for", detail: "Pages you visited longer ago are removed", icon: "calendar.badge.clock") {
+                DropdownButton(label: keep.name,
+                               options: HistoryKeep.allCases.map { DropdownOption(id: "\($0.rawValue)", title: $0.name) },
+                               selected: "\(keep.rawValue)") { keep = Int($0).flatMap(HistoryKeep.init) ?? .threeMonths }
+            }
             SettingsLink(title: "View browsing history", icon: "clock.arrow.circlepath", action: browser.openHistory)
         }
+        .onChange(of: keep) { History.shared.keepChanged() }
         SettingsGroup(title: "Adblock") {
             SettingsRow(title: "Block ads and trackers", detail: blockDetail, icon: "hand.raised") {
                 SettingsToggle(title: "Block ads and trackers", isOn: $blocker.isEnabled)
@@ -301,6 +382,17 @@ private struct PrivacySettings: View {
                 FiltersButton()
             }
         }
+        SettingsGroup(title: "Incognito") {
+            SettingsRow(title: "Lock incognito windows",
+                        detail: "After Nerda is in the background this long, and whenever your Mac locks or sleeps",
+                        icon: "lock.rectangle.stack") {
+                DropdownButton(label: lock.name,
+                               options: IncognitoAutoLock.allCases.map {
+                                   DropdownOption(id: "\($0.rawValue)", title: $0.name, separated: $0 == .quarterHour)
+                               },
+                               selected: "\(lock.rawValue)") { lock = Int($0).flatMap(IncognitoAutoLock.init) ?? .minute }
+            }
+        }
     }
 
     private var blockDetail: String {
@@ -308,6 +400,237 @@ private struct PrivacySettings: View {
         if blocker.failed { return "Some filters couldn't be updated. Nerda tries again later" }
         guard let updated = blocker.updated else { return "If a site has trouble, turn this off and reload it" }
         return "Last updated \(updated.formatted(.relative(presentation: .named)))"
+    }
+}
+
+/// How tabs live: how soon one left alone sleeps, what loads at launch, and
+/// the card a tab shows under the pointer.
+private struct TabsSettings: View {
+    @AppStorage(TabSleep.key) private var sleep = TabSleep.halfHour
+    @AppStorage(Session.loadsPinsKey) private var loadsPins = true
+    @AppStorage(TabPreviews.key) private var previews = true
+
+    var body: some View {
+        SettingsGroup(title: "Memory") {
+            SettingsRow(title: "Sleep inactive tabs",
+                        detail: "A tab left this long frees its memory and loads again when opened. "
+                            + "One over \(Browser.heavy >> 20) MB sleeps after \(Int(Browser.heavyAfter / 60)) minutes",
+                        icon: "moon.zzz") {
+                DropdownButton(label: sleep.name,
+                               options: TabSleep.allCases.map {
+                                   DropdownOption(id: "\($0.rawValue)", title: $0.name, separated: $0 == .fourHours)
+                               },
+                               selected: "\(sleep.rawValue)") { sleep = Int($0).flatMap(TabSleep.init) ?? .halfHour }
+            }
+        }
+        SettingsGroup(title: "Startup") {
+            SettingsRow(title: "Load pinned tabs at launch", detail: "Off, Nerda opens on a new tab and loads a pinned tab when you open it",
+                        icon: "pin") {
+                SettingsToggle(title: "Load pinned tabs at launch", isOn: $loadsPins)
+            }
+        }
+        SettingsGroup(title: "Previews") {
+            SettingsRow(title: "Tab previews", detail: "When the pointer rests on a tab, show its page, its title and the memory it uses",
+                        icon: "rectangle.on.rectangle") {
+                SettingsToggle(title: "Tab previews", isOn: $previews)
+            }
+        }
+    }
+}
+
+/// Saved sign-ins: where to see them, whether Nerda offers to keep and fill
+/// them, and the sites it was told never to ask about.
+private struct PasswordsSettings: View {
+    let browser: Browser
+
+    @AppStorage(Passwords.offersKey) private var offers = true
+    @AppStorage(Passwords.fillsKey) private var fills = true
+    /// Read once, then changed here and in the defaults together.
+    @State private var never = Passwords.never.sorted()
+
+    var body: some View {
+        SettingsGroup {
+            SettingsLink(title: "Saved passwords", detail: "See, copy and change them. Opens with Touch ID or your Mac's password",
+                         icon: "key", action: PasswordsWindow.show)
+            SettingsRow(title: "Import passwords", detail: "From the file Passwords, Safari or Chrome exports", icon: "tray.and.arrow.down") {
+                Button("Import…", action: browser.importPasswords)
+                    .buttonStyle(SettingsButtonStyle())
+                    .fixedSize()
+            }
+        }
+        SettingsGroup(title: "AutoFill") {
+            SettingsRow(title: "Offer to save passwords", detail: offerDetail, icon: "square.and.arrow.down.on.square") {
+                SettingsToggle(title: "Offer to save passwords", isOn: $offers)
+            }
+            SettingsRow(title: "Fill in saved passwords", detail: "List your accounts under a sign-in box, to fill one in with a click",
+                        icon: "rectangle.and.pencil.and.ellipsis") {
+                SettingsToggle(title: "Fill in saved passwords", isOn: $fills)
+            }
+        }
+        SettingsGroup(title: "Never saved") {
+            if never.isEmpty {
+                SettingsRow(title: "No sites", detail: "Sites you answer Never for, when Nerda offers to save a password, are listed here",
+                            icon: "nosign") { EmptyView() }
+            }
+            ForEach(never, id: \.self) { site in
+                SiteRow(site: URL(string: "https://\(site)"), title: site) {
+                    Button("Remove") {
+                        never.removeAll { $0 == site }
+                        Passwords.never.remove(site)
+                    }
+                    .buttonStyle(SettingsButtonStyle())
+                    .fixedSize()
+                    .help("Offer to save passwords on \(site) again")
+                }
+            }
+        }
+    }
+
+    private var offerDetail: String {
+        if let manager = Extensions.shared.passwordSavingTakenBy { return "\(manager) saves your passwords instead" }
+        return "Ask to keep a new password once you have signed in with it"
+    }
+}
+
+/// What sites may do: what every site gets unless it has a choice of its
+/// own, and each site that has, to change or reset. The same choices as
+/// Site Settings beside the address.
+private struct SitePermissionsSettings: View {
+    private let settings = SiteSettings.shared
+    @State private var fallbacks = Dictionary(uniqueKeysWithValues: SiteSettings.Kind.allCases.map { ($0, $0.fallback) })
+    @State private var offOnMac: Set<SiteSettings.Kind> = []
+
+    var body: some View {
+        SettingsGroup(title: "Permissions") {
+            ForEach(Self.kinds) { kind in
+                let fallback = fallbacks[kind] ?? .ask
+                SettingsRow(title: kind.title, detail: detail(kind, fallback), icon: kind.symbol(fallback)) {
+                    DropdownButton(label: fallback.title,
+                                   options: [SiteSettings.Permission.ask, .block].map { DropdownOption(id: $0.rawValue, title: $0.title) },
+                                   selected: fallback.rawValue) { choice in
+                        let permission = SiteSettings.Permission(rawValue: choice) ?? .ask
+                        fallbacks[kind] = permission
+                        if permission == .ask { UserDefaults.standard.removeObject(forKey: kind.fallbackKey) }
+                        else { UserDefaults.standard.set(permission.rawValue, forKey: kind.fallbackKey) }
+                    }
+                }
+            }
+        }
+        .task { offOnMac = await SiteSettings.offOnMac() }
+        SettingsGroup(title: "Sites") {
+            let sites = settings.sites.compactMap { key, options in Self.address(key).map { (url: $0, options: options) } }
+                .sorted { name($0.url).localizedStandardCompare(name($1.url)) == .orderedAscending }
+            if sites.isEmpty {
+                SettingsRow(title: "No sites yet", detail: "Sites you allow or block, when they ask or in Site Settings beside the address, are listed here",
+                            icon: "globe") { EmptyView() }
+            }
+            ForEach(sites, id: \.url) { site in
+                SiteRow(site: site.url, title: name(site.url), detail: summary(site.options)) {
+                    menu(for: site.url)
+                }
+            }
+        }
+    }
+
+    /// Notifications only where WebKit hands them over.
+    private static var kinds: [SiteSettings.Kind] {
+        SiteSettings.Kind.allCases.filter { $0 != .notifications || WebNotifications.isAvailable }
+    }
+
+    private func detail(_ kind: SiteSettings.Kind, _ fallback: SiteSettings.Permission) -> String {
+        if offOnMac.contains(kind) { return "Off for Nerda in System Settings › Privacy & Security" }
+        let what = kind.request.prefix(1).lowercased() + kind.request.dropFirst()
+        return fallback == .block ? "Sites can't ask to \(what)" : "Sites ask before they \(what)"
+    }
+
+    /// A site's origin as an address, without the port its scheme goes to anyway.
+    private static func address(_ origin: String) -> URL? {
+        guard var parts = URLComponents(string: origin) else { return nil }
+        if parts.port == (parts.scheme == "https" ? 443 : 80) { parts.port = nil }
+        return parts.url
+    }
+
+    private func name(_ url: URL) -> String {
+        let site = History.site(of: url) ?? url.host() ?? url.absoluteString
+        return url.scheme == "http" ? "http://\(site)" : site
+    }
+
+    /// What is the site's own: "Camera allowed · Notifications blocked".
+    private func summary(_ options: SiteSettings.Options) -> String {
+        var parts = Self.kinds.compactMap { kind -> String? in
+            switch options[keyPath: kind.key] {
+            case .ask: nil
+            case .allow: "\(kind.title) allowed"
+            case .block: "\(kind.title) blocked"
+            }
+        }
+        if !options.blocksAds { parts.append("Ads not blocked") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Each permission to pick again, ads, and a way back to what every site gets.
+    private func menu(for url: URL) -> some View {
+        let options = settings.resolved(for: url)
+        return Menu {
+            ForEach(Self.kinds) { kind in
+                Picker(kind.title, selection: Binding(get: { options[keyPath: kind.key] }, set: { change(kind.key, to: $0, for: url) })) {
+                    ForEach(kind.choices) { Text($0.title).tag($0) }
+                }
+            }
+            Toggle("Block Ads and Trackers", isOn: Binding(get: { options.blocksAds }, set: { change(\.blocksAds, to: $0, for: url) }))
+            Divider()
+            Button("Reset Site Settings") { Windows.regular.browser.changeSiteOptions(.init(), for: url) }
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .foregroundStyle(Palette.muted)
+        .fixedSize()
+        .accessibilityLabel("Settings for \(name(url))")
+    }
+
+    /// Through the regular window, which takes back what is no longer allowed at once.
+    private func change<T>(_ key: WritableKeyPath<SiteSettings.Options, T>, to value: T, for url: URL) {
+        var options = settings.options(for: url)
+        options[keyPath: key] = value
+        Windows.regular.browser.changeSiteOptions(options, for: url)
+    }
+}
+
+/// A site in a list: its icon and name, a line on it, and what can be done to it.
+private struct SiteRow<Control: View>: View {
+    let site: URL?
+    let title: String
+    var detail: String?
+    @ViewBuilder let control: Control
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Group {
+                if let site { Favicon(site: site, size: 16, plate: false) }
+            }
+            .frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                if let detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 8)
+            control
+        }
+        .padding(.horizontal, 13)
+        .frame(minHeight: 52)
     }
 }
 
@@ -849,6 +1172,7 @@ private struct ShortcutsSettings: View {
             ("Find", "Search for text on the page", "⌘F"),
             ("Find Next", "Go to the next match", "⌘G"),
             ("Find Previous", "Go to the match before", "⇧⌘G"),
+            ("Bookmark This Tab", "Keep the page in your bookmarks, or take it out", "⌘D"),
             ("Zoom In", "Make the page bigger", "⌘+"),
             ("Zoom Out", "Make the page smaller", "⌘−"),
             ("Actual Size", "Back to the zoom pages open at", "⌘0"),
@@ -861,7 +1185,15 @@ private struct ShortcutsSettings: View {
             ("Settings", "Open Nerda's settings", "⌘,"),
             ("Minimize", "Put the window in the Dock", "⌘M"),
             ("Hide Nerda", "Hide Nerda's windows", "⌘H"),
+            ("Hide Others", "Hide every app's windows but Nerda's", "⌥⌘H"),
             ("Quit Nerda", "Close Nerda. Your tabs come back next time", "⌘Q"),
+        ]),
+        ("Developer", [
+            ("Developer Tools", "Open the page's Web Inspector", "⌥⌘I"),
+            ("JavaScript Console", "Open the inspector on its console", "⌥⌘J"),
+            ("Inspect Element", "Pick something on the page to inspect", "⌥⌘C"),
+            ("Responsive Design Mode", "See the page as a phone or a tablet shows it", "⌥⌘R"),
+            ("View Page Source", "The page's HTML, in a tab of its own", "⌥⌘U"),
         ]),
     ]
 
@@ -1121,6 +1453,7 @@ private struct AboutSettings: View {
     let openReleaseNotes: () -> Void
 
     private let updater = Updater.shared
+    @AppStorage(Updater.automaticKey) private var automatic = true
 
     var body: some View {
         SettingsGroup(title: "About Nerda") {
@@ -1142,6 +1475,11 @@ private struct AboutSettings: View {
                 }
             }
             .padding(.vertical, 6)
+            if Edition.updates {
+                SettingsRow(title: "Check for updates automatically", detail: "Look for a newer Nerda a few times a day", icon: "arrow.triangle.2.circlepath") {
+                    SettingsToggle(title: "Check for updates automatically", isOn: $automatic)
+                }
+            }
             SettingsLink(title: "Release notes", detail: "What each version brought", icon: "sparkles", action: openReleaseNotes)
         }
         VStack(alignment: .leading, spacing: 3) {

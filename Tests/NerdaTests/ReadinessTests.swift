@@ -177,6 +177,23 @@ struct ReadinessTests {
         #expect(SiteSettings(defaults: nil).options(for: url) == .init())
     }
 
+    @Test func sitesNotAnsweredForGetWhatSettingsGivesEverySite() {
+        let kind = SiteSettings.Kind.location
+        UserDefaults.standard.set(SiteSettings.Permission.block.rawValue, forKey: kind.fallbackKey)
+        defer { UserDefaults.standard.removeObject(forKey: kind.fallbackKey) }
+        let settings = SiteSettings(defaults: nil)
+        let asked = URL(string: "https://example.com")!, allowed = URL(string: "https://maps.example.com")!
+        var options = SiteSettings.Options()
+        options.location = .allow
+        settings.set(options, for: allowed)
+        #expect(settings.resolved(for: asked).location == .block)
+        #expect(settings.resolved(for: allowed).location == .allow)
+        #expect(settings.options(for: asked).location == .ask)
+        #expect(kind.choices == [.allow, .block])
+        UserDefaults.standard.removeObject(forKey: kind.fallbackKey)
+        #expect(settings.resolved(for: asked).location == .ask)
+    }
+
     @Test func siteSettingsSavedBeforeNotificationsKeepTheirChoices() throws {
         let saved = #"{"https://example.com:443":{"blocksAds":false,"camera":"allow","microphone":"block","location":"ask"}}"#
         let defaults = try #require(UserDefaults(suiteName: "nerda-site-settings-\(UUID())"))

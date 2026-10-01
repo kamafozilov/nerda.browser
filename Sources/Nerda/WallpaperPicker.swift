@@ -46,10 +46,12 @@ struct WallpaperPicker: View {
     }
 }
 
-/// The pictures side by side on glass, opened on the one showing. Past its
-/// ends, what is left fades out and an arrow scrolls to it.
-private struct WallpaperStrip: View {
+/// The pictures side by side on glass (or, in Settings, on the page),
+/// opened on the one showing. Past its ends, what is left fades out and an
+/// arrow scrolls to it.
+struct WallpaperStrip: View {
     let backdrop: Backdrop
+    var glass = true
 
     @State private var position: ScrollPosition
     /// The last scroll, for the arrows. Kept out of the view's state, so
@@ -65,8 +67,9 @@ private struct WallpaperStrip: View {
         var geometry: ScrollGeometry?
     }
 
-    init(backdrop: Backdrop) {
+    init(backdrop: Backdrop, glass: Bool = true) {
         self.backdrop = backdrop
+        self.glass = glass
         // There from the first frame, rather than scrolled to as it opens.
         _position = State(initialValue: ScrollPosition(id: backdrop.wallpaper, anchor: .center))
     }
@@ -135,9 +138,22 @@ private struct WallpaperStrip: View {
         .animation(.easeOut(duration: 0.15), value: after)
         .frame(maxWidth: min(width, 620))
         .frame(height: Self.tile.height + 2 * Self.inset)
-        .glassPanel(cornerRadius: 18, tint: 0.5)
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.14)))
-        .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
+        .modifier(StripGlass(on: glass))
+    }
+
+    private struct StripGlass: ViewModifier {
+        let on: Bool
+
+        func body(content: Content) -> some View {
+            if on {
+                content
+                    .glassPanel(cornerRadius: 18, tint: 0.5)
+                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.14)))
+                    .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
+            } else {
+                content
+            }
+        }
     }
 
     /// Most of a strip's width at a time, so the tile at the edge stays in sight.

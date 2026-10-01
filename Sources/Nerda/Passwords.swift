@@ -511,6 +511,13 @@ enum Passwords {
         }
     }
 
+    /// Whether a password that got someone in is offered to keep, and saved
+    /// accounts are listed under a sign-in box (Settings › Passwords).
+    static let offersKey = "offersToSavePasswords"
+    static let fillsKey = "fillsPasswords"
+    static var offers: Bool { UserDefaults.standard.object(forKey: offersKey) as? Bool ?? true }
+    static var fills: Bool { UserDefaults.standard.object(forKey: fillsKey) as? Bool ?? true }
+
     /// Sites told never to ask about, by site.
     static var never: Set<String> {
         get { Set(UserDefaults.standard.stringArray(forKey: "passwordsNeverSaved") ?? []) }
@@ -689,7 +696,7 @@ extension Browser {
         guard let tab = tab(for: page) else { return }
         switch kind {
         case "focus":
-            guard let spot = Self.spot(body, on: page, frame: frame) else { return }
+            guard Passwords.fills, let spot = Self.spot(body, on: page, frame: frame) else { return }
             choicesAsked += 1
             let asked = choicesAsked
             Task {
@@ -741,7 +748,7 @@ extension Browser {
     private func offer(_ sent: SentSignIn, on tab: Tab) {
         // A password manager extension that saves passwords itself asked
         // Nerda not to offer (chrome.privacy), as it asks Chrome.
-        guard !Passwords.never.contains(Site.of(sent.host)), Extensions.shared.passwordSavingTakenBy == nil else { return }
+        guard Passwords.offers, !Passwords.never.contains(Site.of(sent.host)), Extensions.shared.passwordSavingTakenBy == nil else { return }
         Task {
             guard let (known, replaces) = await vault.check(sent), !known,
                   tabs.contains(where: { $0 === tab }) else { return }

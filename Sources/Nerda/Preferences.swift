@@ -68,6 +68,14 @@ nonisolated enum SearchEngine: String, CaseIterable, Identifiable {
     }
 }
 
+/// Whether what is typed in the address bar goes to the search engine as it
+/// is typed, for its guesses. Off, nothing typed leaves the Mac until Return.
+nonisolated enum SearchSuggestions {
+    static let key = "searchSuggestions"
+
+    static var isOn: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+}
+
 /// A video playing with sound floats over everything when its tab is left,
 /// and goes back into its page when the tab is come back to, as in Arc; and,
 /// if chosen too, when Nerda is left for another app.
@@ -243,6 +251,80 @@ enum TabStyle: String, CaseIterable {
     /// The title bar is as tall as the row the traffic lights sit on: the
     /// sidebar's top row, level with the address bar (52 pt), or the tab strip (40 pt).
     var toolbarStyle: NSWindow.ToolbarStyle { self == .horizontal ? .unifiedCompact : .unified }
+}
+
+/// How long a tab can go unseen before it sleeps (Settings › Tabs), in
+/// minutes, or never. Edge's default is 2 hours; Nerda's is shorter because
+/// staying light is the point. A heavy tab sleeps sooner either way (`Browser.heavy`).
+enum TabSleep: Int, CaseIterable {
+    case quarterHour = 15, halfHour = 30, hour = 60, twoHours = 120, fourHours = 240, never = 0
+
+    static let key = "sleepTabsAfter"
+
+    static var current: Self {
+        (UserDefaults.standard.object(forKey: key) as? Int).flatMap(Self.init) ?? .halfHour
+    }
+
+    var name: String {
+        switch self {
+        case .never: "Never"
+        case .quarterHour, .halfHour: "After \(rawValue) minutes"
+        case .hour: "After 1 hour"
+        default: "After \(rawValue / 60) hours"
+        }
+    }
+
+    var interval: TimeInterval? { self == .never ? nil : TimeInterval(rawValue * 60) }
+}
+
+/// How long pages visited are remembered (Settings › Security & Privacy), in
+/// days, as Safari's Remove history items.
+nonisolated enum HistoryKeep: Int, CaseIterable {
+    case day = 1, week = 7, twoWeeks = 14, month = 30, threeMonths = 90, year = 365
+
+    static let key = "keepHistoryFor"
+
+    static var current: Self {
+        (UserDefaults.standard.object(forKey: key) as? Int).flatMap(Self.init) ?? .threeMonths
+    }
+
+    var name: String {
+        switch self {
+        case .day: "1 day"
+        case .week: "1 week"
+        case .twoWeeks: "2 weeks"
+        case .month: "1 month"
+        case .threeMonths: "3 months"
+        case .year: "1 year"
+        }
+    }
+
+    var interval: TimeInterval { TimeInterval(rawValue) * 24 * 60 * 60 }
+}
+
+/// How long Nerda can be in the background before incognito windows lock
+/// (Settings › Security & Privacy), in seconds; they lock at once whenever
+/// the Mac locks or sleeps, whatever is chosen.
+enum IncognitoAutoLock: Int, CaseIterable {
+    case now = 0, minute = 60, fiveMinutes = 300, quarterHour = 900, never = -1
+
+    static let key = "incognitoLockAfter"
+
+    static var current: Self {
+        (UserDefaults.standard.object(forKey: key) as? Int).flatMap(Self.init) ?? .minute
+    }
+
+    var name: String {
+        switch self {
+        case .now: "Right away"
+        case .minute: "After 1 minute"
+        case .fiveMinutes: "After 5 minutes"
+        case .quarterHour: "After 15 minutes"
+        case .never: "Only when the Mac locks"
+        }
+    }
+
+    var delay: Duration? { self == .never ? nil : .seconds(rawValue) }
 }
 
 /// How much of the desktop shows through the window's glass: all the

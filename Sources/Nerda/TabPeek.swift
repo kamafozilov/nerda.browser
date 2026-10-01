@@ -120,6 +120,13 @@ final class Hovered {
     var id: Tab.ID?
 }
 
+/// Whether a tab's card shows at all (Settings › Tabs).
+enum TabPreviews {
+    static let key = "tabPreviews"
+
+    static var isOn: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+}
+
 /// Keeps the card to the tab under the pointer (see `peeking`), drawing nothing.
 struct PeekWatch: View {
     let browser: Browser
@@ -145,7 +152,7 @@ extension View {
             peeked.wrappedValue = nil
         }
         .task(id: hovered?.id) {
-            guard let hovered else {
+            guard let hovered, TabPreviews.isOn else {
                 try? await Task.sleep(for: .milliseconds(100))
                 if !Task.isCancelled { peeked.wrappedValue = nil }
                 return

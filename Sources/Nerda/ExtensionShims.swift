@@ -3049,7 +3049,7 @@ enum ExtensionShims {
             }
             return nil
         case "downloads.showDefaultFolder":
-            NSWorkspace.shared.open(.downloadsDirectory)
+            NSWorkspace.shared.open(Downloads.folder)
             return nil
         case "downloads.erase":
             return []
