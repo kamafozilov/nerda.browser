@@ -7,6 +7,18 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- Settings has three new pages. Tabs: how soon a tab you've left gives its memory back, from 15 minutes to 4 hours or never, and whether tabs show a preview when the pointer rests on them. Passwords: open your saved passwords, import them, turn off offering to save or fill them, and take sites off the Never list. Site Settings: whether sites may ask for your camera, microphone, location and notifications at all, and every site you've allowed or blocked, to change or reset.
+- Settings › General: turn off search suggestions so nothing you type leaves your Mac until Return, choose where downloads go or have Nerda ask each time, import and export bookmarks, and turn off checking for updates automatically.
+- Settings › Appearance: pick the new tab picture, and hide the AI chats button in the sidebar.
+- Settings › Security & Privacy: choose how long history is kept, from a day to a year, and how soon incognito windows lock when Nerda is in the background.
+- Keyboard Shortcuts lists Bookmark This Tab, Hide Others and the Developer keys.
+
+### Changed
+
+- Load pinned tabs at launch moved from Settings › General to Settings › Tabs.
+
 ## [0.0.19] - 2026-10-01
 
 ### Added

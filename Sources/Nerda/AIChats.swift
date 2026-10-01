@@ -121,6 +121,9 @@ final class AIChats {
 }
 
 struct AIChatsButton: View {
+    /// Whether it is in the sidebar at all (Settings › Appearance).
+    static let key = "aiChatsButton"
+
     let browser: Browser
     @Binding var shown: Bool
 

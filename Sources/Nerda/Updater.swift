@@ -112,6 +112,11 @@ final class Updater {
     var news = Updater.unreadNews()
     private var clock: Timer?
 
+    /// Whether Nerda looks for a newer version by itself (Settings › General).
+    /// Off, only Check for Updates looks.
+    static let automaticKey = "checksForUpdatesAutomatically"
+    static var checksAutomatically: Bool { UserDefaults.standard.object(forKey: automaticKey) as? Bool ?? true }
+
     /// The version that ran last.
     private static let launchedKey = "updater.launched"
     /// Set by 0.0.5 and earlier as they installed an update; they kept no launchedKey.
@@ -139,7 +144,7 @@ final class Updater {
 
     /// `asked`: from Check for Updates…, which always answers, even "none".
     func check(asked: Bool) {
-        guard canCheck else { return }
+        guard canCheck, asked || Self.checksAutomatically else { return }
         state = .checking
         Task {
             let found = try? await Self.latest()

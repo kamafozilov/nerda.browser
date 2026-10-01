@@ -54,6 +54,17 @@ final class SiteSettings {
             case .notifications: \.notifications
             }
         }
+        /// What a site not answered for gets: asked, or blocked without
+        /// asking (Settings › Site Settings), as Chrome's "Don't allow sites to ask".
+        var fallback: Permission {
+            UserDefaults.standard.string(forKey: fallbackKey) == Permission.block.rawValue ? .block : .ask
+        }
+
+        var fallbackKey: String { "sitePermission.\(title.lowercased())" }
+
+        /// What a site can be given: no Ask where every site is blocked from asking.
+        var choices: [Permission] { fallback == .block ? [.allow, .block] : Permission.allCases }
+
         /// Where the Mac lets Nerda have it at all.
         var macSettings: URL {
             URL(string: self == .notifications ? "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
@@ -67,7 +78,8 @@ final class SiteSettings {
         var location = Permission.ask
         var notifications = Permission.ask
     }
-    private var sites: [String: Options]
+    /// Each site with a choice of its own, by origin.
+    private(set) var sites: [String: Options]
     @ObservationIgnored private let defaults: UserDefaults?
 
     init(defaults: UserDefaults?) {
@@ -93,6 +105,16 @@ final class SiteSettings {
 
     func options(for url: URL?) -> Options { Self.origin(url).flatMap { sites[$0] } ?? Options() }
 
+    /// What the site may do: its own choices, and for what it hasn't been
+    /// answered, what Settings gives every site.
+    func resolved(for url: URL?) -> Options {
+        var options = options(for: url)
+        for kind in Kind.allCases where options[keyPath: kind.key] == .ask {
+            options[keyPath: kind.key] = kind.fallback
+        }
+        return options
+    }
+
     /// The sites allowed or blocked from showing notifications, as WebKit
     /// hands them to a page's process as it starts.
     var notificationPermissions: [String: Bool] {
@@ -110,7 +132,7 @@ final class SiteSettings {
     }
 
     func mediaDecision(for origin: WKSecurityOrigin, on page: WKWebView, type: WKMediaCaptureType) -> WKPermissionDecision {
-        let decision = Self.mediaDecision(options: options(for: page.url), type: type)
+        let decision = Self.mediaDecision(options: resolved(for: page.url), type: type)
         // Block applies to the whole page. Embedded origins never inherit
         // the host page's permission to capture.
         guard decision != .deny, Self.origin(origin) != Self.origin(page.url) else { return decision }
@@ -147,6 +169,20 @@ final class SiteSettings {
 }
 
 
+extension SiteSettings {
+    /// What the Mac itself keeps from Nerda, whatever a site's choice.
+    static func offOnMac() async -> Set<Kind> {
+        var off: Set<Kind> = []
+        let refused: Set<AVAuthorizationStatus> = [.denied, .restricted]
+        if refused.contains(AVCaptureDevice.authorizationStatus(for: .video)) { off.insert(.camera) }
+        if refused.contains(AVCaptureDevice.authorizationStatus(for: .audio)) { off.insert(.microphone) }
+        if [.denied, .restricted].contains(CLLocationManager().authorizationStatus) { off.insert(.location) }
+        if WebNotifications.isAvailable, !(await WebNotifications.macAllows()) { off.insert(.notifications) }
+        return off
+    }
+}
+
+
 extension SiteSettings.Options {
     /// A setting saved before it existed (notifications, from 0.0.16) keeps its default.
     init(from decoder: any Decoder) throws {
@@ -177,7 +213,7 @@ extension Browser {
         // A frame from another site gets WebKit's own question, naming it:
         // an answer to Nerda's would be kept for the page around it.
         guard decision == .prompt, SiteSettings.origin(origin) == SiteSettings.origin(webView.url) else { return decision }
-        let options = siteSettings.options(for: webView.url)
+        let options = siteSettings.resolved(for: webView.url)
         let kinds: [SiteSettings.Kind] = switch type {
         case .camera: [.camera]
         case .microphone: [.microphone]
@@ -201,7 +237,7 @@ extension Browser {
 
     private func locationDecision(_ origin: WKSecurityOrigin, on page: WKWebView) async -> WKPermissionDecision {
         guard !locked else { return .deny }
-        let decision = siteSettings.options(for: page.url).location.decision
+        let decision = siteSettings.resolved(for: page.url).location.decision
         guard decision != .deny, SiteSettings.origin(origin) == SiteSettings.origin(page.url) else {
             return decision == .deny ? .deny : .prompt
         }
@@ -214,7 +250,7 @@ extension Browser {
     func notificationPermission(_ page: WKWebView, origin: WKSecurityOrigin, decision: @escaping (Bool) -> Void) {
         guard WebNotifications.isAvailable, !locked, !isPrivate, let url = page.url,
               SiteSettings.origin(origin) == SiteSettings.origin(url) else { return decision(false) }
-        switch siteSettings.options(for: url).notifications {
+        switch siteSettings.resolved(for: url).notifications {
         case .allow: decision(true)
         case .block: decision(false)
         case .ask:
@@ -241,7 +277,7 @@ extension Browser {
         }
         guard let tab else { return .deny }
         // The site's own choice may have come in the meantime (another question).
-        let options = siteSettings.options(for: site)
+        let options = siteSettings.resolved(for: site)
         let asking = kinds.filter { options[keyPath: $0.key] == .ask }
         if asking.isEmpty { return kinds.allSatisfy { options[keyPath: $0.key] == .allow } ? .grant : .deny }
         let answer = await withCheckedContinuation { answer in
@@ -340,7 +376,7 @@ private struct SitePanel: View {
     @State private var offOnMac: Set<SiteSettings.Kind> = []
 
     var body: some View {
-        let options = browser.siteSettings.options(for: url)
+        let options = browser.siteSettings.resolved(for: url)
         let secure = url.scheme == "https"
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
@@ -379,7 +415,8 @@ private struct SitePanel: View {
                     SettingRow(symbol: kind.symbol(permission), title: kind.title,
                                note: offOnMac.contains(kind) ? "Off for Nerda in System Settings" : nil,
                                noteAction: { NSWorkspace.shared.open(kind.macSettings) }) {
-                        PermissionMenu(title: kind.title, selection: Binding(get: { permission }, set: { change(kind.key, to: $0) }))
+                        PermissionMenu(title: kind.title, choices: kind.choices,
+                                       selection: Binding(get: { permission }, set: { change(kind.key, to: $0) }))
                     }
                 }
             }
@@ -394,7 +431,7 @@ private struct SitePanel: View {
                     }
                 }
                 PopoverRow(symbol: "trash", title: "Clear Site Data…", action: clearData)
-                if options != .init() {
+                if browser.siteSettings.options(for: url) != .init() {
                     PopoverRow(symbol: "arrow.counterclockwise", title: "Reset Site Settings") {
                         if !options.blocksAds { blockingChanged = true }
                         browser.changeSiteOptions(.init(), for: url)
@@ -405,7 +442,7 @@ private struct SitePanel: View {
             .padding(.bottom, 6)
         }
         .frame(width: 300)
-        .task { offOnMac = await Self.offOnMac() }
+        .task { offOnMac = await SiteSettings.offOnMac() }
     }
 
     /// Notifications only in a regular window, and only where WebKit hands them over.
@@ -432,16 +469,6 @@ private struct SitePanel: View {
         alert.beginSheetModal(for: window) { answer in
             if answer == .alertSecondButtonReturn { Task { await tab.clearSiteData() } }
         }
-    }
-
-    private static func offOnMac() async -> Set<SiteSettings.Kind> {
-        var off: Set<SiteSettings.Kind> = []
-        let refused: Set<AVAuthorizationStatus> = [.denied, .restricted]
-        if refused.contains(AVCaptureDevice.authorizationStatus(for: .video)) { off.insert(.camera) }
-        if refused.contains(AVCaptureDevice.authorizationStatus(for: .audio)) { off.insert(.microphone) }
-        if [.denied, .restricted].contains(CLLocationManager().authorizationStatus) { off.insert(.location) }
-        if WebNotifications.isAvailable, !(await WebNotifications.macAllows()) { off.insert(.notifications) }
-        return off
     }
 }
 
@@ -482,8 +509,9 @@ private struct SettingRow<Control: View>: View {
 }
 
 /// Ask, Allow or Block, as a small menu at the row's end.
-private struct PermissionMenu: View {
+struct PermissionMenu: View {
     let title: String
+    let choices: [SiteSettings.Permission]
     @Binding var selection: SiteSettings.Permission
 
     @State private var hovering = false
@@ -491,7 +519,7 @@ private struct PermissionMenu: View {
     var body: some View {
         Menu {
             Picker(title, selection: $selection) {
-                ForEach(SiteSettings.Permission.allCases) { Text($0.title).tag($0) }
+                ForEach(choices) { Text($0.title).tag($0) }
             }
             .pickerStyle(.inline)
             .labelsHidden()

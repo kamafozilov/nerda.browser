@@ -121,6 +121,19 @@ final class Download: Identifiable {
 }
 
 nonisolated enum Downloads {
+    /// Where downloads go (Settings › General): ~/Downloads, or a folder
+    /// chosen instead while it is there; or, asked, wherever each is saved.
+    static let folderKey = "downloadFolder"
+    static let asksKey = "asksWhereToSave"
+
+    static var folder: URL {
+        guard let path = UserDefaults.standard.string(forKey: folderKey),
+              FileManager.default.fileExists(atPath: path) else { return .downloadsDirectory }
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+
+    static var asks: Bool { UserDefaults.standard.bool(forKey: asksKey) }
+
     static func canRetry(_ request: URLRequest?) -> Bool {
         guard let request, ["http", "https"].contains(request.url?.scheme),
               ["GET", "HEAD"].contains(request.httpMethod?.uppercased() ?? "GET") else { return false }
@@ -350,7 +363,7 @@ struct DownloadsList: View {
 
             HStack {
                 FooterButton(title: "Show All Downloads") {
-                    NSWorkspace.shared.open(.downloadsDirectory)
+                    NSWorkspace.shared.open(Downloads.folder)
                 }
                 Spacer()
                 if browser.downloads.contains(where: { $0.state != .running && $0.state != .paused }) {

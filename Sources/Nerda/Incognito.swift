@@ -10,15 +10,12 @@ import WebKit
 ///
 /// They lock together, as Safari's private windows do: at once when the Mac
 /// locks its screen or sleeps, and once Nerda has been in the background for
-/// a minute. Locked, each shows only its lock, until Touch ID or the Mac's
+/// a minute (Settings › Security & Privacy). Locked, each shows only its lock, until Touch ID or the Mac's
 /// password opens them again.
 enum Windows {
     static var regular: BrowserWindow!
     /// Each open incognito window, with what looks after it.
     private static var incognito: [AppDelegate] = []
-    /// How long Nerda can be in the background before incognito locks.
-    // ponytail: fixed; a setting if a minute turns out too short or too long.
-    static let lockAfter: Duration = .seconds(60)
     private static var lockTimer: Task<Void, Never>?
     private static var watching = false
 
@@ -97,9 +94,9 @@ enum Windows {
                 lockTimer?.cancel()
                 // Watched for good once the first window opened; with none
                 // open now there is nothing to lock.
-                guard !incognito.isEmpty else { return }
+                guard !incognito.isEmpty, let after = IncognitoAutoLock.current.delay else { return }
                 lockTimer = Task {
-                    try? await Task.sleep(for: lockAfter)
+                    try? await Task.sleep(for: after)
                     if !Task.isCancelled { lock() }
                 }
             }

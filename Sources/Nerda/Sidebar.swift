@@ -55,6 +55,7 @@ struct Sidebar: View {
     /// The tab the pointer is on, and the one whose card shows (`TabPeek`).
     @State private var hovered = Hovered()
     @State private var peeked: Peek?
+    @AppStorage(AIChatsButton.key) private var showsAIChats = true
 
     /// A tab, tile or bookmark being dragged.
     private struct Drag {
@@ -228,7 +229,7 @@ struct Sidebar: View {
             HStack {
                 SidebarMenuButton(shown: $menuShown, incognito: browser.isPrivate)
                 Spacer()
-                AIChatsButton(browser: browser, shown: $aiChatsShown)
+                if showsAIChats { AIChatsButton(browser: browser, shown: $aiChatsShown) }
                 DownloadsButton(browser: browser, shown: $downloadsShown)
             }
             .padding(.horizontal, 10)

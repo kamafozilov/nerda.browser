@@ -3,7 +3,7 @@ import os
 
 /// Every page visited, to suggest again as you type: once you have been to
 /// YouTube, "yo" means YouTube. Kept per address (how often, how lately, what
-/// the page was called) in a JSON file, for 90 days.
+/// the page was called) in a JSON file, for as long as Settings keeps it (`HistoryKeep`).
 // ponytail: all in memory, and rewritten whole on each save: fine for tens of
 // thousands of pages (a few MB). SQLite if it ever outgrows that.
 @Observable
@@ -12,7 +12,6 @@ final class History {
     /// Always empty: what an incognito window's fields suggest from.
     static let empty = History()
     static let file = Edition.folder.appending(path: "history.json")
-    private static let keptFor: TimeInterval = 90 * 24 * 60 * 60
     private static let limit = 20_000
     /// How quickly a visit counts for less: half as much two weeks on.
     private static let halfLife: TimeInterval = 14 * 24 * 60 * 60
@@ -410,10 +409,16 @@ final class History {
         }
     }
 
-    /// Drops what is older than 90 days, and past the limit the oldest: the
+    /// A shorter time to keep history for drops what is now too old, at once.
+    func keepChanged() {
+        dirty = true
+        save(waiting: false)
+    }
+
+    /// Drops what is older than Settings keeps, and past the limit the oldest: the
     /// index's last pages, as it is latest first, so nothing is sorted again.
     private func trim() {
-        let cutoff = Date.now.addingTimeInterval(-Self.keptFor)
+        let cutoff = Date.now.addingTimeInterval(-HistoryKeep.current.interval)
         var index = self.index
         let kept = min(Self.start(of: cutoff, in: index), Self.limit)
         guard kept < index.count else { return }
