@@ -11,6 +11,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - A page zoomed in or out (⌘+, ⌘−) shows its zoom, such as 125%, at the top of the sidebar. Click it to go back to actual size.
 
+### Changed
+
+- The update card at the bottom of the sidebar fills from left to right as the update downloads, without a percentage. Nerda no longer restarts on its own once it's in: the card turns into Restart to update, so nothing you're doing is cut short. Quitting Nerda finishes the update too.
+
 ## [0.0.18] - 2026-10-01
 
 ### Fixed

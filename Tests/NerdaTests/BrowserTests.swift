@@ -77,8 +77,8 @@ private let somewhere = URL(string: "https://example.com")!
 
 @MainActor
 @Test func updateStatusDistinguishesResultsAndBusyWork() {
-    let states: [Updater.State] = [.idle, .checking, .upToDate, .available("0.0.10"), .installing, .failed("Connection failed.")]
-    #expect(states.map(\.isBusy) == [false, true, false, false, true, false])
+    let states: [Updater.State] = [.idle, .checking, .upToDate, .available("0.0.10"), .downloading(0.5), .ready("0.0.10"), .failed("Connection failed.")]
+    #expect(states.map(\.isBusy) == [false, true, false, false, true, false, false])
     #expect(Set(states.map(\.detail)).count == states.count)
     #expect(Updater.State.available("0.0.10").detail.contains("0.0.10"))
     #expect(Updater.State.failed("Connection failed.").detail == "Connection failed.")

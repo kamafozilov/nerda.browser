@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// At the foot of the sidebar once a newer Nerda is out (Updater): its
-/// version, and a click to install it. A bar fills as the update comes in,
-/// then Nerda opens again as the new one.
+/// version, and a click to download it. The card fills from left to right as
+/// the update comes in; once it is in, a click restarts Nerda as the new one.
 struct UpdateCard: View {
     let release: Updater.Release
     var incognito = false
@@ -12,81 +12,77 @@ struct UpdateCard: View {
 
     private var accent: Color { incognito ? Palette.incognitoAccent : .accentColor }
 
-    /// How much of it is in, while it downloads and once it's being put in place.
+    /// How much of it is in: from the download's start, full once it's ready.
     private var fraction: Double? {
         switch updater.state {
         case .downloading(let fraction): fraction
-        case .installing: 1
+        case .ready: 1
         default: nil
         }
     }
 
+    private var downloading: Bool {
+        if case .downloading = updater.state { true } else { false }
+    }
+
+    private var ready: Bool {
+        if case .ready = updater.state { true } else { false }
+    }
+
     private var title: String {
-        switch updater.state {
-        case .downloading: "Downloading update…"
-        case .installing: "Installing…"
-        default: "Update available"
-        }
+        downloading ? "Downloading update…" : ready ? "Restart to update" : "Update available"
     }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
-        Button(action: updater.install) {
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(spacing: 10) {
-                    Image(systemName: "arrow.down")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 26, height: 26)
-                        .background(accent.gradient, in: Circle())
-                        .symbolEffect(.bounce, value: hovering && fraction == nil)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(title)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Palette.ink)
-                        Text("Nerda \(release.version)")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.muted)
-                    }
-                    Spacer(minLength: 0)
-                    if let fraction {
-                        Text(fraction, format: .percent.precision(.fractionLength(0)))
-                            .font(.system(size: 11, weight: .medium))
-                            .monospacedDigit()
-                            .foregroundStyle(Palette.muted)
-                            .contentTransition(.numericText(value: fraction))
-                    } else {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(hovering ? Palette.ink : Palette.muted)
-                    }
+        Button { ready ? updater.restart() : updater.download() } label: {
+            HStack(spacing: 10) {
+                Image(systemName: ready ? "arrow.clockwise" : "arrow.down")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 26, height: 26)
+                    .background(accent.gradient, in: Circle())
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.bounce, value: hovering && !downloading)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                    Text("Nerda \(release.version)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
                 }
-                if let fraction {
-                    Capsule()
-                        .fill(Palette.wash)
-                        .frame(height: 4)
-                        .overlay(alignment: .leading) {
-                            GeometryReader { bar in
-                                Capsule()
-                                    .fill(accent.gradient)
-                                    .frame(width: max(4, bar.size.width * fraction))
-                            }
-                        }
-                        .transition(.opacity)
+                Spacer(minLength: 0)
+                if !downloading {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(hovering ? Palette.ink : Palette.muted)
                 }
             }
             .padding(10)
-            .background(shape.fill(hovering && fraction == nil ? Palette.wash : Palette.hover))
+            .background {
+                shape.fill(hovering && !downloading ? Palette.wash : Palette.hover)
+                if let fraction {
+                    GeometryReader { card in
+                        Rectangle()
+                            .fill(accent.opacity(0.18))
+                            .frame(width: card.size.width * fraction)
+                    }
+                    .clipShape(shape)
+                }
+            }
             .overlay(shape.strokeBorder(Palette.rim))
             .contentShape(shape)
         }
-        // Not disabled while it downloads, which would grey the bar out:
-        // Updater takes one install at a time.
+        // Not disabled while it downloads, which would grey the fill out:
+        // Updater takes one download at a time.
         .buttonStyle(.plain)
-        .help("Install Nerda \(release.version) and relaunch")
+        .help(ready ? "Restart Nerda to finish updating to \(release.version)" : "Download Nerda \(release.version)")
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
-        .animation(.easeOut(duration: 0.25), value: fraction)
+        // Linear, as progress goes: each step glides into the next.
+        .animation(.linear(duration: 0.3), value: fraction)
+        .animation(.easeOut(duration: 0.2), value: ready)
     }
 }
 
