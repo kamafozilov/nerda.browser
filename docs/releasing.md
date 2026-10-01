@@ -116,9 +116,11 @@ The first release build asks once for the login keychain password when it reache
 
 `Sources/Nerda/Updater.swift` reads `release.json` from the latest release (`https://github.com/kamafozilov/nerda.browser/releases/latest/download/release.json`), which `release.sh` writes in the shape of GitHub's API: tag, notes, page, and `Nerda.zip` with its SHA-256. Not the API itself, which answers only 60 requests an hour to an address without a GitHub account, and a provider's shared address runs out of them. When its tag is newer than the running version, a card at the bottom of the sidebar shows it (in Settings › About Nerda too). A click on it then:
 
-1. downloads `Nerda.zip` and checks it against the SHA-256 that GitHub lists (a release without one isn't taken);
+1. downloads `Nerda.zip`, filling the card from left to right, and checks it against the SHA-256 that GitHub lists (a release without one isn't taken);
 2. checks that the new app has the same bundle id, a newer version, and a valid signature, everything inside it included, from a Developer ID Application certificate Apple gave the same team;
-3. moves the old app to `Nerda.app.old`, moves the new one into place, and reopens Nerda, which restores its tabs and shows What's New once: the notes of every version since the one that ran last, newest first.
+3. keeps the new app unpacked beside the old one and turns the card into Restart to update. Nothing closes until then, so a download never cuts short what the browser is doing.
+
+Restart to update (or a quit, if it's never clicked) checks the new app again, moves the old one to `Nerda.app.old` and the new one into place; a restart reopens Nerda, which restores its tabs and shows What's New once: the notes of every version since the one that ran last, newest first.
 
 The notes come from the `CHANGELOG.md` that `build.sh` puts in the app (a release gets `[Unreleased]` there as its version and date), so What's New and Settings › Release Notes, which lists every version, need no network.
 

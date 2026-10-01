@@ -7,9 +7,11 @@ import SwiftUI
 // Releases: release.sh publishes each version there with Nerda.dmg for
 // people and Nerda.zip for this. A little after launch and every few hours
 // the latest release is read; if it is newer, a card at the foot of the
-// sidebar says so (UpdateCard), and a click on it fetches the ZIP, showing
-// how far along it is, checks it, puts it where this bundle is, and opens
-// again as the new one, tabs and all, with what's new over it (WhatsNew):
+// sidebar says so (UpdateCard). A click on it fetches the ZIP, filling the
+// card as it comes in, and checks and unpacks it beside this bundle; nothing
+// closes. The card then offers a restart, which puts the new bundle in place
+// and opens again as it, tabs and all; a quit without it puts it in place
+// too. The new one shows what's new over it (WhatsNew):
 // every version since the one that ran last, from the CHANGELOG.md in the
 // bundle (ReleaseNotes).
 //
@@ -74,11 +76,11 @@ final class Updater {
     }
 
     enum State: Equatable {
-        case idle, checking, upToDate, available(String), downloading(Double), installing, failed(String)
+        case idle, checking, upToDate, available(String), downloading(Double), ready(String), failed(String)
 
         var isBusy: Bool {
             switch self {
-            case .checking, .downloading, .installing: true
+            case .checking, .downloading: true
             default: false
             }
         }
@@ -90,18 +92,21 @@ final class Updater {
             case .upToDate: "Nerda is up to date."
             case .available(let version): "Version \(version) is available."
             case .downloading: "Downloading update…"
-            case .installing: "Installing update. Nerda will relaunch…"
+            case .ready(let version): "Version \(version) is ready. Restart Nerda to finish updating."
             case .failed(let message): message
             }
         }
     }
     private(set) var state = State.idle
-    var canCheck: Bool { Edition.updates && !state.isBusy }
+    var canCheck: Bool { Edition.updates && !state.isBusy && staged == nil }
     /// Quitting to come back as the new one: no asking first.
     private(set) var relaunching = false
     /// A newer release than this one, offered at the foot of the sidebar
     /// until it is installed.
     private(set) var found: Release?
+    /// The release found, downloaded, checked and unpacked, waiting for a
+    /// restart or a quit to be put in place.
+    private(set) var staged: URL?
     /// What came since the version that ran last, newest first, shown once as
     /// a newer one first opens: after an update, or a newer disk image.
     var news = Updater.unreadNews()
@@ -121,6 +126,8 @@ final class Updater {
     func start() {
         Swap.sweep()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+            // Quit with an update ready: the next launch is the new version.
+            if let fresh = MainActor.assumeIsolated({ Updater.shared.staged }) { try? Swap.place(fresh) }
             Swap.sweep()
         }
         clock = Timer.scheduledTimer(withTimeInterval: 6 * 60 * 60, repeats: true) { _ in
@@ -151,55 +158,72 @@ final class Updater {
         }
     }
 
-    /// From the card: fetches the release found, then relaunches as it.
-    func install() {
-        guard let release = found, !state.isBusy else { return }
-        // Asked before the download, so Later costs nothing and a Restart
-        // isn't followed by a second download of the same release.
+    /// From the card: fetches the release found and gets it ready. Nothing
+    /// closes: a download can't cut short what the browser is doing.
+    func download() {
+        guard let release = found, !state.isBusy, staged == nil else { return }
+        state = .downloading(0)
+        Task {
+            do {
+                staged = try await Task.detached(priority: .userInitiated) {
+                    try await Swap.fetch(release) { fraction in
+                        DispatchQueue.main.async { MainActor.assumeIsolated { Updater.shared.advance(fraction) } }
+                    }
+                }.value
+                state = .ready(release.version)
+            } catch {
+                state = .available(release.version)
+                refused(release, error)
+            }
+        }
+    }
+
+    /// From the card once the update is ready: asks first when something
+    /// would be lost, then opens again as the new version.
+    func restart() {
+        guard staged != nil else { return }
         let hasWork = NSApp.windows.compactMap { ($0 as? BrowserWindow)?.browser }.contains {
             $0.tabs.contains(where: \.hasUnsavedWork) || $0.downloads.contains(where: \.needsSession)
         }
-        guard hasWork else { return download(release) }
+        guard hasWork else { return finish() }
         let alert = NSAlert()
         alert.messageText = "Restart to update Nerda?"
         alert.informativeText = "Unsaved changes may be lost and unfinished downloads will be lost."
         alert.addButton(withTitle: "Later")
         alert.addButton(withTitle: "Restart")
         present(alert) { answer in
-            if answer == .alertSecondButtonReturn { self.download(release) }
+            if answer == .alertSecondButtonReturn { self.finish() }
         }
     }
 
-    private func download(_ release: Release) {
-        guard !state.isBusy else { return }
-        state = .downloading(0)
-        Task {
-            do {
-                try await Task.detached(priority: .userInitiated) {
-                    try await Swap.install(release) { fraction in
-                        DispatchQueue.main.async { MainActor.assumeIsolated { Updater.shared.advance(fraction) } }
-                    }
-                }.value
-                relaunch()
-            } catch {
-                state = .available(release.version)
-                let alert = NSAlert()
-                alert.messageText = "Couldn't install Nerda \(release.version)"
-                alert.informativeText = ((error as? Swap.Refused)?.reason ?? "The download didn't finish.")
-                    + " The disk image is on GitHub."
-                alert.addButton(withTitle: "Open GitHub")
-                alert.addButton(withTitle: "Cancel")
-                present(alert) { answer in
-                    if answer == .alertFirstButtonReturn { NSWorkspace.shared.open(release.page) }
-                }
-            }
+    private func finish() {
+        guard let release = found, let fresh = staged else { return }
+        staged = nil
+        do {
+            try Swap.place(fresh)
+            relaunch()
+        } catch {
+            state = .available(release.version)
+            refused(release, error)
         }
     }
 
-    /// The download's progress; once it is all in, the checking and moving.
+    private func refused(_ release: Release, _ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Couldn't install Nerda \(release.version)"
+        alert.informativeText = ((error as? Swap.Refused)?.reason ?? "The download didn't finish.")
+            + " The disk image is on GitHub."
+        alert.addButton(withTitle: "Open GitHub")
+        alert.addButton(withTitle: "Cancel")
+        present(alert) { answer in
+            if answer == .alertFirstButtonReturn { NSWorkspace.shared.open(release.page) }
+        }
+    }
+
+    /// How much of the download is in.
     private func advance(_ fraction: Double) {
         guard case .downloading = state else { return }
-        state = fraction < 1 ? .downloading(fraction) : .installing
+        state = .downloading(fraction)
     }
 
     /// Nothing on a first launch; after one of 0.0.5 and earlier, which
@@ -333,16 +357,18 @@ nonisolated private enum Swap {
         target.deletingLastPathComponent().appendingPathComponent(target.lastPathComponent + ".old")
     }
 
-    /// `progress`: how much of the ZIP is in, 0 to 1, in whole percents.
-    static func install(_ release: Updater.Release, progress: @escaping @Sendable (Double) -> Void) async throws {
+    /// The new bundle, checked, in a scratch folder of its own (`place` puts
+    /// it in). `progress`: how much of the ZIP is in, 0 to 1, in whole percents.
+    static func fetch(_ release: Updater.Release, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         let files = FileManager.default
         // No team: an ad-hoc build, which can't tell who made a download.
         guard let team = teamID(of: target) else { throw Refused.unsigned }
         guard files.isWritableFile(atPath: target.deletingLastPathComponent().path) else { throw Refused.readOnly }
 
-        // On the app's volume, so the last move is a rename. Gone whatever happens.
+        // On the app's volume, so the last move is a rename. Kept only for a bundle that passed.
         let scratch = try files.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: target, create: true)
-        defer { try? files.removeItem(at: scratch) }
+        var passed = false
+        defer { if !passed { try? files.removeItem(at: scratch) } }
 
         let zip = scratch.appending(path: "Nerda.zip")
         var request = URLRequest(url: release.archive, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)
@@ -359,6 +385,18 @@ nonisolated private enum Swap {
         guard let fresh = try files.contentsOfDirectory(at: unpacked, includingPropertiesForKeys: nil)
             .first(where: { $0.pathExtension == "app" })
         else { throw Refused.archive }
+        try verify(fresh, team: team)
+        try? files.removeItem(at: zip)
+        passed = true
+        return fresh
+    }
+
+    /// Puts a fetched bundle where this one is, and removes its scratch
+    /// folder. Checked again first: the system may clear old scratch files
+    /// while it waits, and a bundle missing some is no Nerda.
+    static func place(_ fresh: URL) throws {
+        defer { try? FileManager.default.removeItem(at: fresh.deletingLastPathComponent().deletingLastPathComponent()) }
+        guard let team = teamID(of: target) else { throw Refused.unsigned }
         try verify(fresh, team: team)
         try swap(fresh)
     }

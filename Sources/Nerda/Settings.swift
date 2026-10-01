@@ -1125,8 +1125,12 @@ private struct AboutSettings: View {
     var body: some View {
         SettingsGroup(title: "About Nerda") {
             SettingsRow(title: "Browser", detail: "Current version is v\(Updater.current). \(Edition.updates ? updater.state.detail : "Development build. Updates are disabled.")") {
-                if updater.found != nil {
-                    Button("Install update", action: updater.install)
+                if case .ready = updater.state {
+                    Button("Restart to update", action: updater.restart)
+                        .buttonStyle(SettingsButtonStyle(prominent: true))
+                        .fixedSize()
+                } else if updater.found != nil {
+                    Button("Download update", action: updater.download)
                         .buttonStyle(SettingsButtonStyle(prominent: true))
                         .fixedSize()
                         .disabled(updater.state.isBusy)
