@@ -28,10 +28,7 @@
 
 <br>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/new-tab-dark.png">
-  <img src="docs/images/new-tab-light.png" alt="A new tab in Nerda: a search field over a photo of Mount Fuji at sunset, with pinned sites and tabs in the sidebar">
-</picture>
+<img src="docs/images/new-tab.jpg" alt="A new tab in Nerda: search suggestions for &quot;spider man&quot; over a Spider-Man wallpaper, with pinned sites, folders and tabs in the sidebar">
 
 <br>
 
