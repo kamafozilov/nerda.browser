@@ -23,6 +23,8 @@ final class Tab: Identifiable {
     private(set) var canGoBack = false
     private(set) var canGoForward = false
     private(set) var progress = 0.0
+    /// The page's zoom, for the sidebar to show while it isn't the one pages open at.
+    private(set) var pageZoom: CGFloat = 1
     /// The colour the page gives its top (its theme colour), or else its
     /// background: the address bar wears it, so it reads as part of the page.
     private(set) var color: NSColor?
@@ -295,6 +297,9 @@ final class Tab: Identifiable {
             },
             page.observe(\.estimatedProgress) { [weak self] page, _ in
                 MainActor.assumeIsolated { self?.progress = page.estimatedProgress }
+            },
+            page.observe(\.pageZoom, options: .initial) { [weak self] page, _ in
+                MainActor.assumeIsolated { self?.pageZoom = page.pageZoom }
             },
             page.observe(\.themeColor) { [weak self] _, _ in
                 MainActor.assumeIsolated { self?.pageRecolored() }

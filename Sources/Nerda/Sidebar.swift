@@ -106,10 +106,14 @@ struct Sidebar: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, 88)
                 #endif
-                if !pinned {
-                    SidebarToggle(open: false, toggle: browser.toggleSidebar)
-                        .padding(.trailing, 10)
+                HStack(spacing: 0) {
+                    // The gap goes with the badge, so the button stays put without it.
+                    ZoomBadge(browser: browser, gap: pinned ? 0 : 6)
+                    if !pinned {
+                        SidebarToggle(open: false, toggle: browser.toggleSidebar)
+                    }
                 }
+                .padding(.trailing, 10)
             }
             .frame(height: Self.topRow)
 
@@ -757,6 +761,52 @@ struct DevBadge: View {
     }
 }
 #endif
+
+/// The page's zoom, at the top of the sidebar, while it isn't the one pages
+/// open at (Settings › Appearance): ⌘+ and ⌘− show where they left it. A
+/// click takes it back, as ⌘0.
+private struct ZoomBadge: View {
+    let browser: Browser
+    var gap: CGFloat = 0
+    @AppStorage(PageZoom.key) private var standard = 1.0
+    @State private var hovering = false
+
+    var body: some View {
+        let tab = browser.selected
+        let zoom = tab?.pageZoom ?? 1
+        let shown = tab?.hasPage == true && abs(zoom - standard) > 0.01
+        ZStack {
+            if shown, let tab {
+                Button { tab.zoom(0) } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: hovering ? "arrow.counterclockwise"
+                              : zoom > standard ? "plus.magnifyingglass" : "minus.magnifyingglass")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(PageZoom.name(zoom))
+                            .font(.system(size: 11, weight: .semibold))
+                            .monospacedDigit()
+                            .contentTransition(.numericText(value: zoom))
+                    }
+                    .foregroundStyle(hovering ? Palette.ink : Palette.muted)
+                    .padding(.horizontal, 8)
+                    .frame(height: 22)
+                    .background(hovering ? Palette.wash : Palette.hover, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Palette.rim))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering = $0 }
+                .help("Actual Size (⌘0)")
+                .accessibilityLabel("Zoom \(PageZoom.name(zoom)), Actual Size")
+                .padding(.trailing, gap)
+                .transition(.scale(scale: 0.8).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.2), value: shown)
+        .animation(.snappy(duration: 0.2), value: zoom)
+        .animation(.easeOut(duration: 0.14), value: hovering)
+    }
+}
 
 /// The frosted desktop behind the window that macOS puts under sidebars
 /// (Finder's, Mail's), greyed while the window is in the background as theirs

@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- A page zoomed in or out (⌘+, ⌘−) shows its zoom, such as 125%, at the top of the sidebar. Click it to go back to actual size.
+
 ## [0.0.18] - 2026-10-01
 
 ### Fixed
