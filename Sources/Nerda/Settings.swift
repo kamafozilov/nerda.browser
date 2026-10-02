@@ -47,7 +47,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
     /// What the page holds, so a search finds it by a setting as well as by its name.
     private var keywords: [String] {
         switch self {
-        case .general: ["default browser", "search engine", "google", "suggestions", "picture in picture", "video", "screenshot", "language", "spell",
+        case .general: ["default browser", "search engine", "google", "kagi", "ecosia", "startpage", "perplexity", "custom search", "suggestions", "picture in picture", "video", "screenshot", "language", "spell",
                         "downloads", "folder", "ask where to save", "bookmarks", "import", "export", "quit", "warn", "about", "version", "updates", "automatically"]
         case .appearance: ["theme", "dark", "light", "zoom", "tab style", "vertical", "horizontal", "sidebar", "transparency", "tinted", "transparent", "glass",
                            "new tab", "wallpaper", "picture", "background", "ai chats", "chatgpt", "claude"]
@@ -83,6 +83,7 @@ struct SettingsView: View {
     /// The list a dropdown button opened, over everything else.
     @State private var dropdown: Dropdown?
     @State private var editingLanguages = false
+    @State private var editingSearch = false
     @State private var deletingData = false
     @State private var languages = PreferredLanguage.chosen
 
@@ -129,7 +130,7 @@ struct SettingsView: View {
                     switch open {
                     case .general:
                         GeneralSettings(browser: browser, languages: languages, editLanguages: { editingLanguages = true },
-                                        openReleaseNotes: { tab.settings = .releaseNotes })
+                                        editSearch: { editingSearch = true }, openReleaseNotes: { tab.settings = .releaseNotes })
                     case .appearance:
                         AppearanceSettings()
                     case .tabs:
@@ -152,7 +153,7 @@ struct SettingsView: View {
                 .padding(.horizontal, 32)
                 .padding(.vertical, 56)
                 .frame(maxWidth: .infinity)
-                .dialogBlur(editingLanguages || deletingData)
+                .dialogBlur(editingLanguages || editingSearch || deletingData)
             }
             .scrollIndicators(.never)
             .scrollBounceBehavior(.basedOnSize)
@@ -172,6 +173,9 @@ struct SettingsView: View {
                         editingLanguages = false
                     }
                 }
+                if editingSearch {
+                    CustomSearchDialog(escapes: dropdown == nil) { editingSearch = false }
+                }
                 if deletingData {
                     DeleteDataDialog(browser: browser, escapes: dropdown == nil) { deletingData = false }
                 }
@@ -186,9 +190,13 @@ private struct GeneralSettings: View {
     let browser: Browser
     let languages: [String]
     let editLanguages: () -> Void
+    let editSearch: () -> Void
     let openReleaseNotes: () -> Void
 
     @AppStorage(SearchEngine.key) private var engine = SearchEngine.google
+    // Watched, so the row shows your own engine's name as it is saved.
+    @AppStorage(SearchEngine.customNameKey) private var customName = ""
+    @AppStorage(SearchEngine.customAddressKey) private var customAddress = ""
     @AppStorage(PictureInPicture.key) private var pictureInPicture = false
     @AppStorage(PictureInPicture.appsKey) private var pictureInPictureForApps = false
     @AppStorage(Screenshot.key) private var screenshot = true
@@ -200,13 +208,33 @@ private struct GeneralSettings: View {
 
     var body: some View {
         DefaultBrowserCard()
+        // Your own, once it has an address that works; Google until then.
+        let current = SearchEngine.current
+        let hasCustom = SearchEngine.customAddress != nil
         SettingsGroup(title: "Search") {
             SettingsRow(title: "Default search engine", detail: "Used for searches from the address bar", icon: "magnifyingglass") {
-                DropdownButton(label: engine.name, site: engine.site,
-                               options: SearchEngine.allCases.map { DropdownOption(id: $0.rawValue, title: $0.name, site: $0.site) },
-                               selected: engine.rawValue) { engine = SearchEngine(rawValue: $0) ?? .google }
+                HStack(spacing: 8) {
+                    if current == .custom {
+                        Button("Edit…", action: editSearch)
+                            .buttonStyle(SettingsButtonStyle())
+                    }
+                    DropdownButton(label: current.name, site: current.site,
+                                   options: SearchEngine.allCases.map { engine in
+                                       // Your own last, under a line; until it has an address, Custom… asks for one.
+                                       engine == .custom && !hasCustom
+                                           ? DropdownOption(id: engine.rawValue, title: "Custom…", symbol: "plus")
+                                           : DropdownOption(id: engine.rawValue, title: engine.name, site: engine.site,
+                                                            separated: engine == .perplexity)
+                                   },
+                                   selected: current.rawValue) { picked in
+                        let picked = SearchEngine(rawValue: picked) ?? .google
+                        if picked == .custom, !hasCustom { editSearch() } else { engine = picked }
+                    }
+                }
             }
-            SettingsRow(title: "Search suggestions", detail: "\(engine.name) suggests searches as you type. Off, nothing leaves your Mac until Return",
+            SettingsRow(title: "Search suggestions",
+                        detail: current.suggests ? "\(current.name) suggests searches as you type. Off, nothing leaves your Mac until Return"
+                            : "\(current.name) doesn't suggest searches as you type",
                         icon: "text.magnifyingglass") {
                 SettingsToggle(title: "Search suggestions", isOn: $suggestions)
             }
@@ -1630,6 +1658,86 @@ private struct LanguagesDialog: View {
     /// Every language not already listed.
     private func options(besides listed: [String]) -> [DropdownOption] {
         PreferredLanguage.all.filter { !listed.contains($0) }.map { DropdownOption(id: $0, title: PreferredLanguage.name($0)) }
+    }
+}
+
+/// Your own search engine: a name, and the address searches go to, with %s
+/// where what was typed goes. Saved, it is the one searches go to.
+private struct CustomSearchDialog: View {
+    let escapes: Bool
+    let done: () -> Void
+
+    @AppStorage(SearchEngine.key) private var engine = SearchEngine.google
+    @AppStorage(SearchEngine.customNameKey) private var savedName = ""
+    @AppStorage(SearchEngine.customAddressKey) private var savedAddress = ""
+    @State private var name = ""
+    @State private var address = ""
+    @FocusState private var addressFocused: Bool
+
+    var body: some View {
+        let valid = SearchEngine.validAddress(address)
+        SettingsDialog(width: 400, escapes: escapes, cancel: done) {
+            Text("Custom search engine")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            Text("Searches from the address bar go to this address, with %s where what you typed goes.")
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+            label("Address")
+                .padding(.top, 18)
+            TextField("Address", text: $address, prompt: Text(verbatim: "https://example.com/search?q=%s"))
+                .labelsHidden()
+                .focused($addressFocused)
+                .onSubmit(save)
+            // Said once something is typed, not while the field is still empty.
+            Text(valid == nil && !address.isEmpty ? "Use a web address with %s where the search goes" : " ")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .padding(.top, 6)
+            label("Name")
+                .padding(.top, 10)
+            TextField("Name", text: $name, prompt: Text(placeholder(valid)))
+                .labelsHidden()
+                .onSubmit(save)
+            HStack(spacing: 8) {
+                Spacer()
+                Button("Cancel", action: done)
+                    .buttonStyle(SettingsButtonStyle())
+                Button("Save", action: save)
+                    .buttonStyle(SettingsButtonStyle())
+                    .disabled(valid == nil)
+            }
+            .padding(.top, 22)
+        }
+        .textFieldStyle(.roundedBorder)
+        .onAppear {
+            name = savedName
+            address = savedAddress
+            addressFocused = true
+        }
+    }
+
+    /// What it is called if left unnamed: its site.
+    private func placeholder(_ valid: String?) -> String {
+        valid.flatMap { URL(string: $0.replacingOccurrences(of: "%s", with: "x"))?.host() } ?? "Optional"
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(Palette.ink)
+            .padding(.bottom, 8)
+    }
+
+    private func save() {
+        guard let valid = SearchEngine.validAddress(address) else { return }
+        // Short enough for the settings row it is shown in.
+        savedName = String(name.trimmingCharacters(in: .whitespaces).prefix(40))
+        savedAddress = valid
+        engine = .custom
+        done()
     }
 }
 

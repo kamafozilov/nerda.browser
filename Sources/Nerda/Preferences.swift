@@ -2,14 +2,37 @@ import AppKit
 import WebKit
 
 /// Where what is typed that isn't an address goes, and whose guesses are
-/// offered as it is typed. They all answer guesses in the same form (OpenSearch's).
+/// offered as it is typed. Those that guess all answer in the same form (OpenSearch's).
 nonisolated enum SearchEngine: String, CaseIterable, Identifiable {
-    case google, bing, duckDuckGo, brave, yandex
+    case google, bing, duckDuckGo, brave, yandex, kagi, ecosia, startpage, perplexity
+    /// One of your own (Settings › General): a name, and an address with %s
+    /// where the search goes.
+    case custom
 
     static let key = "searchEngine"
+    static let customNameKey = "customSearchName"
+    static let customAddressKey = "customSearchAddress"
 
+    /// The one chosen; your own only while its address works, Google otherwise.
     static var current: Self {
-        UserDefaults.standard.string(forKey: key).flatMap(Self.init) ?? .google
+        let chosen = UserDefaults.standard.string(forKey: key).flatMap(Self.init) ?? .google
+        return chosen == .custom && customAddress == nil ? .google : chosen
+    }
+
+    /// Your own's address, if it is a web address with a %s in it.
+    static var customAddress: String? {
+        UserDefaults.standard.string(forKey: customAddressKey).flatMap(validAddress)
+    }
+
+    /// `address`, trimmed, if it is a web address (http or https, with a host)
+    /// with a %s where the search goes: in its path or query, not its host,
+    /// where what is typed would make no address at all.
+    static func validAddress(_ address: String) -> String? {
+        let address = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard address.contains("%s"), let url = URLComponents(string: address.replacingOccurrences(of: "%s", with: "nerdasearch")),
+              ["http", "https"].contains(url.scheme?.lowercased() ?? ""), let host = url.host, !host.isEmpty,
+              !host.contains("nerdasearch") else { return nil }
+        return address
     }
 
     var id: Self { self }
@@ -21,36 +44,79 @@ nonisolated enum SearchEngine: String, CaseIterable, Identifiable {
         case .duckDuckGo: "DuckDuckGo"
         case .brave: "Brave"
         case .yandex: "Yandex"
+        case .kagi: "Kagi"
+        case .ecosia: "Ecosia"
+        case .startpage: "Startpage"
+        case .perplexity: "Perplexity"
+        case .custom: Self.customName ?? Self.customSite?.host() ?? "Custom"
         }
     }
 
+    /// Your own's name, if it was given one.
+    private static var customName: String? {
+        let name = UserDefaults.standard.string(forKey: customNameKey)?.trimmingCharacters(in: .whitespaces) ?? ""
+        return name.isEmpty ? nil : name
+    }
+
+    /// Your own's site: its address short of its path.
+    private static var customSite: URL? {
+        guard let address = customAddress,
+              let url = URLComponents(string: address.replacingOccurrences(of: "%s", with: "x")) else { return nil }
+        var site = URLComponents()
+        site.scheme = url.scheme
+        site.host = url.host
+        site.port = url.port
+        return site.url
+    }
+
     /// The site whose icon it is shown with (Brave Search has none of its own).
-    var site: URL {
+    var site: URL? {
         switch self {
-        case .google: URL(string: "https://www.google.com")!
-        case .bing: URL(string: "https://www.bing.com")!
-        case .duckDuckGo: URL(string: "https://duckduckgo.com")!
-        case .brave: URL(string: "https://brave.com")!
-        case .yandex: URL(string: "https://yandex.com")!
+        case .google: URL(string: "https://www.google.com")
+        case .bing: URL(string: "https://www.bing.com")
+        case .duckDuckGo: URL(string: "https://duckduckgo.com")
+        case .brave: URL(string: "https://brave.com")
+        case .yandex: URL(string: "https://yandex.com")
+        case .kagi: URL(string: "https://kagi.com")
+        case .ecosia: URL(string: "https://www.ecosia.org")
+        case .startpage: URL(string: "https://www.startpage.com")
+        case .perplexity: URL(string: "https://www.perplexity.ai")
+        case .custom: Self.customSite
         }
     }
 
     func search(_ text: String) -> URL? {
-        let (address, name) = switch self {
+        let query: (address: String, name: String)? = switch self {
         case .google: ("https://www.google.com/search", "q")
         case .bing: ("https://www.bing.com/search", "q")
         case .duckDuckGo: ("https://duckduckgo.com/", "q")
         case .brave: ("https://search.brave.com/search", "q")
         case .yandex: ("https://yandex.com/search/", "text")
+        case .kagi: ("https://kagi.com/search", "q")
+        case .ecosia: ("https://www.ecosia.org/search", "q")
+        case .startpage: ("https://www.startpage.com/sp/search", "query")
+        case .perplexity: ("https://www.perplexity.ai/search", "q")
+        case .custom: nil
         }
-        var search = URLComponents(string: address)!
-        search.queryItems = [URLQueryItem(name: name, value: text)]
+        guard let query else { return Self.customAddress.flatMap { Self.fill($0, with: text) } }
+        var search = URLComponents(string: query.address)!
+        search.queryItems = [URLQueryItem(name: query.name, value: text)]
         return search.url
     }
 
-    /// Where to ask what it thinks is being typed.
+    /// `address` with `text` in place of its %s, encoded so that nothing
+    /// typed (&, #, /) can change the address around it.
+    static func fill(_ address: String, with text: String) -> URL? {
+        let typed = text.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._~"))) ?? ""
+        return URL(string: address.replacingOccurrences(of: "%s", with: typed))
+    }
+
+    /// Whether it offers guesses as you type.
+    var suggests: Bool { guesses("") != nil }
+
+    /// Where to ask what it thinks is being typed, if it says.
     func guesses(_ text: String) -> URL? {
-        let (address, items): (String, [URLQueryItem]) = switch self {
+        let ask: (address: String, items: [URLQueryItem])? = switch self {
         case .google: ("https://suggestqueries.google.com/complete/search", [
             URLQueryItem(name: "client", value: "firefox"),
             URLQueryItem(name: "ie", value: "utf-8"),
@@ -61,9 +127,14 @@ nonisolated enum SearchEngine: String, CaseIterable, Identifiable {
         case .duckDuckGo: ("https://duckduckgo.com/ac/", [URLQueryItem(name: "q", value: text), URLQueryItem(name: "type", value: "list")])
         case .brave: ("https://search.brave.com/api/suggest", [URLQueryItem(name: "q", value: text)])
         case .yandex: ("https://suggest.yandex.com/suggest-ff.cgi", [URLQueryItem(name: "part", value: text)])
+        case .kagi: ("https://kagi.com/api/autosuggest", [URLQueryItem(name: "q", value: text)])
+        case .ecosia: ("https://ac.ecosia.org/autocomplete", [URLQueryItem(name: "q", value: text), URLQueryItem(name: "type", value: "list")])
+        case .startpage: ("https://www.startpage.com/osuggestions", [URLQueryItem(name: "q", value: text)])
+        case .perplexity, .custom: nil
         }
-        var request = URLComponents(string: address)!
-        request.queryItems = items
+        guard let ask else { return nil }
+        var request = URLComponents(string: ask.address)!
+        request.queryItems = ask.items
         return request.url
     }
 }
