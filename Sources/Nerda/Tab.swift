@@ -102,6 +102,9 @@ final class Tab: Identifiable {
     @ObservationIgnored private var recorded: URL?
     /// When the page's process last died, to tell a page that keeps crashing.
     @ObservationIgnored var crashed: Date?
+    /// How many of the page's own print sheets (`window.print()`) in a row
+    /// were cancelled, and when the last was (see `Browser.printFrame`).
+    @ObservationIgnored var printCancels: (count: Int, last: Date)?
     /// A password the page just sent, until it is known whether it got in.
     @ObservationIgnored var signIn: SentSignIn?
     /// A name sent on its own, for the password step that comes after it.
