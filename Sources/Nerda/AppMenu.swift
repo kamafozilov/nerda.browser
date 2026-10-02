@@ -40,7 +40,7 @@ final class AppMenu: NSObject {
             return item
         })
         let servicesMenu = submenu("Services", [])
-        // Each opens a new issue on GitHub, filled in for you to finish (Feedback).
+        // Each shows its report, then opens a new issue on GitHub, filled in for you to finish (Feedback).
         let helpMenu = submenu("Help", [
             item("Report a Problem…", #selector(reportProblem), target: self),
             item("Suggest an Idea…", #selector(suggestIdea), target: self),
