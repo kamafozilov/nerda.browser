@@ -1364,6 +1364,8 @@ final class ExtensionTab: NSObject, WKWebExtensionTab {
     func isLoadingComplete(for context: WKWebExtensionContext) -> Bool { !(tab?.isLoading ?? false) }
     func isSelected(for context: WKWebExtensionContext) -> Bool { tab != nil && tab?.id == browser?.selectedID }
     func isPinned(for context: WKWebExtensionContext) -> Bool { tab?.isPinned ?? false }
+    func isPlayingAudio(for context: WKWebExtensionContext) -> Bool { tab?.playsAudio ?? false }
+    func isMuted(for context: WKWebExtensionContext) -> Bool { tab?.isMuted ?? false }
     func zoomFactor(for context: WKWebExtensionContext) -> Double { Double(tab?.page?.pageZoom ?? 1) }
     func size(for context: WKWebExtensionContext) -> CGSize { tab?.page?.bounds.size ?? .zero }
     func shouldGrantPermissionsOnUserGesture(for context: WKWebExtensionContext) -> Bool { true }
@@ -1371,6 +1373,10 @@ final class ExtensionTab: NSObject, WKWebExtensionTab {
     func setPinned(_ pinned: Bool, for context: WKWebExtensionContext) async throws {
         guard let tab else { return }
         browser?.setPinned(pinned, tab.id)
+    }
+
+    func setMuted(_ muted: Bool, for context: WKWebExtensionContext) async throws {
+        tab?.isMuted = muted
     }
 
     func setZoomFactor(_ zoomFactor: Double, for context: WKWebExtensionContext) async throws {

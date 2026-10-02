@@ -158,6 +158,8 @@ struct Sidebar: View {
                                 selected: id == browser.selectedID,
                                 dev: tab.isOnThisMac,
                                 close: { withAnimation(.slide) { browser.close(id) } },
+                                muted: tab.speaker,
+                                mute: { browser.toggleMute(id) },
                                 // A new tab, or the settings, keeps the name it has.
                                 rename: tab.hasPage ? { name in
                                     if let name { browser.rename(id, to: name) }
@@ -314,6 +316,7 @@ struct Sidebar: View {
                     if let tab = byID[id] {
                         PinnedTile(site: tab.site, loading: tab.isLoading, title: tab.title,
                                    selected: id == browser.selectedID, asleep: tab.isAsleep,
+                                   muted: tab.speaker, mute: { browser.toggleMute(id) },
                                    press: { browser.select(id) }) {
                             browser.select(id)
                         }
@@ -497,6 +500,8 @@ struct Sidebar: View {
                 : tabID.map { tabID in { withAnimation(.slide) { browser.close(tabID) } } },
             closeShown: tabID != nil || folderOpen,
             closesFolder: item.isFolder,
+            muted: tab?.speaker,
+            mute: { if let tabID { browser.toggleMute(tabID) } },
             rename: { name in
                 renaming = nil
                 if let name { browser.bookmarks.rename(id, to: name) }
@@ -948,6 +953,10 @@ private struct SidebarRow: View {
     var closeShown = false
     /// A minus, to close a folder's tabs; an ×, a tab.
     var closesFolder = false
+    /// Given, its page makes sound (false) or is muted (true): a speaker on
+    /// its icon (`speaker`), a click on which is `mute`.
+    var muted: Bool?
+    var mute: () -> Void = {}
     /// Given, a double-click makes the title editable in place: Return or a
     /// click away keeps the new name (nil for Esc, which keeps the old).
     var rename: ((String?) -> Void)?
@@ -961,6 +970,8 @@ private struct SidebarRow: View {
 
     @State private var hovering = false
     @State private var renaming = false
+    /// The pointer is on the speaker, which takes the icon's place.
+    @State private var overSpeaker = false
     @Environment(\.incognito) private var incognito
 
     private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -971,6 +982,8 @@ private struct SidebarRow: View {
                 TabIcon(site: site, loading: loading, fallback: icon)
                     .font(.system(size: 14, weight: dimmed ? .light : .regular))
                     .frame(width: 22)
+                    .opacity(overSpeaker && muted != nil ? 0 : 1)
+                    .speakerSpot()
                 if renaming {
                     RenameField(title: title) { name in
                         renaming = false
@@ -1014,8 +1027,9 @@ private struct SidebarRow: View {
                 CloseButton(folder: closesFolder, action: close).padding(.trailing, 6)
             }
         }
-        // After the overlay, so moving onto the close button still counts as
-        // being over the row.
+        .speaker(muted, over: $overSpeaker, action: mute)
+        // After the overlays, so moving onto the close button or the speaker
+        // still counts as being over the row.
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
     }
@@ -1127,11 +1141,15 @@ private struct PinnedTile: View {
     let selected: Bool
     /// Asleep (`Tab.sleep`): its icon in grey, as not running.
     var asleep = false
+    /// As a tab row's: its speaker.
+    var muted: Bool?
+    var mute: () -> Void = {}
     /// As a tab row's: on the way down.
     var press: (() -> Void)?
     let action: () -> Void
 
     @State private var hovering = false
+    @State private var overSpeaker = false
 
     private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
 
@@ -1147,6 +1165,8 @@ private struct PinnedTile: View {
                 .saturation(asleep ? 0 : 1)
                 .frame(maxWidth: .infinity)
                 .frame(height: Sidebar.tileHeight)
+                // Its speaker in the tile's corner, clear of the icon.
+                .speakerSpot()
                 .background {
                     // No colour to wear (GitHub's): as dark as the window gets, or as light,
                     // under the mark drawn in the text's colour.
@@ -1185,6 +1205,7 @@ private struct PinnedTile: View {
         .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in press?() })
         .help(title)
         .accessibilityLabel(title)
+        .speaker(muted, over: $overSpeaker, corner: 11, action: mute)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
     }
@@ -1241,6 +1262,109 @@ struct CloseButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel(folder ? "Close Tabs in Folder" : "Close Tab")
         .onHover { hovering = $0 }
+    }
+}
+
+/// Where a tab's icon is, for its speaker to go over it (`speaker`).
+struct SpeakerSpot: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? { nil }
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = value ?? nextValue() }
+}
+
+extension View {
+    /// Marks the tab's icon, where its speaker goes.
+    func speakerSpot() -> some View {
+        anchorPreference(key: SpeakerSpot.self, value: .bounds) { $0 }
+    }
+
+    /// While the tab's page makes sound (`muted` false) or is muted (true),
+    /// its speaker over the icon marked with `speakerSpot`. Over the tab's
+    /// button rather than in it, so a click on it mutes without also
+    /// selecting the tab. `over` says when the pointer is on it, for the tab
+    /// to hide its icon meanwhile. On a pinned site (`corner`, how far in
+    /// from the marked frame's bottom-trailing corner), only that small
+    /// speaker mutes: the middle of a tile, where its icon is, is where it is
+    /// clicked to go to the site.
+    func speaker(_ muted: Bool?, over: Binding<Bool>, corner: CGFloat? = nil, action: @escaping () -> Void) -> some View {
+        overlayPreferenceValue(SpeakerSpot.self) { spot in
+            if let muted, let spot {
+                GeometryReader { space in
+                    let frame = space[spot]
+                    Speaker(muted: muted, over: over, cornerOnly: corner != nil, action: action)
+                        .position(x: corner.map { frame.maxX - $0 } ?? frame.midX,
+                                  y: corner.map { frame.maxY - $0 } ?? frame.midY)
+                }
+            }
+        }
+    }
+}
+
+/// A small speaker on the corner of a tab's icon, so the tab making the
+/// sound shows at a glance; muted, the speaker struck through. Under the
+/// pointer the icon gives way to the speaker itself: a click mutes the tab,
+/// or brings its sound back. `cornerOnly`, it is the corner's speaker alone,
+/// a little larger under the pointer.
+private struct Speaker: View {
+    let muted: Bool
+    @Binding var over: Bool
+    var cornerOnly = false
+    let action: () -> Void
+
+    var body: some View {
+        let symbol = muted ? "speaker.slash.fill" : "speaker.wave.2.fill"
+        if cornerOnly {
+            Button(action: action) {
+                // Only what is seen of it takes the click.
+                badge(symbol, lit: over)
+                    .scaleEffect(over ? 1.25 : 1)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help(muted ? "Unmute Tab" : "Mute Tab")
+            .accessibilityLabel(muted ? "Unmute Tab" : "Mute Tab")
+            .onHover { over = $0 }
+            .onDisappear { over = false }
+            .animation(.easeOut(duration: 0.12), value: over)
+        } else {
+            icon(symbol)
+        }
+    }
+
+    private func badge(_ symbol: String, lit: Bool = false) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 6.5, weight: .bold))
+            .foregroundStyle(muted && !lit ? Palette.muted : Palette.ink)
+            .frame(width: 12, height: 12)
+            .background(Circle().fill(Palette.ground))
+            .overlay(Circle().strokeBorder(Color.primary.opacity(lit ? 0.3 : 0.15), lineWidth: 0.5))
+    }
+
+    private func icon(_ symbol: String) -> some View {
+        Button(action: action) {
+            ZStack(alignment: .bottomTrailing) {
+                if over {
+                    Image(systemName: symbol)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.ink)
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(width: 22, height: 22)
+                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Palette.hover))
+                } else {
+                    // Over the icon's corner, a little past it.
+                    badge(symbol)
+                        .offset(x: 3, y: 3)
+                }
+            }
+            .frame(width: 22, height: 22)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(muted ? "Unmute Tab" : "Mute Tab")
+        .accessibilityLabel(muted ? "Unmute Tab" : "Mute Tab")
+        .onHover { over = $0 }
+        // Gone with the pointer on it (the sound stopped): not under it any more.
+        .onDisappear { over = false }
+        .animation(.easeOut(duration: 0.12), value: over)
     }
 }
 

@@ -36,7 +36,8 @@ final class Browser: NSObject {
             // Accounts listed under a box of the tab left behind.
             if selectedID != oldValue { passwordChoices = nil }
             if selectedID != oldValue, PictureInPicture.isOn {
-                tabs.first { $0.id == oldValue }?.page?.evaluateJavaScript(PictureInPicture.enter)
+                // A muted tab's video has no sound to keep hearing.
+                tabs.first { $0.id == oldValue && !$0.isMuted }?.page?.evaluateJavaScript(PictureInPicture.enter)
                 selected?.page?.evaluateJavaScript(PictureInPicture.exit)
             }
             if selectedID != oldValue, Extensions.started { Extensions.shared.activated(self, from: oldValue) }
@@ -227,6 +228,11 @@ final class Browser: NSObject {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         tabs.first { $0.id == id }?.name = name.isEmpty ? nil : name
         sessionChanged()
+    }
+
+    /// The tab's speaker, Mute Tab and Unmute Tab: its sound off, or back on.
+    func toggleMute(_ id: Tab.ID) {
+        tabs.first { $0.id == id }?.isMuted.toggle()
     }
 
     /// The keyboard back on the page on screen, once something of ours

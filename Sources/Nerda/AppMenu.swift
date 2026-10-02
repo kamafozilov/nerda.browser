@@ -107,6 +107,7 @@ final class AppMenu: NSObject {
                 item("Reload Page", #selector(reload), "r", target: self),
                 // ⌘⇧R, as Chrome's and Firefox's hard reload.
                 item("Hard Reload Page", #selector(hardReload), "r", [.command, .shift], target: self),
+                item("Mute Tab", #selector(toggleMute), target: self),
                 .separator(),
                 zoom("Zoom In", 1, "+"),
                 // ⌘= as well as ⌘+: they're the same key on most keyboards.
@@ -214,6 +215,7 @@ final class AppMenu: NSObject {
     @objc private func toggleSidebar() { browser.toggleSidebar() }
     @objc private func printPage() { browser.printPage() }
     @objc private func exportPDF() { browser.exportPDF() }
+    @objc private func toggleMute() { browser.selectedID.map(browser.toggleMute) }
     @objc private func reload() { browser.selected?.reload() }
     @objc private func hardReload() { browser.selected?.reload(fromOrigin: true) }
     @objc private func goBack() { browser.selected?.webView.goBack() }
@@ -329,6 +331,9 @@ extension AppMenu: NSMenuItemValidation {
         case #selector(toggleBookmark):
             item.title = browser.selected?.bookmark == nil ? "Bookmark This Tab" : "Remove Bookmark"
             return !browser.isPrivate && browser.selected?.hasPage == true
+        case #selector(toggleMute):
+            item.title = browser.selected?.isMuted == true ? "Unmute Tab" : "Mute Tab"
+            return browser.selected?.hasPage == true
         case #selector(showFind), #selector(inspect(_:)), #selector(clearSiteData), #selector(printPage), #selector(exportPDF):
             return browser.selected?.hasPage == true
         case #selector(toggleResponsive):
@@ -507,7 +512,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationWillResignActive(_ notification: Notification) {
         guard PictureInPicture.isOnForApps else { return }
         // The window in front, an incognito one's included.
-        floating = ((NSApp.mainWindow as? BrowserWindow)?.browser ?? browser).selected?.page
+        // A muted tab's video has no sound to keep hearing.
+        floating = ((NSApp.mainWindow as? BrowserWindow)?.browser ?? browser).selected.flatMap { $0.isMuted ? nil : $0.page }
         floating?.evaluateJavaScript(PictureInPicture.enter)
     }
 

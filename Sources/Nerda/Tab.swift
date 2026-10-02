@@ -42,6 +42,21 @@ final class Tab: Identifiable {
     }
     /// Where a pinned tab was when pinned; double-clicking its tile goes back there.
     var home: URL?
+    /// The page is making sound now: its tab shows a speaker, which mutes it.
+    private(set) var playsAudio = false {
+        didSet { if playsAudio != oldValue, Extensions.started { Extensions.shared.changed(self, .playingAudio) } }
+    }
+    /// Its sound is off (the speaker on its tab, Mute Tab, or an extension)
+    /// until turned on again, asleep and awake.
+    var isMuted = false {
+        didSet {
+            guard isMuted != oldValue else { return }
+            if let page { Self.mute(page, isMuted) }
+            if Extensions.started { Extensions.shared.changed(self, .muted) }
+        }
+    }
+    /// The speaker its tab shows: nil for none, or whether it is muted.
+    var speaker: Bool? { playsAudio || isMuted ? isMuted : nil }
     /// The bookmark it is the tab of (`Browser.open(bookmark:)`): shown in
     /// the bookmark's place in the sidebar, not in the list.
     var bookmark: Bookmarks.Item.ID?
@@ -80,7 +95,10 @@ final class Tab: Identifiable {
     @ObservationIgnored var lastSeen = Date.now
     /// The page, while awake.
     @ObservationIgnored private(set) var page: WKWebView? {
-        didSet { if isAsleep != (page == nil) { isAsleep = page == nil } }
+        didSet {
+            if isAsleep != (page == nil) { isAsleep = page == nil }
+            if page == nil, playsAudio { playsAudio = false }
+        }
     }
     /// Whether its page is let go (`sleep`), kept in step with `page` so a
     /// pinned site's icon can show it, where `page` itself isn't watched.
@@ -270,6 +288,7 @@ final class Tab: Identifiable {
         // rubber band pulls it on, over a blank ground. No edge bounces.
         // WebKit SPI (`_WKRectEdge`): should it go, pages bounce again.
         Self.set(page, "_setRubberBandingEnabled:", UInt(0))
+        if isMuted { Self.mute(page, true) }
         page.uiDelegate = delegate
         page.navigationDelegate = delegate
         // WebKit reports these on the main thread, where the tab lives.
@@ -312,6 +331,11 @@ final class Tab: Identifiable {
             },
             KeyObserver(page, Self.sampledTopColor) { [weak self] in self?.sampled() },
         ]
+        if page.responds(to: NSSelectorFromString(Self.playingAudio)) {
+            observations.append(KeyObserver(page, Self.playingAudio) { [weak self, weak page] in
+                self?.playsAudio = page?.value(forKey: Self.playingAudio) as? Bool ?? false
+            })
+        }
         // This page took the process kept ready; the next one is readied once it is under way.
         DispatchQueue.main.async { Self.warmUp() }
         return page
@@ -510,6 +534,18 @@ final class Tab: Identifiable {
     }
 
     private static let sampledTopColor = "_sampledPageTopColor"
+
+    /// Whether the page makes sound, and turning it off, as Safari's tabs do.
+    // WebKit SPI: should it go, no tab shows a speaker, and Mute Tab does nothing.
+    private static let playingAudio = "_isPlayingAudio"
+
+    /// The page's sound off or on (`_WKMediaMutedState`'s audio bit), its
+    /// camera and microphone left as they are.
+    private static func mute(_ page: WKWebView, _ muted: Bool) {
+        guard page.responds(to: NSSelectorFromString("_mediaMutedState")) else { return }
+        let state = page.value(forKey: "_mediaMutedState") as? UInt ?? 0
+        set(page, "_setPageMuted:", muted ? state | 1 : state & ~1)
+    }
 
     /// The page's own colours changed after WebKit's sample: light or dark
     /// mode switched, or the site's own theme. WebKit won't sample again until

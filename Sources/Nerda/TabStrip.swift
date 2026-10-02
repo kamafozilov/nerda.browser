@@ -176,7 +176,8 @@ struct TabStrip: View {
             ForEach(items, id: \.self) { id in
                 if let id, let tab = byID[id] {
                     PinnedIcon(site: tab.site, loading: tab.isLoading, title: tab.title,
-                               selected: id == browser.selectedID, asleep: tab.isAsleep, press: { browser.select(id) }) {
+                               selected: id == browser.selectedID, asleep: tab.isAsleep,
+                               muted: tab.speaker, mute: { browser.toggleMute(id) }, press: { browser.select(id) }) {
                         browser.select(id)
                     }
                     // Its place stays empty while it is dragged: where it will land.
@@ -264,6 +265,8 @@ struct TabStrip: View {
             separated: separated,
             compact: compact,
             close: { withAnimation(.slide) { browser.close(id) } },
+            muted: tab.speaker,
+            mute: { browser.toggleMute(id) },
             // A new tab, or the settings, keeps the name it has.
             rename: tab.hasPage ? { name in
                 if let name { browser.rename(id, to: name) }
@@ -387,12 +390,15 @@ private struct StripTab: View {
     var compact = false
     let close: () -> Void
     /// As a sidebar row's (see there).
+    var muted: Bool?
+    var mute: () -> Void = {}
     var rename: ((String?) -> Void)?
     var press: (() -> Void)?
     let action: () -> Void
 
     @State private var hovering = false
     @State private var renaming = false
+    @State private var overSpeaker = false
 
     var body: some View {
         let closes = !compact && !renaming && (hovering || selected)
@@ -401,6 +407,8 @@ private struct StripTab: View {
                 TabIcon(site: site, loading: loading, fallback: icon)
                     .font(.system(size: 13))
                     .frame(width: 16)
+                    .opacity(overSpeaker && muted != nil ? 0 : 1)
+                    .speakerSpot()
                 if renaming {
                     RenameField(title: title) { name in
                         renaming = false
@@ -433,6 +441,9 @@ private struct StripTab: View {
         .buttonStyle(.plain)
         .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in press?() })
         .simultaneousGesture(TapGesture(count: 2).onEnded { if rename != nil { renaming = true } })
+        // Before the overlays: the close button and the speaker say what they do.
+        .help(title)
+        .accessibilityLabel(title)
         // Over the tab rather than inside it, so a click on it closes the tab
         // without also selecting it.
         .overlay(alignment: .trailing) {
@@ -450,12 +461,11 @@ private struct StripTab: View {
                     .padding(.bottom, 4)
             }
         }
-        // After the overlays, so moving onto the close button still counts as
-        // being over the tab.
+        .speaker(renaming ? nil : muted, over: $overSpeaker, action: mute)
+        // After the overlays, so moving onto the close button or the speaker
+        // still counts as being over the tab.
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
-        .help(title)
-        .accessibilityLabel(title)
     }
 }
 
@@ -537,10 +547,14 @@ private struct PinnedIcon: View {
     let selected: Bool
     /// Asleep (`Tab.sleep`): its icon in grey, as not running.
     var asleep = false
+    /// As a tab's: its speaker.
+    var muted: Bool?
+    var mute: () -> Void = {}
     var press: (() -> Void)?
     let action: () -> Void
 
     @State private var hovering = false
+    @State private var overSpeaker = false
 
     private let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
 
@@ -549,6 +563,7 @@ private struct PinnedIcon: View {
             TabIcon(site: site, loading: loading && Favicons.origin(of: site).flatMap { Favicons.shared.icon($0).image } == nil,
                     size: 16)
                 .saturation(asleep ? 0 : 1)
+                .speakerSpot()
                 .frame(width: TabStrip.icon, height: 26)
                 .background(shape.fill(selected ? Palette.wash : hovering ? Palette.hover : .clear))
                 .contentShape(shape)
@@ -557,6 +572,8 @@ private struct PinnedIcon: View {
         .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in press?() })
         .help(title)
         .accessibilityLabel(title)
+        // On the icon's own corner: the tile is too small for one of its own.
+        .speaker(muted, over: $overSpeaker, corner: 0, action: mute)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
     }
