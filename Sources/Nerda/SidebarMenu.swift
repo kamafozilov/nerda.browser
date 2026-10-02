@@ -279,6 +279,7 @@ struct TabMenu: View {
             Divider()
             if tab.hasPage {
                 Button("Reload") { tab.reload() }
+                Button(tab.isMuted ? "Unmute Tab" : "Mute Tab") { browser.toggleMute(id) }
                 // Incognito keeps nothing pinned, nor bookmarks.
                 if !browser.isPrivate, let bookmark = tab.bookmark {
                     Button("Remove Bookmark") { withAnimation(.slide) { browser.removeBookmark(bookmark) } }
