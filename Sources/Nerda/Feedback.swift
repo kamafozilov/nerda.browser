@@ -5,8 +5,10 @@ import SwiftUI
 /// Telling Nerda's makers what went wrong, or what would make it better, as
 /// an issue on its GitHub repository: Help › Report a Problem… and Suggest an
 /// Idea…, and the card at the foot of the sidebar once Nerda has crashed
-/// (CrashCard). Each opens GitHub's new issue page in a tab, already filled
-/// in, and nothing leaves the Mac until you submit it there.
+/// (CrashCard). Each shows the report first and, once you continue, opens
+/// GitHub's new issue page in a tab, already filled in. The report travels
+/// in that page's address, so nothing leaves the Mac before you continue,
+/// and nothing is posted until you submit it there.
 ///
 /// The crash comes from MetricKit, which hands its report over the next time
 /// Nerda opens: why it stopped, and the calls it was in, as places in each
@@ -54,8 +56,7 @@ final class Feedback: NSObject, MXMetricManagerSubscriber {
             ---
             \(Self.system)
             \(report.map { "\n" + $0 } ?? "")
-            """)
-        if report != nil { dismissCrash() }
+            """) { if report != nil { self.dismissCrash() } }
     }
 
     /// Help › Suggest an Idea….
@@ -81,8 +82,7 @@ final class Feedback: NSObject, MXMetricManagerSubscriber {
 
             ---
             \(crash)
-            """)
-        dismissCrash()
+            """) { self.dismissCrash() }
     }
 
     func dismissCrash() {
@@ -90,11 +90,38 @@ final class Feedback: NSObject, MXMetricManagerSubscriber {
         withAnimation(.spring(duration: 0.4)) { crash = nil }
     }
 
-    /// In the regular window, where you may be signed in to GitHub.
-    private func open(template: String, title: String, body: String) {
+    /// In the regular window, where you may be signed in to GitHub, once
+    /// you have read what goes and continued: the address carries it to
+    /// GitHub as the page opens. Cancel sends nothing and keeps the crash.
+    private func open(template: String, title: String, body: String, then sent: @escaping () -> Void = {}) {
         guard let url = Self.issue(template: template, title: title, body: body) else { return }
         let browser = Windows.showRegular()
-        withAnimation(.slide) { browser.open(url) }
+        let alert = NSAlert()
+        alert.messageText = "Send this report to GitHub?"
+        alert.informativeText = "Continuing opens it as a new issue on GitHub, to finish there. It's only posted when you submit it."
+        alert.addButton(withTitle: "Continue to GitHub")
+        alert.addButton(withTitle: "Cancel")
+        alert.accessoryView = Self.preview(body)
+        let answer = { (answer: NSApplication.ModalResponse) in
+            guard answer == .alertFirstButtonReturn else { return }
+            withAnimation(.slide) { browser.open(url) }
+            sent()
+        }
+        if let window = browser.window { alert.beginSheetModal(for: window, completionHandler: answer) }
+        else { answer(alert.runModal()) }
+    }
+
+    /// The report as it will go, to read and scroll through.
+    private static func preview(_ body: String) -> NSView {
+        let scroll = NSTextView.scrollableTextView()
+        scroll.frame = NSRect(x: 0, y: 0, width: 420, height: 220)
+        scroll.borderType = .bezelBorder
+        let text = scroll.documentView as! NSTextView
+        text.string = body
+        text.isEditable = false
+        text.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        text.textContainerInset = NSSize(width: 4, height: 4)
+        return scroll
     }
 
     nonisolated static func issue(template: String, title: String, body: String) -> URL? {
@@ -218,7 +245,7 @@ struct CrashCard: View {
                 Button("Send Report") { Feedback.shared.sendCrash() }
                     .buttonStyle(.borderedProminent)
                     .tint(incognito ? Palette.incognitoAccent : .accentColor)
-                    .help("Opens the report as a new issue on GitHub, to look over before you submit it")
+                    .help("Shows the report, then opens it as a new issue on GitHub for you to submit")
                 Button("Dismiss") { Feedback.shared.dismissCrash() }
                     .buttonStyle(.bordered)
             }
