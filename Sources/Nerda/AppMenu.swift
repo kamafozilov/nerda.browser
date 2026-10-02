@@ -8,6 +8,8 @@ import WebKit
 final class AppMenu: NSObject {
     /// The regular window's, for when no window of Nerda's is in front.
     private let regular: Browser
+    /// What File › Share shares, kept while its menu may be open.
+    private var sharing: NSSharingServicePicker?
 
     /// What the menu works on: the browser of the window in front, an
     /// incognito one's included.
@@ -41,6 +43,27 @@ final class AppMenu: NSObject {
         let bookmarksMenu = submenu("Bookmarks", [
             item("Bookmark This Tab", #selector(toggleBookmark), "d", target: self),
         ])
+        // Filled with the Mac's ways to share the page on screen as it opens (`fillFile`).
+        let fileMenu = submenu("File", [
+            item("New Tab", #selector(newTab), "t", target: self),
+            item("Reopen Closed Tab", #selector(reopenClosedTab), "t", [.command, .shift], target: self),
+            item("New Incognito Window", #selector(newIncognitoWindow), "n", [.command, .shift], target: self),
+            // ⌘⇧A, as Chrome's Search Tabs: a key sites leave to the browser,
+            // where ⌘K is often a site's own.
+            item("Search Tabs…", #selector(searchTabs), "a", [.command, .shift], target: self),
+            item("Open Location…", #selector(openLocation), "l", target: self),
+            item("Close Tab", #selector(closeTab), "w", target: self),
+            item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]),
+            .separator(),
+            Self.noShare,
+            .separator(),
+            item("Export as PDF…", #selector(exportPDF), target: self),
+            item("Print…", #selector(printPage), "p", target: self),
+            .separator(),
+            item("Import Passwords…", #selector(importPasswords), target: self),
+            item("Import Bookmarks…", #selector(importBookmarks), target: self),
+            item("Export Bookmarks…", #selector(exportBookmarks), target: self),
+        ])
         let historyMenu = submenu("History", [
             item("Back", #selector(goBack), "[", target: self),
             item("Forward", #selector(goForward), "]", target: self),
@@ -66,24 +89,7 @@ final class AppMenu: NSObject {
                 .separator(),
                 item("Quit Nerda", #selector(NSApplication.terminate(_:)), "q"),
             ]),
-            submenu("File", [
-                item("New Tab", #selector(newTab), "t", target: self),
-                item("Reopen Closed Tab", #selector(reopenClosedTab), "t", [.command, .shift], target: self),
-                item("New Incognito Window", #selector(newIncognitoWindow), "n", [.command, .shift], target: self),
-                // ⌘⇧A, as Chrome's Search Tabs: a key sites leave to the browser,
-                // where ⌘K is often a site's own.
-                item("Search Tabs…", #selector(searchTabs), "a", [.command, .shift], target: self),
-                item("Open Location…", #selector(openLocation), "l", target: self),
-                item("Close Tab", #selector(closeTab), "w", target: self),
-                item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]),
-                .separator(),
-                item("Export as PDF…", #selector(exportPDF), target: self),
-                item("Print…", #selector(printPage), "p", target: self),
-                .separator(),
-                item("Import Passwords…", #selector(importPasswords), target: self),
-                item("Import Bookmarks…", #selector(importBookmarks), target: self),
-                item("Export Bookmarks…", #selector(exportBookmarks), target: self),
-            ]),
+            fileMenu,
             submenu("Edit", [
                 item("Undo", Selector(("undo:")), "z"),
                 item("Redo", Selector(("redo:")), "z", [.command, .shift]),
@@ -135,6 +141,7 @@ final class AppMenu: NSObject {
             bookmarksMenu,
             windowMenu,
         ]
+        fileMenu.submenu?.delegate = self
         historyMenu.submenu?.delegate = self
         bookmarksMenu.submenu?.delegate = self
         NSApp.mainMenu = bar
@@ -368,7 +375,8 @@ extension AppMenu: NSMenuDelegate {
     /// Under Back, Forward and Show All History, the pages visited last, as Safari lists them;
     /// each opens in a tab of its own.
     func menuNeedsUpdate(_ menu: NSMenu) {
-        guard menu.title != "Bookmarks" else { return fillBookmarks(menu) }
+        if menu.title == "Bookmarks" { return fillBookmarks(menu) }
+        if menu.title == "File" { return fillFile(menu) }
         while menu.items.count > 3 { menu.removeItem(at: 3) }
         if !browser.isPrivate, !browser.recentlyClosed.isEmpty {
             let closed = browser.recentlyClosed.reversed().map { closed in
@@ -389,6 +397,27 @@ extension AppMenu: NSMenuDelegate {
         }
         if menu.items.count > 4 { menu.addItem(.separator()) }
         menu.addItem(item("Clear History…", #selector(clearHistory), target: self))
+    }
+
+    /// Share, with the Mac's own ways to share the page on screen (AirDrop,
+    /// Messages, Mail, Notes and the rest), as Safari's File menu has it;
+    /// greyed with no web page on screen.
+    private func fillFile(_ menu: NSMenu) {
+        guard let index = menu.items.firstIndex(where: { $0.identifier == Self.shareID }) else { return }
+        sharing = (browser.locked ? nil : browser.selected?.shareable).map { NSSharingServicePicker(items: [$0]) }
+        let item = sharing?.standardShareMenuItem ?? Self.noShare
+        item.identifier = Self.shareID
+        menu.removeItem(at: index)
+        menu.insertItem(item, at: index)
+    }
+
+    private static let shareID = NSUserInterfaceItemIdentifier("share")
+
+    /// Share, greyed: no action, so the menu turns it off.
+    private static var noShare: NSMenuItem {
+        let item = NSMenuItem(title: "Share", action: nil, keyEquivalent: "")
+        item.identifier = shareID
+        return item
     }
 
     /// Under Bookmark This Tab, the bookmarks, each folder a submenu of what is in it.

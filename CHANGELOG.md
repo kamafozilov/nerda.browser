@@ -11,6 +11,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - File › Print… (⌘P) prints the page, and Export as PDF… saves it in pages, as it would print. A site's own Print button works too, and a page that closes itself once printed, as a ticket or a receipt does, is printed first.
 - A tab making sound shows a small speaker on its site's icon, in the sidebar and across the top. Point at the icon and click to mute the tab, and again to bring its sound back; a pinned site has the speaker in its corner, so a click in the middle still opens it. Mute Tab is in the tab's right-click menu and in View too, and a muted tab's video doesn't float in Picture in Picture.
+- Share the page on screen with AirDrop, Messages, Mail, Notes and the rest, from File › Share or a tab's right-click menu.
 
 ## [0.0.20] - 2026-10-01
 
