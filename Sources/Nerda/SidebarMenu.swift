@@ -287,6 +287,7 @@ struct TabMenu: View {
                     Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { withAnimation(.slide) { browser.setPinned(!tab.isPinned, id) } }
                     AddToBookmarks(browser: browser, id: id)
                 }
+                if let url = tab.shareable { ShareLink("Share", item: url) }
                 Divider()
             }
             TabsLayoutMenu(browser: browser)

@@ -152,6 +152,13 @@ final class Tab: Identifiable {
     /// The site the tab is about: the one that failed, if one did.
     var site: URL? { failure?.url ?? url }
 
+    /// The page's address, for Share: a web page's only, not Nerda's own
+    /// pages (a page's source, an extension's).
+    var shareable: URL? {
+        guard hasPage, let url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        return url
+    }
+
     /// A page from a server on this Mac, one being made: it shows as such,
     /// with the tools for it in the address bar (Developer Mode, as Arc's).
     var isOnThisMac: Bool {
