@@ -7,6 +7,11 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- Help › Report a Problem… and Suggest an Idea… open a new issue on Nerda's GitHub, filled in with Nerda's version and your macOS, for you to finish and submit.
+- After Nerda quits unexpectedly, a card at the foot of the sidebar offers to send a report of it. Send Report opens it as an issue on GitHub to look over first; nothing is sent until you submit it.
+
 ## [0.0.21] - 2026-10-02
 
 ### Added

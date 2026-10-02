@@ -3,7 +3,8 @@
 # becomes that version's section, a v-tag marks the commit, and a GitHub
 # Release carries Nerda.dmg (to install from) and Nerda.zip (what an
 # installed Nerda updates itself from) and release.json (what it reads to
-# find them), with the section as its notes. Both
+# find them), with the section as its notes, and Nerda.dSYM.zip, which
+# symbolicate.sh reads crash reports with. The app and the image
 # are signed with Developer ID, notarized by Apple and stapled, so they open
 # on any Mac without a warning.
 #
@@ -115,6 +116,14 @@ if [ "$NOTARIZE" != 0 ]; then
   spctl --assess --type open --context context:primary-signature "$DMG" || fail "Gatekeeper refuses $DMG"
 fi
 ditto -c -k --keepParent "$APP" "$ZIP"
+# The names of Nerda's functions, which the app leaves out: a crash report
+# gives only places in its code (Feedback.swift, symbolicate.sh).
+DSYM="build/Nerda.dSYM.zip"
+SYMBOLS="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/Nerda.dSYM"
+[ "$(dwarfdump --uuid "$SYMBOLS" | cut -d' ' -f2,3)" = "$(dwarfdump --uuid "$APP/Contents/MacOS/Nerda" | cut -d' ' -f2,3)" ] \
+  || fail "$SYMBOLS isn't from this build of Nerda"
+rm -f "$DSYM"
+ditto -c -k --keepParent "$SYMBOLS" "$DSYM"
 printf '%s\n' "$NOTES" > build/notes.md
 
 # The section gets its version and date under a new, empty [Unreleased], and
@@ -151,7 +160,7 @@ plutil -convert json "$FEED"
 
 # Not a pre-release, even below 1.0.0: the updater reads the latest release,
 # and GitHub leaves pre-releases out of it.
-gh release create "$TAG" "$DMG" "$ZIP" "$FEED" --repo "$REPO" --title "Nerda $VERSION" \
+gh release create "$TAG" "$DMG" "$ZIP" "$FEED" "$DSYM" --repo "$REPO" --title "Nerda $VERSION" \
   --notes-file build/notes.md --latest \
-  || fail "$TAG is pushed but the release isn't made; again with: gh release create $TAG $DMG $ZIP $FEED --repo $REPO --title 'Nerda $VERSION' --notes-file build/notes.md --latest"
+  || fail "$TAG is pushed but the release isn't made; again with: gh release create $TAG $DMG $ZIP $FEED $DSYM --repo $REPO --title 'Nerda $VERSION' --notes-file build/notes.md --latest"
 echo "released: $URL/releases/tag/$TAG"

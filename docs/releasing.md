@@ -85,11 +85,11 @@ Every release is signed by that one team. An installed Nerda only takes an updat
 2. Push `main`, then run `./release.sh`. It shows the version and the notes and asks before doing anything. Then it:
    - builds `build/Nerda.app` with that version for Apple silicon and Intel, signed with Developer ID, the hardened runtime and `Nerda.entitlements` (camera and microphone for pages);
    - puts the app in `build/Nerda.dmg` (to install from), signs the disk image, has Apple notarize it (only the disk image: its ticket covers the app inside too) and staples the ticket to the disk image and to the app;
-   - packs the stapled app as `build/Nerda.zip` (for the updater);
+   - packs the stapled app as `build/Nerda.zip` (for the updater), and the build's symbols as `build/Nerda.dSYM.zip` (for crash reports);
    - checks both tickets and Gatekeeper's verdict on both, and stops before anything is committed if one fails;
    - turns `[Unreleased]` into `[0.0.x] - date` under a new, empty `[Unreleased]`, and updates the compare links at the bottom;
    - commits `chore(release): v0.0.x`, tags `v0.0.x`, pushes both;
-   - creates the GitHub Release with both files, `release.json` for the updater, and the section as its notes, marked Latest (never as a pre-release: the updater reads only the latest release).
+   - creates the GitHub Release with both files, `release.json` for the updater, `Nerda.dSYM.zip`, and the section as its notes, marked Latest (never as a pre-release: the updater reads only the latest release).
 3. Installed copies see it within six hours or at their next launch. Nerda › Check for Updates… sees it at once.
 
 If the release step fails after the push, the script prints the `gh release create` command that finishes it.
@@ -127,3 +127,7 @@ The notes come from the `CHANGELOG.md` that `build.sh` puts in the app (a releas
 Only the app bundle is replaced; the data folder, settings and keychain stay as they are. If Nerda can't replace itself (for example when it runs from the disk image instead of Applications), it says why and opens the release page.
 
 To try the updater without publishing, serve a JSON file shaped like GitHub's release (`tag_name`, `body`, `html_url`, `assets[].name`, `assets[].browser_download_url`, and `assets[].digest` as `sha256:` and the zip's `shasum -a 256`) next to a newer `Nerda.zip` signed with the Developer ID, and open a release build with `open --env NERDA_UPDATES=http://127.0.0.1:8000/release.json build/Nerda.app`. Plain http is taken only from this Mac.
+
+## Crash reports
+
+After a crash, Nerda's next launch gets the report from MetricKit and offers it in a card at the foot of the sidebar; Send Report opens it as a new GitHub issue for the person to look over and submit (`Sources/Nerda/Feedback.swift`). Help › Report a Problem… takes it along too. The report has the version, the build, the binary's UUID and the crashed thread's calls as places in each binary's code. `./symbolicate.sh <issue number>` downloads that version's `Nerda.dSYM.zip` and puts the names of Nerda's functions in place of its places; a release made before 0.0.22 has no symbols to read them with.

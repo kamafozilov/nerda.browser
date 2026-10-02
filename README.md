@@ -99,6 +99,7 @@ Open an extension's page in the Chrome Web Store and press **Add to Nerda**. Dar
 - Swipe back and forward with two fingers, as in Chrome; a mouse's side buttons work too.
 - Pause and resume downloads, or retry an interrupted download. Resume needs the server's support and lasts for this running session.
 - Nerda updates itself: a card in the sidebar shows the new version, and What's New shows what it brings.
+- Help › Report a Problem… or Suggest an Idea… writes an issue on GitHub for you to finish. After a crash, a card offers to send its report the same way.
 
 ## Install
 

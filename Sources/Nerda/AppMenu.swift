@@ -40,6 +40,11 @@ final class AppMenu: NSObject {
             return item
         })
         let servicesMenu = submenu("Services", [])
+        // Each opens a new issue on GitHub, filled in for you to finish (Feedback).
+        let helpMenu = submenu("Help", [
+            item("Report a Problem…", #selector(reportProblem), target: self),
+            item("Suggest an Idea…", #selector(suggestIdea), target: self),
+        ])
         let bookmarksMenu = submenu("Bookmarks", [
             item("Bookmark This Tab", #selector(toggleBookmark), "d", target: self),
         ])
@@ -140,6 +145,7 @@ final class AppMenu: NSObject {
             historyMenu,
             bookmarksMenu,
             windowMenu,
+            helpMenu,
         ]
         fileMenu.submenu?.delegate = self
         historyMenu.submenu?.delegate = self
@@ -147,6 +153,7 @@ final class AppMenu: NSObject {
         NSApp.mainMenu = bar
         NSApp.windowsMenu = windowMenu.submenu
         NSApp.servicesMenu = servicesMenu.submenu
+        NSApp.helpMenu = helpMenu.submenu
 
         // A focused page takes ⌃Tab as a key of its own, so it would never
         // reach the menu: it is caught on its way in instead. So are the keys
@@ -270,6 +277,8 @@ final class AppMenu: NSObject {
     }
 
     @objc private func checkForUpdates() { Updater.shared.check(asked: true) }
+    @objc private func reportProblem() { Feedback.shared.reportProblem() }
+    @objc private func suggestIdea() { Feedback.shared.suggestIdea() }
 
     @objc private func openVisit(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }
