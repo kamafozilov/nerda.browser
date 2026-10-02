@@ -1173,6 +1173,7 @@ private struct ShortcutsSettings: View {
             ("Find Next", "Go to the next match", "⌘G"),
             ("Find Previous", "Go to the match before", "⇧⌘G"),
             ("Bookmark This Tab", "Keep the page in your bookmarks, or take it out", "⌘D"),
+            ("Print", "Print the page, or save it as a PDF from the print sheet", "⌘P"),
             ("Zoom In", "Make the page bigger", "⌘+"),
             ("Zoom Out", "Make the page smaller", "⌘−"),
             ("Actual Size", "Back to the zoom pages open at", "⌘0"),

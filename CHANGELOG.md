@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- File › Print… (⌘P) prints the page, and Export as PDF… saves it in pages, as it would print. A site's own Print button works too, and a page that closes itself once printed, as a ticket or a receipt does, is printed first.
+
 ## [0.0.20] - 2026-10-01
 
 ### Added

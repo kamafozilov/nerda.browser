@@ -77,6 +77,9 @@ final class AppMenu: NSObject {
                 item("Close Tab", #selector(closeTab), "w", target: self),
                 item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]),
                 .separator(),
+                item("Export as PDF…", #selector(exportPDF), target: self),
+                item("Print…", #selector(printPage), "p", target: self),
+                .separator(),
                 item("Import Passwords…", #selector(importPasswords), target: self),
                 item("Import Bookmarks…", #selector(importBookmarks), target: self),
                 item("Export Bookmarks…", #selector(exportBookmarks), target: self),
@@ -209,6 +212,8 @@ final class AppMenu: NSObject {
         shown.reopenClosedTab(id)
     }
     @objc private func toggleSidebar() { browser.toggleSidebar() }
+    @objc private func printPage() { browser.printPage() }
+    @objc private func exportPDF() { browser.exportPDF() }
     @objc private func reload() { browser.selected?.reload() }
     @objc private func hardReload() { browser.selected?.reload(fromOrigin: true) }
     @objc private func goBack() { browser.selected?.webView.goBack() }
@@ -324,7 +329,7 @@ extension AppMenu: NSMenuItemValidation {
         case #selector(toggleBookmark):
             item.title = browser.selected?.bookmark == nil ? "Bookmark This Tab" : "Remove Bookmark"
             return !browser.isPrivate && browser.selected?.hasPage == true
-        case #selector(showFind), #selector(inspect(_:)), #selector(clearSiteData):
+        case #selector(showFind), #selector(inspect(_:)), #selector(clearSiteData), #selector(printPage), #selector(exportPDF):
             return browser.selected?.hasPage == true
         case #selector(toggleResponsive):
             item.state = browser.selected?.responsive != nil ? .on : .off
