@@ -103,7 +103,7 @@ Open an extension's page in the Chrome Web Store and press **Add to Nerda**. Dar
 ## Install
 
 1. [**Download Nerda.dmg**](https://github.com/kamafozilov/nerda.browser/releases/latest/download/Nerda.dmg) and drag Nerda to Applications.
-2. Open it. Nerda isn't notarized by Apple yet, so the first time macOS may say it can't check it: open **System Settings › Privacy & Security**, scroll to Nerda and click **Open Anyway**. You only do this once.
+2. Open it. Nerda is signed and notarized by Apple, so it opens like any other app.
 3. Make it your default browser from the card at the top of Settings (⌘,).
 
 Nerda runs on **macOS 15.4 or later**, on Apple silicon and Intel Macs. From then on it keeps itself up to date.
