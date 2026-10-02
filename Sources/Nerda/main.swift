@@ -708,6 +708,7 @@ DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Tab.warmUp() }
 let menu = AppMenu(browser: browser)
 menu.install()
 if Edition.updates { Updater.shared.start() }
+Feedback.shared.start()
 
 let window = BrowserWindow(browser: browser)
 Windows.regular = window

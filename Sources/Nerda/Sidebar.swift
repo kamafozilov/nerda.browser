@@ -221,6 +221,13 @@ struct Sidebar: View {
                 }
             }
 
+            if Feedback.shared.crash != nil {
+                CrashCard(incognito: browser.isPrivate)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 6)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             if let release = Updater.shared.found {
                 UpdateCard(release: release, incognito: browser.isPrivate)
                     .padding(.horizontal, 8)
