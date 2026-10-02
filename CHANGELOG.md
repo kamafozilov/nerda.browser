@@ -14,6 +14,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Share the page on screen with AirDrop, Messages, Mail, Notes and the rest, from File › Share or a tab's right-click menu.
 - More search engines in Settings › General: Kagi, Ecosia, Startpage and Perplexity, or one of your own. Custom… asks for its address, with %s where the search goes.
 
+### Fixed
+
+- With the tabs across the top, a tab's close button says Close Tab when the pointer rests on it, and to VoiceOver, where it said the tab's title.
+
 ## [0.0.20] - 2026-10-01
 
 ### Added
