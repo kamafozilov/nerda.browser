@@ -9,8 +9,14 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Added
 
+- Open HTML and PDF files from Finder's Open With menu, by dropping them on Nerda's Dock icon, or with File › Open File… (⌘O).
 - Help › Report a Problem… and Suggest an Idea… show what will be sent, then open a new issue on Nerda's GitHub, filled in with Nerda's version and your macOS, for you to finish and submit.
 - After Nerda quits unexpectedly, a card at the foot of the sidebar offers to send a report of it. Send Report shows the report first; nothing leaves your Mac until you choose Continue to GitHub, and nothing is posted until you submit it there.
+
+### Fixed
+
+- The app icon fills more of its space in macOS menus, where it looked too small.
+- Nerda appears as Nerda Browser, with its app icon, among the default web browsers in macOS System Settings.
 
 ## [0.0.21] - 2026-10-02
 

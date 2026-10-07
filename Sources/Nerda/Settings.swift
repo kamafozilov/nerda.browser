@@ -1193,6 +1193,7 @@ private struct ShortcutsSettings: View {
         ]),
         ("Page", [
             ("Open Location", "Type an address or a search", "⌘L"),
+            ("Open File", "Open HTML or PDF files from your Mac", "⌘O"),
             ("Back", "Go to the previous page", "⌘["),
             ("Forward", "Go to the next page", "⌘]"),
             ("Reload Page", "Load the page again", "⌘R"),
