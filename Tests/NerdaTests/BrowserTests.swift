@@ -113,7 +113,7 @@ private let somewhere = URL(string: "https://example.com")!
     #expect(!browser.commandBarOpen && !browser.editingAddress && window.isVisible)
 
     window.orderOut(nil)
-    delegate.application(.shared, open: [URL(string: "file:///tmp/page.html")!, URL(string: "https:/missing-host")!])
+    delegate.application(.shared, open: [URL(string: "file:///tmp/page.txt")!, URL(string: "https:/missing-host")!])
     #expect(browser.tabs.count == 2 && !window.isVisible)
     delegate.application(.shared, open: [http])
     #expect(browser.tabs.map(\.url) == [http, https, http] && window.isVisible)

@@ -60,13 +60,31 @@ vtool -set-build-version macos 15.4 "$(xcrun --show-sdk-version)" -replace \
 # AppIconDev.svg, so Nerda Dev isn't taken for Nerda in the Dock.
 ICON=assets/AppIconDev.svg
 [ "$CONFIG" = release ] && ICON=assets/AppIcon.svg
-ICONSET="$(mktemp -d)/AppIcon.iconset"
+ICON_WORK="$(mktemp -d)"
+ICONSET="$ICON_WORK/AppIcon.iconset"
 mkdir -p "$ICONSET" "$APP/Contents/Resources"
+# Menus use 16/32-point icons: the Dock's outer spacing makes those too
+# small. Tighten their viewBox, keeping the whole tile and its shadow.
+sed 's/viewBox="0 0 1024 1024"/viewBox="80 80 864 864"/' "$ICON" > "$ICON_WORK/AppIconSmall.svg"
 for size in 16 32 128 256 512; do
-  sips -s format png -z $size $size "$ICON" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
-  sips -s format png -z $((size * 2)) $((size * 2)) "$ICON" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+  SOURCE_ICON="$ICON"
+  [ "$size" -le 32 ] && SOURCE_ICON="$ICON_WORK/AppIconSmall.svg"
+  sips -s format png -z $size $size "$SOURCE_ICON" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+  sips -s format png -z $((size * 2)) $((size * 2)) "$SOURCE_ICON" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+rm -rf "$ICON_WORK"
+
+# A display name, not a new app: the bundle path, data and updater keep
+# their existing names. macOS uses the localised name while the bundle's
+# filename still matches CFBundleDisplayName in Info.plist.
+DISPLAY_NAME="$NAME"
+[ "$CONFIG" = release ] && DISPLAY_NAME="Nerda Browser"
+mkdir -p "$APP/Contents/Resources/en.lproj"
+cat > "$APP/Contents/Resources/en.lproj/InfoPlist.strings" <<STRINGS
+"CFBundleName" = "$DISPLAY_NAME";
+"CFBundleDisplayName" = "$DISPLAY_NAME";
+STRINGS
 
 # The pictures behind a new tab's field (Backdrop.swift, assets/backgrounds/CREDITS.md).
 mkdir -p "$APP/Contents/Resources/Backgrounds"
@@ -87,6 +105,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleName</key><string>$NAME</string>
+  <key>CFBundleDisplayName</key><string>$NAME</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>LSHasLocalizedDisplayName</key><true/>
   <key>CFBundleExecutable</key><string>$NAME</string>
   <key>CFBundleIdentifier</key><string>$ID</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
@@ -95,7 +116,24 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>$(date +%Y%m%d%H%M)</string>
   <key>NSHumanReadableCopyright</key><string>© 2026 Kamron Fozilov</string>
   <key>LSMinimumSystemVersion</key><string>15.4</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <!-- Web links alone make an app a URL handler. A browser also opens
+       HTML documents, which macOS uses when offering browser candidates. -->
+  <key>CFBundleDocumentTypes</key><array>
+    <dict>
+      <key>CFBundleTypeName</key><string>HTML document</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Default</string>
+      <key>LSItemContentTypes</key><array><string>public.html</string><string>public.xhtml</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>PDF document</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array><string>com.adobe.pdf</string></array>
+    </dict>
+  </array>
   <key>CFBundleURLTypes</key><array><dict>
     <key>CFBundleURLName</key><string>Web addresses</string>
     <key>CFBundleTypeRole</key><string>Viewer</string>

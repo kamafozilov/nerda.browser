@@ -57,6 +57,7 @@ final class AppMenu: NSObject {
             // where ⌘K is often a site's own.
             item("Search Tabs…", #selector(searchTabs), "a", [.command, .shift], target: self),
             item("Open Location…", #selector(openLocation), "l", target: self),
+            item("Open File…", #selector(openFile), "o", target: self),
             item("Close Tab", #selector(closeTab), "w", target: self),
             item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]),
             .separator(),
@@ -186,16 +187,16 @@ final class AppMenu: NSObject {
     /// ⌘T and the rest by their place, as on a US keyboard, for a layout that
     /// types no Latin letters (Russian, Uzbek Cyrillic): there ⌘T types "е".
     private static let latinKeys: [UInt16: String] = [17: "t", 13: "w", 37: "l", 12: "q", 43: ",", 0: "a", 45: "n", 2: "d",
-                                                      34: "i", 38: "j", 8: "c", 15: "r", 32: "u"]
+                                                      34: "i", 38: "j", 8: "c", 15: "r", 32: "u", 31: "o"]
 
-    /// ⌘T, ⌘W, ⌘L, ⌘Q, ⌘D and ⌘, ⌘⇧W, ⌘⇧A and ⌘⇧N, and Developer's ⌥⌘ keys, straight to the menu while
+    /// ⌘T, ⌘W, ⌘L, ⌘O, ⌘Q, ⌘D and ⌘, ⌘⇧W, ⌘⇧A and ⌘⇧N, and Developer's ⌥⌘ keys, straight to the menu while
     /// a page has the keyboard (and no sheet or dialog is up).
     private static func browserKey(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
         guard let window = event.window, window.firstResponder is WKWebView, window.attachedSheet == nil,
               NSApp.modalWindow == nil, let typed = event.charactersIgnoringModifiers?.lowercased() else { return false }
         let key = typed.allSatisfy(\.isASCII) ? typed : latinKeys[event.keyCode] ?? typed
-        let reserved = modifiers == .command && ["t", "w", "l", "q", "d", ","].contains(key)
+        let reserved = modifiers == .command && ["t", "w", "l", "o", "q", "d", ","].contains(key)
             || modifiers == [.command, .shift] && ["t", "w", "a", "n"].contains(key)
             || modifiers == [.command, .option] && ["i", "j", "c", "r", "u"].contains(key)
         return reserved && NSApp.mainMenu?.performKeyEquivalent(with: event) == true
@@ -220,6 +221,20 @@ final class AppMenu: NSObject {
     @objc private func openPasswords() { PasswordsWindow.show() }
     @objc private func searchTabs() { shown.showCommandBar() }
     @objc private func openLocation() { shown.editAddress() }
+    @objc private func openFile() {
+        let browser = shown
+        guard !browser.locked, let window = browser.window else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = ExternalNavigation.documentTypes
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        Task {
+            guard await panel.beginSheetModal(for: window) == .OK, !browser.locked else { return }
+            if browser.commandBarOpen { browser.hideCommandBar() }
+            browser.endAddressEdit()
+            for url in panel.urls where ExternalNavigation.accepts(url) { browser.go(to: url) }
+        }
+    }
     @objc private func closeTab() { browser.closeSelectedTab() }
     @objc private func reopenClosedTab() { shown.reopenClosedTab() }
     @objc private func reopenTab(_ sender: NSMenuItem) {
@@ -503,11 +518,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return true
     }
 
-    /// Links from other apps always open in the regular window.
+    /// Links from other apps and documents from Finder open in the regular window.
     func application(_ application: NSApplication, open urls: [URL]) {
-        let links = urls.filter {
-            ["http", "https"].contains($0.scheme?.lowercased() ?? "") && $0.host?.isEmpty == false
-        }
+        let links = urls.filter(ExternalNavigation.accepts)
         guard !links.isEmpty else { return }
         if browser.tabs.isEmpty { browser.restore(from: Session.file) }
         if browser.commandBarOpen { browser.hideCommandBar() }
