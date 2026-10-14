@@ -961,13 +961,20 @@ extension Browser: WKNavigationDelegate {
     /// instead, and loads when it is next shown: reloading it now would only
     /// add to the memory it may have died for. A page that dies again within
     /// a minute would only keep reloading, and says so instead; ⌘R tries again.
+    /// So does a page that had something typed into it (`hasUnsavedWork`):
+    /// that went with the process, and a page loaded afresh in its place
+    /// would hide that it was lost.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard let tab = tab(for: webView) else { return }
         if fullscreenTab == tab.id { fullscreenTab = nil }
         let again = tab.crashed.map { Date.now.timeIntervalSince($0) < 60 } ?? false
         tab.crashed = .now
-        if again, let url = webView.url ?? tab.site {
-            tab.failure = (url, "The page crashed each time it was opened.")
+        let edited = tab.hasUnsavedWork
+        // Nothing is left to protect: closing or quitting needn't ask.
+        tab.hasUnsavedWork = false
+        if again || edited, let url = webView.url ?? tab.site {
+            tab.failure = (url, again ? "The page crashed each time it was opened."
+                                      : "The page crashed. Changes you made in it may not have been saved.")
         } else if tab.id == selectedID {
             webView.reload()
         } else {

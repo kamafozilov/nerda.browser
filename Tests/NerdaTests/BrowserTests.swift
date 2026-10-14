@@ -526,9 +526,12 @@ func framesFromAnotherSiteDownloadOnlyWhenClicked(scheme: String, host: String, 
     try await press(4, until: two)
 }
 
-/// A middle click on a link opens it in a tab of its own, behind this one.
+/// A middle click on a link opens it in a tab of its own, behind this one:
+/// on a page that stops the click on its way up too, but not on one that
+/// takes the click for itself, as in Chrome.
 @MainActor
-@Test func aMiddleClickOpensTheLinkBehind() async throws {
+@Test(arguments: [("", true), ("event.stopPropagation()", true), ("event.preventDefault()", false)])
+func aMiddleClickOpensTheLinkBehind(page handler: String, opens: Bool) async throws {
     let browser = Browser()
     let tab = Tab()
     browser.add(tab)
@@ -537,7 +540,7 @@ func framesFromAnotherSiteDownloadOnlyWhenClicked(scheme: String, host: String, 
     let page = tab.webView
     page.frame = window.contentView!.bounds
     window.contentView!.addSubview(page)
-    page.loadHTMLString(#"<a href="https://example.com/elsewhere" style="position:fixed;inset:0">x</a><script>window.ready = true</script>"#, baseURL: somewhere)
+    page.loadHTMLString(#"<a href="https://example.com/elsewhere" style="position:fixed;inset:0">x</a><script>document.querySelector('a').addEventListener('auxclick', event => { \#(handler) }); window.ready = true</script>"#, baseURL: somewhere)
     for _ in 0..<100 where try await page.callAsyncJavaScript("return window.ready === true", contentWorld: .page) as? Bool != true {
         try await Task.sleep(for: .milliseconds(20))
     }
@@ -550,10 +553,10 @@ func framesFromAnotherSiteDownloadOnlyWhenClicked(scheme: String, host: String, 
         let event = NSEvent(cgEvent: made)!
         if type == .otherMouseDown { page.otherMouseDown(with: event) } else { page.otherMouseUp(with: event) }
     }
-    for _ in 0..<100 where browser.tabs.count < 2 { try await Task.sleep(for: .milliseconds(20)) }
+    for _ in 0..<100 where opens && browser.tabs.count < 2 { try await Task.sleep(for: .milliseconds(20)) }
     // And the page itself stays where it was.
     try await Task.sleep(for: .milliseconds(300))
-    #expect(browser.tabs.map(\.site?.absoluteString) == ["https://example.com/elsewhere", "https://example.com/"])
+    #expect(browser.tabs.map(\.site?.absoluteString) == (opens ? ["https://example.com/elsewhere"] : []) + ["https://example.com/"])
     #expect(browser.selectedID == tab.id)
 }
 
@@ -1226,6 +1229,23 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     browser.webViewWebContentProcessDidTerminate(hidden.webView)
     #expect(hidden.isAsleep)
     #expect(hidden.failure == nil)
+}
+
+/// A page that had something typed into it, on screen or not, isn't
+/// loaded again when its process dies: it says what happened, and waits
+/// for ⌘R. With what was typed gone, closing it no longer asks.
+@MainActor
+@Test(arguments: [true, false])
+func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) {
+    let browser = Browser()
+    browser.open(somewhere)
+    browser.open(somewhere)
+    let tab = browser.tabs[onScreen ? 0 : 1]
+    tab.hasUnsavedWork = true
+    browser.webViewWebContentProcessDidTerminate(tab.webView)
+    #expect(tab.failure?.url.host == "example.com")
+    #expect(!tab.isAsleep)
+    #expect(!tab.hasUnsavedWork)
 }
 
 // MARK: - History
@@ -2305,4 +2325,31 @@ func errorsAreCountedOnThisMacOnly(address: String, counted: Int) async throws {
     #expect(result?[0] as? String == "hidden")
     #expect(result?[1] as? Bool == true)
     #expect(result?[2] as? Bool == false)
+}
+
+/// Once a page has nudged a video's speed, a 1 it asks for is played a
+/// hair off 1 and read back as 1; a speed from a menu never starts it, and
+/// what WebKit refuses still throws. On a stand-in for a video element.
+@MainActor @Test func aLiveVideosSpeedNudgesStayOffOne() {
+    let context = JSContext()!
+    context.evaluateScript("""
+        globalThis.HTMLMediaElement = function () { this.real = 1; };
+        Object.defineProperty(HTMLMediaElement.prototype, 'playbackRate', {
+            get() { return this.real; },
+            set(value) { if (!isFinite(+value)) throw new TypeError('non-finite'); this.real = +value; },
+            enumerable: true, configurable: true,
+        });
+        """)
+    context.evaluateScript(LiveRate.source)
+    func run(_ script: String) -> [Double] {
+        context.evaluateScript("(() => { const v = new HTMLMediaElement(); \(script); return [v.real, v.playbackRate]; })()")
+            .toArray()?.compactMap { ($0 as? NSNumber)?.doubleValue } ?? []
+    }
+    #expect(run("v.playbackRate = 1") == [1, 1])
+    #expect(run("v.playbackRate = 1.04") == [1.04, 1.04])
+    #expect(run("v.playbackRate = 1.04; v.playbackRate = 1") == [1.0001, 1])
+    #expect(run("v.playbackRate = 1.04; v.playbackRate = 1; v.real = 1.5") == [1.5, 1.5])
+    #expect(run("v.playbackRate = 1.5; v.playbackRate = 1") == [1, 1])
+    #expect(run("v.playbackRate = 2; try { v.playbackRate = NaN } catch {}") == [2, 2])
+    #expect(context.exception == nil)
 }

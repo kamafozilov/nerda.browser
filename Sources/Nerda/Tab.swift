@@ -427,13 +427,16 @@ final class Tab: Identifiable {
     /// A middle click on a link opens it in a tab of its own, behind this one,
     /// as ⌘-click does. WebKit leaves the middle button to the page and asks
     /// the browser nothing, so the click is heard here: a real one (not one a
-    /// page made up), on a link, that the page left alone.
+    /// page made up), on a link, that the page left alone. Heard on its way
+    /// down, as a page may stop it on its way up, and the link found then,
+    /// while the event still has its path; whether the page took the click
+    /// for itself is asked once its handlers have run.
     private static let middleClick = WKUserScript(source: """
         addEventListener('auxclick', event => {
-            if (event.button !== 1 || !event.isTrusted || event.defaultPrevented) return;
-            const link = event.composedPath().find(element => element instanceof HTMLAnchorElement || element instanceof HTMLAreaElement);
-            if (link?.href) webkit.messageHandlers.middleClick.postMessage(link.href);
-        });
+            if (event.button !== 1 || !event.isTrusted) return;
+            const href = event.composedPath().find(element => element instanceof HTMLAnchorElement || element instanceof HTMLAreaElement)?.href;
+            if (href) setTimeout(() => { if (!event.defaultPrevented) webkit.messageHandlers.middleClick.postMessage(href); });
+        }, true);
         """, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient)
 
     /// An element moved elsewhere in the page keeps the keyboard, as in
@@ -927,6 +930,7 @@ final class Tab: Identifiable {
         configuration.userContentController.add(middleClicks, contentWorld: .defaultClient, name: "middleClick")
         configuration.userContentController.addUserScript(keepFocus)
         configuration.userContentController.addUserScript(unseenMedia)
+        configuration.userContentController.addUserScript(LiveRate.script)
         configuration.userContentController.addUserScript(pageErrors)
         configuration.userContentController.add(pageErrorCounts, contentWorld: .defaultClient, name: "pageError")
         configuration.userContentController.add(Translator.messages, contentWorld: .defaultClient, name: "translate")
