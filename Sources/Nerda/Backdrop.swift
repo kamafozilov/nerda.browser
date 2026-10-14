@@ -36,7 +36,8 @@ nonisolated enum Wallpaper: Hashable, Sendable {
 /// The picture behind a new tab's field: Nerda's own (photos of Japan's
 /// nature, assets/backgrounds) in turn, one of them, or one of yours,
 /// picked under the page (WallpaperPicker) or from View. Decoded once, off
-/// the main thread, and shared by every new tab.
+/// the main thread, and shared by every new tab; let go a few minutes after
+/// the last new tab is left, as it takes 20 to 100 MB.
 @Observable
 final class Backdrop {
     static let shared = Backdrop()
@@ -46,7 +47,10 @@ final class Backdrop {
     /// The file `image` is, or is being made from.
     @ObservationIgnored private var shown: URL?
     /// How many new tabs show `image` now (`BackdropView`).
-    @ObservationIgnored var showing = 0
+    @ObservationIgnored var showing = 0 {
+        didSet { if showing == 0 { releaseLater() } }
+    }
+    @ObservationIgnored private var releasing: Task<Void, Never>?
     @ObservationIgnored private var memoryPressure: (any DispatchSourceMemoryPressure)?
 
     /// Your pictures, oldest first.
@@ -57,11 +61,12 @@ final class Backdrop {
     var wallpaper: Wallpaper {
         didSet {
             UserDefaults.standard.set(wallpaper.saved, forKey: "newTabWallpaper")
-            load()
+            // Picked in Settings or from View, it waits for the next new tab.
+            if showing > 0 { load() }
         }
     }
 
-    /// Small copies for the picker, by file, made as a new tab shows.
+    /// Small copies for the picker, by file, made as it opens.
     private(set) var thumbnails: [URL: CGImage] = [:]
     @ObservationIgnored private var thumbnailsAsked: Set<URL> = []
 
@@ -95,6 +100,16 @@ final class Backdrop {
         guard showing == 0, image != nil else { return }
         image = nil
         shown = nil
+    }
+
+    /// Lets the picture go once no new tab has shown it for a few minutes:
+    /// going from one to another and back keeps it, a day of web pages doesn't.
+    private func releaseLater() {
+        releasing?.cancel()
+        releasing = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(180))
+            if !Task.isCancelled { self?.release() }
+        }
     }
 
     /// Your pictures in `folder`, oldest first; the one kept before there
@@ -153,11 +168,10 @@ final class Backdrop {
         return pictures[number % pictures.count]
     }
 
-    /// Makes the picture for now ready, unless it already is, and the
-    /// picker's small copies. Asked at launch, and each time a new tab shows,
-    /// so a new day brings the next one.
+    /// Makes the picture for now ready, unless it already is. Asked at
+    /// launch when Nerda opens on a new tab, and each time one shows, so a
+    /// new day brings the next one.
     func load() {
-        loadThumbnails()
         guard let file = file(of: wallpaper), file != shown else { return }
         shown = file
         let screens = NSScreen.screens.map {
@@ -175,8 +189,8 @@ final class Backdrop {
     }
 
     /// Makes small copies of the pictures for the picker, those not made
-    /// yet, before it is opened: it opens with them all there. Handed over
-    /// together, so the tiles don't fill in one by one.
+    /// yet, as it opens (or is about to: the pointer on its button). Handed
+    /// over together, so the tiles don't fill in one by one.
     func loadThumbnails() {
         let files = (Self.own + chosen).filter { !thumbnailsAsked.contains($0) }
         guard !files.isEmpty else { return }

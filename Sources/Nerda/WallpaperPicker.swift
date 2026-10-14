@@ -36,7 +36,10 @@ struct WallpaperPicker: View {
                 .buttonStyle(.plain)
                 .glassPanel(cornerRadius: 17, tint: 0.5)
                 .overlay(Circle().strokeBorder(.white.opacity(0.14)))
-                .onHover { hovering = $0 }
+                .onHover { hovering in
+                    self.hovering = hovering
+                    if hovering { backdrop.loadThumbnails() }
+                }
                 .help("Change Wallpaper")
                 .accessibilityLabel("Change Wallpaper")
             }
@@ -139,6 +142,7 @@ struct WallpaperStrip: View {
         .frame(maxWidth: min(width, 620))
         .frame(height: Self.tile.height + 2 * Self.inset)
         .modifier(StripGlass(on: glass))
+        .onAppear { backdrop.loadThumbnails() }
     }
 
     private struct StripGlass: ViewModifier {

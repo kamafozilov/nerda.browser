@@ -701,8 +701,9 @@ Bookmarks.shared.load(from: Bookmarks.file)
 Favicons.shared.folder = Favicons.folder
 browser.restore(from: Session.file)
 Favicons.shared.preload(browser.tabs.compactMap(\.site))
-// Ready before the first new tab, so it opens with its picture already there.
-Backdrop.shared.load()
+// Opening on a new tab, it opens with its picture already there. On a web
+// page, the picture waits for the first new tab: 20 to 100 MB not taken for one.
+if browser.selected?.isBlank == true { Backdrop.shared.load() }
 // Once the window is up: a page's process ready for the first page.
 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Tab.warmUp() }
 let menu = AppMenu(browser: browser)

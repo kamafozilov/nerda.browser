@@ -361,7 +361,6 @@ private struct AppearanceSettings: View {
                     .padding(.bottom, 4)
             }
         }
-        .onAppear { Backdrop.shared.loadThumbnails() }
         SettingsGroup(title: "Sidebar") {
             SettingsRow(title: "AI chats", detail: "The button at the bottom of the sidebar that opens ChatGPT, Claude and the others",
                         icon: "sparkles") {
