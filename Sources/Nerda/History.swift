@@ -255,7 +255,11 @@ final class History {
         guard !title.isEmpty, let url = Self.withoutCredentials(url), var visit = visits[url], visit.title != title
         else { return }
         visit.title = title
-        visits[url] = visit
+        // Into `visits`' own storage (`@Observable` makes it): the history
+        // page and a new tab's field aren't drawn again at each tick of a
+        // title, but show it the next time they look, opened or as pages
+        // come or go.
+        _visits[url] = visit
         reindex(visit)
         // Written with the next save, not a save of its own: some pages count
         // in their title ("(3) Inbox", a timer), each tick a rewrite of it all.

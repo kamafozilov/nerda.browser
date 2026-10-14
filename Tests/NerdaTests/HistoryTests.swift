@@ -191,3 +191,24 @@ private func historyFile() throws -> URL {
     meanwhile.settle()
     #expect(meanwhile.visits[big]?.count == History.mostVisits)
 }
+
+/// A page's new title doesn't draw again the views that list pages, as a
+/// page counting in its title would at every tick; they find it the next
+/// time they look. A new page does draw them again.
+@MainActor
+@Test func aNewTitleDoesntRedrawWhatListsPages() {
+    let history = History()
+    let page = URL(string: "https://mail.example/")!
+    history.visit(page, title: "Inbox")
+    final class Flag: @unchecked Sendable { var raised = false }
+    let told = Flag()
+    withObservationTracking { _ = history.recent(10) } onChange: { told.raised = true }
+    history.name(page, "(3) Inbox")
+    #expect(!told.raised)
+    #expect(history.recent(1).first?.title == "(3) Inbox")
+    #expect(history.pages(containing: ["(3)"]).count == 1)
+    #expect(history.visits[page]?.title == "(3) Inbox")
+
+    history.visit(URL(string: "https://other.example/")!, title: "Other")
+    #expect(told.raised)
+}
