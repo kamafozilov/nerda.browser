@@ -1,3 +1,4 @@
+import SecurityInterface
 import SwiftUI
 @preconcurrency import Translation
 import WebKit
@@ -126,6 +127,9 @@ final class Browser: NSObject {
     @ObservationIgnored private var retried: URL?
     /// The sites left to http this session; an incognito window's its own.
     @ObservationIgnored var httpsUpgrade = HTTPSUpgrade()
+    /// The certificate chosen for each host this session, sent from then on
+    /// without asking, as in Safari; an incognito window's its own.
+    @ObservationIgnored var chosenCertificates: [String: SecIdentity] = [:]
     /// The frames whose navigation under way a click or a key in the page
     /// started, by WebKit's handle for each (see `mayDownload`).
     @ObservationIgnored private var clickedFrames: Set<NSObject> = []
@@ -972,9 +976,9 @@ extension Browser: WKNavigationDelegate {
     /// run, opens, as Chrome and Search let it. Nothing can be in between there.
     /// A site's own sign-in (Basic, Digest, NTLM, Kerberos) takes the password
     /// already saved for it, or asks for one, and a site asking who you are
-    /// by certificate the one in the keychain from an issuer it names, when
-    /// there is one only. Without an answer WebKit goes on as it would: the
-    /// page is never stopped.
+    /// by certificate the one chosen for it this session, or else asks which,
+    /// even with only one: a certificate tells the site who you are. Without
+    /// an answer WebKit goes on as it would: the page is never stopped.
     func webView(_ webView: WKWebView, respondTo challenge: URLAuthenticationChallenge) async
         -> (URLSession.AuthChallengeDisposition, URLCredential?) {
         let space = challenge.protectionSpace
@@ -987,12 +991,13 @@ extension Browser: WKNavigationDelegate {
             credential = Self.savedLogin(for: challenge)
             if credential == nil { credential = await askForLogin(challenge, on: webView) }
         case NSURLAuthenticationMethodClientCertificate:
-            // A site that names no issuer would take any certificate, and
-            // with it who you are: that one is never sent without asking.
-            let names = space.distinguishedNames ?? []
-            let identities = await Self.identities(issuedBy: names)
-            var identity = names.isEmpty || identities.count != 1 ? nil : identities.first
-            if identity == nil, !identities.isEmpty { identity = await chooseCertificate(identities) }
+            let host = space.host.lowercased()
+            let identities = await Self.identities(issuedBy: space.distinguishedNames ?? [])
+            var identity = chosenCertificates[host].flatMap { chosen in identities.first { CFEqual($0, chosen) } }
+            if identity == nil, !identities.isEmpty {
+                identity = await chooseCertificate(identities, for: space.host, on: webView)
+                if let identity { chosenCertificates[host] = identity }
+            }
             credential = identity.map { URLCredential(identity: $0, certificates: nil, persistence: .forSession) }
         default:
             break
@@ -1089,9 +1094,22 @@ extension Browser: WKNavigationDelegate {
                 : "Your login information will not be sent securely.")
     }
 
-    /// The sheet choosing among certificates the site would take, to be
-    /// designed with the owner. Until then none is sent.
-    private func chooseCertificate(_ identities: [SecIdentity]) async -> SecIdentity? { nil }
+    /// The Mac's own sheet for choosing among the certificates the site would
+    /// take, each with its name, issuer and expiry, as Safari shows it: over
+    /// the page once its tab is on screen. Cancelled, none is sent.
+    private func chooseCertificate(_ identities: [SecIdentity], for host: String, on webView: WKWebView) async -> SecIdentity? {
+        guard let window = await window(showing: webView), let panel = SFChooseIdentityPanel.shared() else { return nil }
+        panel.setInformativeText("Choose the certificate to use with this site, then click Continue.")
+        panel.setDefaultButtonTitle("Continue")
+        panel.setAlternateButtonTitle("Cancel")
+        let end = SheetEnd()
+        let chosen = await withCheckedContinuation { done in
+            end.done = { done.resume(returning: $0 == NSApplication.ModalResponse.OK.rawValue) }
+            panel.beginSheet(for: window, modalDelegate: end, didEnd: #selector(SheetEnd.sheetDidEnd(_:returnCode:contextInfo:)),
+                             contextInfo: nil, identities: identities, message: "\(host) asks for a certificate to identify you.")
+        }
+        return withExtendedLifetime(end) { chosen ? panel.identity()?.takeUnretainedValue() : nil }
+    }
 
     /// localhost and its names, and the loopback addresses (127.x.x.x, ::1).
     /// macOS answers every name under localhost with this Mac itself. Digits
@@ -1128,6 +1146,17 @@ extension Browser: WKNavigationDelegate {
         } else {
             tab.sleep()
         }
+    }
+}
+
+/// Hears a SecurityInterface sheet end, which it tells by selector, as
+/// sheets did before blocks.
+final class SheetEnd: NSObject {
+    var done: ((Int) -> Void)?
+
+    @objc func sheetDidEnd(_ sheet: NSWindow, returnCode: Int, contextInfo: UnsafeMutableRawPointer?) {
+        done?(returnCode)
+        done = nil
     }
 }
 
