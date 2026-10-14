@@ -3011,9 +3011,9 @@ enum ExtensionShims {
         case "downloads.search":
             let all = Array(browser.downloads.reversed())
             return all.enumerated().map { index, item in
+                let url = item.task?.originalRequest?.url?.absoluteString ?? ""
                 let states: [Download.State: String] = [.running: "in_progress", .paused: "in_progress", .finished: "complete", .failed: "interrupted", .cancelled: "interrupted"]
-                return ["id": index + 1, "url": item.task.originalRequest?.url?.absoluteString ?? "",
-                        "finalUrl": item.task.originalRequest?.url?.absoluteString ?? "",
+                return ["id": index + 1, "url": url, "finalUrl": url,
                         "filename": item.file?.path ?? "", "state": states[item.state] ?? "complete",
                         "exists": item.file.map { FileManager.default.fileExists(atPath: $0.path) } ?? false,
                         "bytesReceived": item.received, "totalBytes": item.total, "paused": item.state == .paused,

@@ -10,13 +10,14 @@ final class Download: Identifiable {
 
     let id = UUID()
     let started = Date.now
-    @ObservationIgnored private(set) var task: WKDownload
+    /// nil for a file saved whole, as a PDF's own download button hands it over.
+    @ObservationIgnored private(set) var task: WKDownload?
     private(set) var resumeData: Data?
     private(set) var error: String?
     var isResuming = false
     var canResume: Bool { (state == .failed || state == .paused) && resumeData != nil }
     var canRetry: Bool {
-        (state == .failed || state == .cancelled) && Downloads.canRetry(task.originalRequest)
+        (state == .failed || state == .cancelled) && Downloads.canRetry(task?.originalRequest)
     }
     var needsSession: Bool { state == .running || state == .paused || canResume }
     /// Where it is being saved; nil until WebKit asks.
@@ -28,7 +29,7 @@ final class Download: Identifiable {
     @ObservationIgnored private var observation: NSKeyValueObservation?
 
     var name: String {
-        file?.lastPathComponent ?? task.originalRequest?.url?.lastPathComponent ?? "Download"
+        file?.lastPathComponent ?? task?.originalRequest?.url?.lastPathComponent ?? "Download"
     }
 
     /// nil when the size isn't known, which shows as a moving bar instead.
@@ -39,6 +40,12 @@ final class Download: Identifiable {
     init(_ task: WKDownload) {
         self.task = task
         observe(task)
+    }
+
+    /// Being written to `file` here, `size` bytes, rather than fetched.
+    init(saving file: URL, size: Int64) {
+        self.file = file
+        total = size
     }
 
     func restart(with task: WKDownload, resuming: Bool) {
@@ -99,7 +106,7 @@ final class Download: Identifiable {
     func pause() {
         guard state == .running else { return }
         state = .paused
-        task.cancel { [weak self] data in
+        task?.cancel { [weak self] data in
             guard let self, state == .paused else { return }
             resumeData = data
             if data == nil {
@@ -115,7 +122,7 @@ final class Download: Identifiable {
         state = .cancelled
         resumeData = nil
         let file = file
-        if wasRunning { task.cancel { _ in if let file { try? FileManager.default.removeItem(at: file) } } }
+        if wasRunning, let task { task.cancel { _ in if let file { try? FileManager.default.removeItem(at: file) } } }
         else if let file { try? FileManager.default.removeItem(at: file) }
     }
 }

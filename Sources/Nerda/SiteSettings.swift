@@ -377,7 +377,9 @@ private struct SitePanel: View {
 
     var body: some View {
         let options = browser.siteSettings.resolved(for: url)
-        let secure = url.scheme == "https"
+        let https = url.scheme == "https"
+        // A secure page that took a script, picture or the like over plain http, as Chrome tells apart.
+        let secure = https && browser.selected?.page?.hasOnlySecureContent != false
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 Favicon(site: url, size: 16, plate: false)
@@ -387,7 +389,7 @@ private struct SitePanel: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
-                    Label(secure ? "Connection is secure" : "Connection is not secure",
+                    Label(secure ? "Connection is secure" : https ? "Connection is not fully secure" : "Connection is not secure",
                           systemImage: secure ? "lock.fill" : "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(Palette.muted)

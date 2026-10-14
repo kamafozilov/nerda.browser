@@ -11,6 +11,18 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - Extensions are turned off for now, while they are made faster and more reliable: the extensions button, Settings › Extensions and the Add to Nerda button in the Chrome Web Store are gone. Extensions you installed and their settings are kept for when they come back.
 
+### Fixed
+
+- Site Settings says Connection is not fully secure for a secure page that loaded part of itself over plain http, where it showed the lock as for a fully secure one.
+- A video in full screen fills the whole screen when the Mac shows scroll bars (a mouse connected, or Always in System Settings), where the page's scroll bar kept a strip down its right.
+- Download Linked File in a link's right-click menu saves the file and lists it in Downloads, where it did nothing.
+- The download button in the bar over a PDF saves the PDF to your downloads folder, or where you choose with Settings › General › Ask where to save each file, and lists it in Downloads. It did nothing.
+- A page that breaks off partway, as when the connection drops, says why, as one that can't be opened at all does, where it stayed half drawn without a word.
+
+### Security
+
+- A frame from another site inside a page, such as an ad, can start a download only after you click in it, as in Chrome. A page's own downloads start as before.
+
 ## [0.0.22] - 2026-10-07
 
 ### Added

@@ -449,9 +449,46 @@ private let somewhere = URL(string: "https://example.com")!
 @Test(arguments: [
     ("localhost", true), ("app.localhost", true), ("127.0.0.1", true), ("127.1.2.3", true), ("::1", true), ("[::1]", true),
     ("localhost.example.com", false), ("128.0.0.1", false), ("127.0.0.256", false), ("127.evil.com", false), ("192.168.1.1", false),
+    ("127.+0.0.1", false), ("127.0.0.-0", false), ("127.0.0.1.evil.com", false), ("evil-localhost", false), ("::ffff:7f00:1", false),
 ])
 func onlyThisMacIsTrustedAsItIs(host: String, trusted: Bool) {
     #expect(Browser.isThisMac(host) == trusted)
+}
+
+/// A site's sign-in takes the password offered for it, but not one it has
+/// just turned down; with none, it is the page's to answer.
+@Test func aSignInTakesASavedPasswordOnce() {
+    final class Sender: NSObject, URLAuthenticationChallengeSender {
+        func use(_ credential: URLCredential, for challenge: URLAuthenticationChallenge) {}
+        func continueWithoutCredential(for challenge: URLAuthenticationChallenge) {}
+        func cancel(_ challenge: URLAuthenticationChallenge) {}
+    }
+    let space = URLProtectionSpace(host: "\(UUID().uuidString).test", port: 443, protocol: "https",
+                                   realm: "Staff", authenticationMethod: NSURLAuthenticationMethodHTTPBasic)
+    func challenge(_ credential: URLCredential?, failures: Int) -> URLAuthenticationChallenge {
+        URLAuthenticationChallenge(protectionSpace: space, proposedCredential: credential, previousFailureCount: failures,
+                                   failureResponse: nil, error: nil, sender: Sender())
+    }
+    let saved = URLCredential(user: "kamron", password: "secret", persistence: .forSession)
+    #expect(Browser.savedLogin(for: challenge(saved, failures: 0)) == saved)
+    #expect(Browser.savedLogin(for: challenge(saved, failures: 1)) == nil)
+    #expect(Browser.savedLogin(for: challenge(nil, failures: 0)) == nil)
+}
+
+/// A frame from another site than the page's downloads only after a click
+/// in it; one of the page's own site, by itself too.
+@Test(arguments: [
+    ("https", "example.com", 0, "https://example.com/page", false, true),
+    ("https", "example.com", 443, "https://example.com:443/", false, true),
+    ("http", "localhost", 3000, "http://localhost:3000/", false, true),
+    ("https", "ads.example.net", 0, "https://example.com/page", false, false),
+    ("https", "ads.example.net", 0, "https://example.com/page", true, true),
+    ("http", "example.com", 0, "https://example.com/", false, false),
+    ("http", "localhost", 3001, "http://localhost:3000/", false, false),
+    ("https", "example.com", 0, "about:blank", false, false),
+])
+func framesFromAnotherSiteDownloadOnlyWhenClicked(scheme: String, host: String, port: Int, page: String, clicked: Bool, allowed: Bool) {
+    #expect(Browser.mayDownload(from: (scheme, host, port), on: URL(string: page), clicked: clicked) == allowed)
 }
 
 /// A tab out of sight can't bring itself forward with an alert: it waits
@@ -1028,6 +1065,21 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     tab.crashed = .now.addingTimeInterval(-120)
     browser.webViewWebContentProcessDidTerminate(tab.webView)
     #expect(tab.failure == nil)
+}
+
+/// A page that breaks off once it has begun to show says why, at its own
+/// address when the error gives none; one stopped or overtaken says nothing.
+@MainActor
+@Test func aPageThatBreaksOffSaysWhy() {
+    let browser = Browser()
+    browser.open(somewhere)
+    let tab = browser.tabs[0]
+    for (domain, code) in [(NSURLErrorDomain, NSURLErrorCancelled), ("WebKitErrorDomain", 102), ("WebKitErrorDomain", 204)] {
+        browser.webView(tab.webView, didFail: nil, withError: NSError(domain: domain, code: code))
+        #expect(tab.failure == nil)
+    }
+    browser.webView(tab.webView, didFail: nil, withError: NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost))
+    #expect(tab.failure?.url.host == "example.com")
 }
 
 /// A page out of sight that crashes sleeps, and loads when next shown.

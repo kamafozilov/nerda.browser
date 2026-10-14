@@ -106,6 +106,9 @@ final class Browser: NSObject {
     @ObservationIgnored private var memoryPressure: (any DispatchSourceMemoryPressure)?
     /// The address last loaded again for a redirect WebKit lost, so it is only tried once.
     @ObservationIgnored private var retried: URL?
+    /// The frames whose navigation under way a click or a key in the page
+    /// started, by WebKit's handle for each (see `mayDownload`).
+    @ObservationIgnored private var clickedFrames: Set<NSObject> = []
     /// Where the tabs are saved as they change (see Session); nil keeps them
     /// to this run, as in tests, and while the window is closed.
     @ObservationIgnored var sessionFile: URL?
@@ -549,6 +552,8 @@ extension Browser: WKNavigationDelegate {
         preferences.allowsContentJavaScript = tab(for: webView)?.javaScriptOff != true
         if action.targetFrame?.isMainFrame ?? true {
             siteSettings.applyBlocking(to: preferences, for: action.request.url)
+        } else if let frame = Self.handle(of: action.targetFrame) {
+            if Self.clicked(action) { clickedFrames.insert(frame) } else { clickedFrames.remove(frame) }
         }
         let policy = await policy(for: action, in: webView)
         // A departure asked about but not taken asks again next time.
@@ -558,7 +563,9 @@ extension Browser: WKNavigationDelegate {
 
     private func policy(for action: WKNavigationAction, in webView: WKWebView) async -> WKNavigationActionPolicy {
         guard let url = action.request.url else { return .cancel }
-        if action.shouldPerformDownload { return .download }
+        if action.shouldPerformDownload {
+            return mayDownload(from: action.sourceFrame, in: webView, clicked: Self.clicked(action)) ? .download : .cancel
+        }
         // Back, Forward and Reload leave an edited page from the browser; an
         // address typed is asked in `Tab.go`. Links and the page's own
         // navigations (a sign-in's redirect) are the page's to ask about,
@@ -665,7 +672,51 @@ extension Browser: WKNavigationDelegate {
         // move to www.youtube.com as application/binary, which would be saved.
         if let status = http?.statusCode, (300..<400).contains(status) { return .allow }
         let disposition = http?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
-        return response.canShowMIMEType && !disposition.lowercased().hasPrefix("attachment") ? .allow : .download
+        let download = !response.canShowMIMEType || disposition.lowercased().hasPrefix("attachment")
+        if !response.isForMainFrame, let frame = Self.frame(of: response) {
+            let clicked = Self.handle(of: frame).map { clickedFrames.remove($0) != nil } ?? true
+            if download, !mayDownload(from: frame, in: webView, clicked: clicked) { return .cancel }
+        }
+        return download ? .download : .allow
+    }
+
+    /// The page itself, and a frame of the page's own site, may start a
+    /// download; a frame from another site only after a click or a key in
+    /// it, as in Chrome: an ad's frame can't push a file on you by itself.
+    private func mayDownload(from frame: WKFrameInfo, in webView: WKWebView, clicked: Bool) -> Bool {
+        let origin = frame.securityOrigin
+        return frame.isMainFrame || Self.mayDownload(from: (origin.protocol, origin.host, origin.port), on: webView.url, clicked: clicked)
+    }
+
+    nonisolated static func mayDownload(from origin: (scheme: String, host: String, port: Int), on page: URL?, clicked: Bool) -> Bool {
+        guard !clicked else { return true }
+        guard let page, let scheme = page.scheme?.lowercased(), let host = page.host()?.lowercased() else { return false }
+        // WebKit gives an origin on its scheme's own port as port 0.
+        func port(_ port: Int?, _ scheme: String) -> Int { port == ["http": 80, "https": 443][scheme] ? 0 : port ?? 0 }
+        return origin.scheme.lowercased() == scheme && origin.host.lowercased() == host
+            && port(origin.port, scheme) == port(page.port, scheme)
+    }
+
+    /// Whether a click or a key in the page started it, by WebKit's own
+    /// record of the gesture (SPI). Should that go, a link followed counts,
+    /// which a page's script can pass off as one.
+    private static func clicked(_ action: WKNavigationAction) -> Bool {
+        let key = "_isUserInitiated"
+        guard action.responds(to: NSSelectorFromString(key)) else { return action.navigationType == .linkActivated }
+        return action.value(forKey: key) as? Bool ?? false
+    }
+
+    /// The frame a response is for, and WebKit's handle for a frame, the same
+    /// from its navigation's start to its response (SPI). Should either go,
+    /// a frame's downloads start as they did before.
+    private static func frame(of response: WKNavigationResponse) -> WKFrameInfo? {
+        guard response.responds(to: NSSelectorFromString("_frame")) else { return nil }
+        return response.value(forKey: "_frame") as? WKFrameInfo
+    }
+
+    private static func handle(of frame: WKFrameInfo?) -> NSObject? {
+        guard let frame, frame.responds(to: NSSelectorFromString("_handle")) else { return nil }
+        return frame.value(forKey: "_handle") as? NSObject
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
@@ -678,6 +729,14 @@ extension Browser: WKNavigationDelegate {
         if webView.backForwardList.currentItem == nil, let tab = tab(for: webView) {
             withAnimation(.slide) { close(tab.id) }
         }
+    }
+
+    /// Download Linked File in a link's right-click menu. WebKit starts the
+    /// download itself and hands it only to a navigation delegate that
+    /// answers this name (SPI, as Safari's); unanswered, the file went nowhere.
+    @objc(_webView:contextMenuDidCreateDownload:)
+    func contextMenuDidCreate(_ webView: WKWebView, download: WKDownload) {
+        track(download)
     }
 
     /// A download an extension asked for (chrome.downloads), through the
@@ -694,12 +753,12 @@ extension Browser: WKNavigationDelegate {
     }
 
     func resume(_ item: Download) {
-        guard downloads.contains(where: { $0 === item }), item.canResume || item.canRetry else { return }
+        guard downloads.contains(where: { $0 === item }), item.canResume || item.canRetry, let old = item.task else { return }
         let data = item.resumeData
-        let request = item.task.originalRequest
+        let request = old.originalRequest
         // Reserve the item before awaiting WebKit so a second click cannot
         // start another download. Keep the same row and extension ownership.
-        item.restart(with: item.task, resuming: data != nil)
+        item.restart(with: old, resuming: data != nil)
         Task {
             // A page awake already, or one of this window's store (an
             // incognito download keeps its cookies), never woken for this.
@@ -758,30 +817,97 @@ extension Browser: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         tab(for: webView)?.departureApproved = false
+        show(error, in: webView, opening: navigation)
+    }
+
+    /// A page that breaks off after it began to show (the connection lost
+    /// halfway) says why too, rather than staying half drawn.
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        show(error, in: webView, opening: navigation)
+    }
+
+    private func show(_ error: Error, in webView: WKWebView, opening navigation: WKNavigation?) {
         let error = error as NSError
-        // Stopped, overtaken by another load, or turned into a download: nothing went wrong.
-        if error.code == NSURLErrorCancelled || (error.domain == "WebKitErrorDomain" && error.code == 102) { return }
-        guard let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL else { return }
-        tab(for: webView)?.failure = (url, error.localizedDescription)
+        // Stopped, overtaken by another load, turned into a download (WebKit's
+        // 102), or handed to a plug-in (204): nothing went wrong.
+        if error.code == NSURLErrorCancelled || (error.domain == "WebKitErrorDomain" && [102, 204].contains(error.code)) { return }
+        // Not every error says its address: then it is the one being opened,
+        // as the page had it when it set off, or the one on show.
+        guard let tab = tab(for: webView) else { return }
+        let setOff = tab.loading.flatMap { $0.navigation === navigation ? $0.site : nil }
+        guard let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL ?? setOff ?? webView.url ?? tab.site else { return }
+        tab.failure = (url, error.localizedDescription)
     }
 
     /// A certificate the Mac doesn't trust is refused, as ever, except on this
     /// Mac itself: a local server with a certificate of its own, as developers
     /// run, opens, as Chrome and Search let it. Nothing can be in between there.
+    /// A site's own sign-in (Basic, Digest, NTLM, Kerberos) takes the password
+    /// already saved for it, and a site asking who you are by certificate the
+    /// one in the keychain from an issuer it names, when there is one only.
+    /// Without an answer WebKit goes on as it would: the page is never stopped.
     func webView(_ webView: WKWebView, respondTo challenge: URLAuthenticationChallenge) async
         -> (URLSession.AuthChallengeDisposition, URLCredential?) {
         let space = challenge.protectionSpace
-        guard space.authenticationMethod == NSURLAuthenticationMethodServerTrust, let trust = space.serverTrust,
-              Self.isThisMac(space.host) else { return (.performDefaultHandling, nil) }
-        return (.useCredential, URLCredential(trust: trust))
+        var credential: URLCredential?
+        switch space.authenticationMethod {
+        case NSURLAuthenticationMethodServerTrust:
+            if let trust = space.serverTrust, Self.isThisMac(space.host) { credential = URLCredential(trust: trust) }
+        case NSURLAuthenticationMethodHTTPBasic, NSURLAuthenticationMethodHTTPDigest,
+             NSURLAuthenticationMethodNTLM, NSURLAuthenticationMethodNegotiate:
+            credential = Self.savedLogin(for: challenge)
+            if credential == nil { credential = await askForLogin(challenge) }
+        case NSURLAuthenticationMethodClientCertificate:
+            // A site that names no issuer would take any certificate, and
+            // with it who you are: that one is never sent without asking.
+            let names = space.distinguishedNames ?? []
+            let identities = await Self.identities(issuedBy: names)
+            var identity = names.isEmpty || identities.count != 1 ? nil : identities.first
+            if identity == nil, !identities.isEmpty { identity = await chooseCertificate(identities) }
+            credential = identity.map { URLCredential(identity: $0, certificates: nil, persistence: .forSession) }
+        default:
+            break
+        }
+        return credential.map { (.useCredential, $0) } ?? (.performDefaultHandling, nil)
     }
 
+    /// The password WebKit offers for a sign-in, or the one the Mac keeps for
+    /// the place; none once it has been turned down, which would only go
+    /// round again.
+    nonisolated static func savedLogin(for challenge: URLAuthenticationChallenge) -> URLCredential? {
+        guard challenge.previousFailureCount == 0 else { return nil }
+        return [challenge.proposedCredential, URLCredentialStorage.shared.defaultCredential(for: challenge.protectionSpace)]
+            .lazy.compactMap(\.self).first(where: \.hasPassword)
+    }
+
+    /// Certificates with their key in the keychain, issued under one of
+    /// `names` (each a DER distinguished name), or every one with none.
+    @concurrent nonisolated static func identities(issuedBy names: [Data]) async -> [SecIdentity] {
+        var query: [CFString: Any] = [kSecClass: kSecClassIdentity, kSecMatchLimit: kSecMatchLimitAll, kSecReturnRef: true]
+        if !names.isEmpty { query[kSecMatchIssuers] = names }
+        var found: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &found) == errSecSuccess else { return [] }
+        return found as? [SecIdentity] ?? []
+    }
+
+    /// The sheet asking for a site's name and password when none is saved,
+    /// to be designed with the owner. Until then the page shows the site's
+    /// own answer to no sign-in.
+    private func askForLogin(_ challenge: URLAuthenticationChallenge) async -> URLCredential? { nil }
+
+    /// The sheet choosing among certificates the site would take, to be
+    /// designed with the owner. Until then none is sent.
+    private func chooseCertificate(_ identities: [SecIdentity]) async -> SecIdentity? { nil }
+
     /// localhost and its names, and the loopback addresses (127.x.x.x, ::1).
+    /// macOS answers every name under localhost with this Mac itself. Digits
+    /// only: a number may otherwise carry a sign ("+1").
     nonisolated static func isThisMac(_ host: String) -> Bool {
         let host = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         let parts = host.split(separator: ".", omittingEmptySubsequences: false)
         return host == "localhost" || host.hasSuffix(".localhost") || host == "::1"
-            || (parts.count == 4 && parts.first == "127" && parts.allSatisfy { UInt8($0) != nil })
+            || (parts.count == 4 && parts.first == "127"
+                && parts.allSatisfy { $0.allSatisfy { $0.isASCII && $0.isNumber } && UInt8($0) != nil })
     }
 
     /// The page's process died (out of memory, or a WebKit bug): it would stay
@@ -811,22 +937,46 @@ extension Browser: WKDownloadDelegate {
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                   suggestedFilename: String) async -> URL? {
         if let item = item(for: download), item.isResuming, let file = item.file { return file }
+        guard let file = await whereToSave(suggestedFilename) else {
+            withAnimation(.slide) { downloads.removeAll { $0.task === download } }
+            return nil
+        }
+        item(for: download)?.file = file
+        return file
+    }
+
+    /// The file a download named so goes to; nil when the question is cancelled.
+    private func whereToSave(_ name: String) async -> URL? {
         if downloadFolder == nil, Downloads.asks, let window {
             let panel = NSSavePanel()
             panel.directoryURL = Downloads.folder
-            panel.nameFieldStringValue = Downloads.destination(for: suggestedFilename, in: Downloads.folder).lastPathComponent
-            guard await panel.beginSheetModal(for: window) == .OK, let file = panel.url else {
-                withAnimation(.slide) { downloads.removeAll { $0.task === download } }
-                return nil
-            }
+            panel.nameFieldStringValue = Downloads.destination(for: name, in: Downloads.folder).lastPathComponent
+            guard await panel.beginSheetModal(for: window) == .OK, let file = panel.url else { return nil }
             // Replacing was agreed to in the panel; WebKit won't write over a file.
             try? FileManager.default.removeItem(at: file)
-            item(for: download)?.file = file
             return file
         }
-        let destination = Downloads.destination(for: suggestedFilename, in: downloadFolder ?? Downloads.folder)
-        item(for: download)?.file = destination
-        return destination
+        return Downloads.destination(for: name, in: downloadFolder ?? Downloads.folder)
+    }
+
+    /// The download button in the bar WebKit draws over a PDF. WebKit has the
+    /// file already and hands it over whole, only to a UI delegate that
+    /// answers this name (SPI, as Safari's); unanswered, the button did nothing.
+    @objc(_webView:saveDataToFile:suggestedFilename:mimeType:originatingURL:)
+    func saveData(_ webView: WKWebView, data: Data?, suggestedFilename: String?, mimeType: String?, originatingURL: URL?) {
+        guard let data else { return }
+        Task {
+            guard let file = await whereToSave(suggestedFilename ?? "") else { return }
+            let item = Download(saving: file, size: Int64(data.count))
+            withAnimation(.slide) { downloads.insert(item, at: 0) }
+            do {
+                try data.write(to: file)
+                item.finish()
+                DistributedNotificationCenter.default().post(name: .init("com.apple.DownloadFileFinished"), object: file.path)
+            } catch {
+                item.fail(error, resumeData: nil)
+            }
+        }
     }
 
     func downloadDidFinish(_ download: WKDownload) {

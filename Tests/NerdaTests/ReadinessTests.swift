@@ -41,6 +41,10 @@ private final class ReadinessServer {
                     var headers = "Content-Type: text/html\r\nAccess-Control-Allow-Origin: *\r\n"
                     var body = Data("<input id='draft'><iframe src='/frame'></iframe>".utf8)
                     if path == "/frame" { body = Data("<input id='user' autocomplete='username'><input id='password' type='password'>".utf8) }
+                    // A frame that downloads by itself, from this site or another (localhost is another to 127.0.0.1).
+                    if path == "/ad" { body = Data("<script>location = '/file'</script>".utf8) }
+                    if path == "/same" { body = Data("<iframe src='/ad'></iframe>".utf8) }
+                    if path == "/cross" { body = Data("<iframe src='http://localhost:\(self.listener.port?.rawValue ?? 0)/ad'></iframe>".utf8) }
                     var length = body.count
                     if path == "/file" || path == "/slow" {
                         headers = "Content-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=readiness.bin\r\nAccept-Ranges: bytes\r\nETag: \"fixture\"\r\nLast-Modified: Wed, 30 Sep 2026 00:00:00 GMT\r\n"
@@ -347,6 +351,25 @@ struct ReadinessTests {
         cancelled.cancel()
         try await Task.sleep(for: .milliseconds(200))
         #expect(cancelled.state == .cancelled)
+    }
+
+    @Test func framesFromAnotherSiteDownloadOnlyWhenClicked() async throws {
+        let folder = try readinessFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let server = try ReadinessServer()
+        defer { server.listener.cancel() }
+        server.interrupt = false
+        let browser = Browser(dataStore: .nonPersistent())
+        browser.downloadFolder = folder
+        defer { browser.closeAll() }
+
+        browser.open(try await server.url("/cross"))
+        try await waitFor { server.requests.contains { $0.hasPrefix("GET /file") } }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(browser.downloads.isEmpty)
+
+        browser.open(try await server.url("/same"))
+        try await waitFor { browser.downloads.first?.state == .finished }
     }
 
     @Test func sameDocumentNavigationKeepsDrafts() {
