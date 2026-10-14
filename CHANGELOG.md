@@ -17,6 +17,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Changed
 
 - Extensions are turned off for now, while they are made faster and more reliable: the extensions button, Settings › Extensions and the Add to Nerda button in the Chrome Web Store are gone. Extensions you installed and their settings are kept for when they come back.
+- Open Link in New Tab, in a link's right-click menu, opens the tab behind the one you're on, as ⌘-click does and as in Safari and Chrome. It said Open Link in New Window and took you to the tab; hold ⌥ with the menu open for Open Link in New Tab and Go to It, which still does.
 
 ### Fixed
 

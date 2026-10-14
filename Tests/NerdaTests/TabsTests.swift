@@ -173,3 +173,46 @@ private func saved(_ host: String, pinned: Bool = false) -> Session.Tab {
     try await Task.sleep(for: .milliseconds(100))
     #expect(try await sharedRan())
 }
+
+/// Stands in for WebKit's own Open Link in New Window, counting the times it is asked.
+private final class LinkOpener: NSObject {
+    var opened = 0
+    @objc func open(_ sender: Any?) { opened += 1 }
+}
+
+/// A link's right-click menu says Open Link in New Tab, which leaves the
+/// tab behind, as in Safari; ⌥ shows WebKit's own item, which goes to it.
+@MainActor
+@Test func openLinkInNewTabStaysBehindUnlessOptionIsHeld() throws {
+    _ = NSApplication.shared
+    let page = SwipingWebView(frame: .zero, configuration: WKWebViewConfiguration())
+    let opener = LinkOpener()
+    let menu = NSMenu()
+    let item = NSMenuItem(title: "Open Link in New Window", action: #selector(LinkOpener.open(_:)), keyEquivalent: "")
+    item.identifier = NSUserInterfaceItemIdentifier("WKMenuItemIdentifierOpenLinkInNewWindow")
+    item.target = opener
+    menu.addItem(item)
+    menu.addItem(withTitle: "Copy Link", action: nil, keyEquivalent: "")
+    let event = try #require(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                                windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    page.willOpenMenu(menu, with: event)
+
+    // Screenshot's items may follow, with that setting on.
+    #expect(menu.items.prefix(4).map(\.title) == ["Open Link in New Tab", "Open Link in New Tab and Go to It",
+                                        "Open Link in Incognito Window", "Copy Link"])
+    #expect(menu.items[1].isAlternate && menu.items[1].keyEquivalentModifierMask == .option)
+
+    menu.performActionForItem(at: 0)
+    #expect(opener.opened == 1)
+    #expect(page.takeLinkAsk() == .behind)
+    // Used up: the page's own next window is an ordinary one.
+    #expect(page.takeLinkAsk() == nil)
+
+    menu.performActionForItem(at: 1)
+    #expect(opener.opened == 2)
+    #expect(page.takeLinkAsk() == nil)
+
+    menu.performActionForItem(at: 2)
+    #expect(opener.opened == 3)
+    #expect(page.takeLinkAsk() == .incognito)
+}

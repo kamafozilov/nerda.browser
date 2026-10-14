@@ -494,14 +494,16 @@ extension Browser: WKUIDelegate {
         for action: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        if (webView as? SwipingWebView)?.takeIncognitoAsk() == true, let url = action.request.url {
+        let ask = (webView as? SwipingWebView)?.takeLinkAsk()
+        if ask == .incognito, let url = action.request.url {
             // Only the web: loaded from here, a page's link to a file on this
             // Mac (file:) would open where a page itself may not take you.
             if ["http", "https"].contains(url.scheme?.lowercased() ?? "") { Windows.openIncognito(url) }
             return nil
         }
         let tab = Tab(configuration: configuration, opener: tab(for: webView))
-        withAnimation(.slide) { add(tab) }
+        // Open Link in New Tab: behind this one, as a ⌘-click's.
+        withAnimation(.slide) { add(tab, inBackground: ask == .behind) }
         return tab.webView
     }
 
