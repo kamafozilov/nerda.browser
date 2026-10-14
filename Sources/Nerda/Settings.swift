@@ -1197,6 +1197,7 @@ private struct ShortcutsSettings: View {
             ("Forward", "Go to the next page", "⌘]"),
             ("Reload Page", "Load the page again", "⌘R"),
             ("Hard Reload Page", "Load the page again, fresh from the site", "⇧⌘R"),
+            ("Show Reader", "Read an article alone, without the rest of the page", "⌃⌘R"),
             ("Find", "Search for text on the page", "⌘F"),
             ("Find Next", "Go to the next match", "⌘G"),
             ("Find Previous", "Go to the match before", "⇧⌘G"),

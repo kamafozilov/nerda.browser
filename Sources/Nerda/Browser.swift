@@ -264,7 +264,7 @@ final class Browser: NSObject {
     /// The keyboard back on the page on screen, once something of ours
     /// that had it (a field) is done with it.
     func focusPage() {
-        if let page = selected?.page { page.window?.makeFirstResponder(page) }
+        if let page = selected.flatMap({ $0.reader ?? $0.page }) { page.window?.makeFirstResponder(page) }
     }
 
     /// Puts a tab at `position` among the pinned tabs, or among the rest
@@ -408,7 +408,8 @@ final class Browser: NSObject {
 
     private func find(step: Int) {
         findTyping?.cancel()
-        guard let page = selected?.page, !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return clearFound() }
+        // Reader's article, while it shows.
+        guard let page = selected.flatMap({ $0.reader ?? $0.page }), !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return clearFound() }
         if foundOn !== page { clearFound() }
         foundOn = page
         let query = findQuery
@@ -854,6 +855,7 @@ extension Browser: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         tab(for: webView)?.pageDidLoad()
+        tab(for: webView)?.checkReadable()
         if let tab = tab(for: webView) { signInLanded(on: tab) }
         WebStore.tell(webView)
         sessionChanged()

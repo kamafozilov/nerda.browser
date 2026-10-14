@@ -312,12 +312,19 @@ private struct PageCard: View {
                 }
                 // Its own width, not the card's: see the top.
                 Overhang(inset: inset, laidOut: laidOut) {
-                    PageView(
-                        tabs: browser.tabs,
-                        // Locked, no page shows, nor can be read out from under the lock.
-                        selected: browser.locked ? nil : browser.selected,
-                        takesFocus: !browser.commandBarOpen
-                    )
+                    ZStack {
+                        PageView(
+                            tabs: browser.tabs,
+                            // Locked, no page shows, nor can be read out from under the lock.
+                            selected: browser.locked ? nil : browser.selected,
+                            takesFocus: !browser.commandBarOpen
+                        )
+                        if let reader = browser.selected?.reader, !browser.locked {
+                            ReaderView(page: reader, takesFocus: !browser.commandBarOpen)
+                                .background(Palette.ground)
+                                .id(ObjectIdentifier(reader))
+                        }
+                    }
                 }
             }
             if let tab = browser.selected, tab.isBlank, browser.isPrivate {

@@ -13,7 +13,9 @@ final class Tab: Identifiable {
     private(set) var url: URL? {
         didSet {
             pageMoved()
-            if url != oldValue, Extensions.started { Extensions.shared.changed(self, .URL) }
+            guard url != oldValue else { return }
+            if Extensions.started { Extensions.shared.changed(self, .URL) }
+            readerAddressChanged(from: oldValue)
         }
     }
     private var pageTitle = "" {
@@ -188,6 +190,11 @@ final class Tab: Identifiable {
     var translating = false
     var hasUnsavedWork = false
     @ObservationIgnored var departureApproved = false
+    /// The page reads as an article: the address bar offers Reader (see Reader).
+    var readable = false
+    /// Reader, open over the page, which stays as it was under it.
+    var reader: ReaderPage?
+    @ObservationIgnored var readerCheck: Task<Void, Never>?
 
     /// The page's own title; until it has one, the site's name, or for an
     /// address without one (file:, about:blank), the address itself.
@@ -641,6 +648,7 @@ final class Tab: Identifiable {
         slept = (page.interactionState, page.pageZoom)
         observations = []
         topColor = nil
+        closeReader(checked: false)
         // Its PageSlot too, now: it holds the page, and PageView takes it out
         // only when it next updates, which a tab out of sight doesn't make it do.
         page.superview?.superview?.removeFromSuperview()
@@ -697,6 +705,8 @@ final class Tab: Identifiable {
     func pageDidCommit() {
         hasUnsavedWork = false
         departureApproved = false
+        // A new document, a reload's included: checked again once it has loaded.
+        closeReader(checked: false)
         if let page { Self.set(page, "_setDrawsBackground:", true) }
         errors = 0
         pageLanguage = nil
@@ -764,13 +774,15 @@ final class Tab: Identifiable {
     /// One step in or out (+1, −1), or back to the zoom pages open at (0).
     // ponytail: per tab; Safari keeps zoom per site across launches.
     func zoom(_ step: Int) {
-        let now = webView.pageZoom
+        // Reader's text, while it shows.
+        let page = reader ?? webView
+        let now = page.pageZoom
         let next: CGFloat? = switch step {
         case 0: PageZoom.current
         case 1...: PageZoom.levels.first { $0 > now + 0.01 }
         default: PageZoom.levels.last { $0 < now - 0.01 }
         }
-        if let next { webView.pageZoom = next }
+        if let next { page.pageZoom = next }
     }
 
     /// The zoom pages open at changed: a page left at the old one takes the
@@ -799,6 +811,7 @@ final class Tab: Identifiable {
         page.setAllMediaPlaybackSuspended(true)
         page.setCameraCaptureState(.none)
         page.setMicrophoneCaptureState(.none)
+        closeReader(checked: false)
         // Out of its stage: WebKit holds the stage as where its inspector
         // docks, so a page left in it holds itself, and its process runs on.
         page.superview?.superview?.removeFromSuperview()
@@ -870,7 +883,7 @@ final class Tab: Identifiable {
         } catch { return named; }
         """
 
-    private static let processPool = WKWebViewConfiguration().value(forKey: "processPool")
+    static let processPool = WKWebViewConfiguration().value(forKey: "processPool")
 
     private static func configuration(_ dataStore: WKWebsiteDataStore) -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
@@ -956,7 +969,7 @@ final class Tab: Identifiable {
         unsafeBitCast(object.method(for: selector), to: Setter.self)(object, selector, value)
     }
 
-    private static func set(_ object: NSObject, _ setter: String, _ value: Bool) {
+    static func set(_ object: NSObject, _ setter: String, _ value: Bool) {
         let selector = NSSelectorFromString(setter)
         guard object.responds(to: selector) else { return }
         typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void

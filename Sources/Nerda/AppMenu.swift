@@ -126,6 +126,9 @@ final class AppMenu: NSObject {
                     item("Show Original", #selector(showOriginal), target: self),
                 ]),
                 .separator(),
+                // Safari's ⇧⌘R is Hard Reload here, as in Chrome.
+                item("Show Reader", #selector(toggleReader), "r", [.command, .control], target: self),
+                .separator(),
                 zoom("Zoom In", 1, "+"),
                 // ⌘= as well as ⌘+: they're the same key on most keyboards.
                 hidden(zoom("Zoom In", 1, "=")),
@@ -194,7 +197,7 @@ final class AppMenu: NSObject {
     private static let latinKeys: [UInt16: String] = [17: "t", 13: "w", 37: "l", 12: "q", 43: ",", 0: "a", 45: "n", 2: "d",
                                                       34: "i", 38: "j", 8: "c", 15: "r", 32: "u", 31: "o"]
 
-    /// ⌘T, ⌘W, ⌘L, ⌘O, ⌘Q, ⌘D and ⌘, ⌘⇧W, ⌘⇧A and ⌘⇧N, and Developer's ⌥⌘ keys, straight to the menu while
+    /// ⌘T, ⌘W, ⌘L, ⌘O, ⌘Q, ⌘D and ⌘, ⌘⇧W, ⌘⇧A and ⌘⇧N, ⌃⌘R, and Developer's ⌥⌘ keys, straight to the menu while
     /// a page has the keyboard (and no sheet or dialog is up).
     private static func browserKey(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
@@ -204,6 +207,7 @@ final class AppMenu: NSObject {
         let reserved = modifiers == .command && ["t", "w", "l", "o", "q", "d", ","].contains(key)
             || modifiers == [.command, .shift] && ["t", "w", "a", "n"].contains(key)
             || modifiers == [.command, .option] && ["i", "j", "c", "r", "u"].contains(key)
+            || modifiers == [.command, .control] && key == "r"
         return reserved && NSApp.mainMenu?.performKeyEquivalent(with: event) == true
     }
 
@@ -268,6 +272,7 @@ final class AppMenu: NSObject {
     @objc private func exportBookmarks() { regular.exportBookmarks() }
     @objc private func toggleBookmark() { browser.toggleBookmark() }
     @objc private func toggleResponsive() { browser.toggleResponsive() }
+    @objc private func toggleReader() { browser.toggleReader() }
     @objc private func viewSource() { browser.viewSource() }
     @objc private func toggleJavaScript() { browser.selected.map { $0.javaScriptOff.toggle() } }
     @objc private func clearSiteData() {
@@ -368,7 +373,7 @@ extension AppMenu: NSMenuItemValidation {
         case #selector(reload), #selector(hardReload), #selector(zoom(_:)):
             // Actual Size only once there is a zoom to undo.
             guard let tab = browser.selected, tab.hasPage else { return false }
-            return item.action != #selector(zoom(_:)) || item.tag != 0 || tab.webView.pageZoom != PageZoom.current
+            return item.action != #selector(zoom(_:)) || item.tag != 0 || (tab.reader ?? tab.webView).pageZoom != PageZoom.current
         case #selector(toggleBookmark):
             item.title = browser.selected?.bookmark == nil ? "Bookmark This Tab" : "Remove Bookmark"
             return !browser.isPrivate && browser.selected?.hasPage == true
@@ -384,6 +389,9 @@ extension AppMenu: NSMenuItemValidation {
             return browser.selected?.hasPage == true
         case #selector(showFind), #selector(inspect(_:)), #selector(clearSiteData), #selector(printPage), #selector(exportPDF):
             return browser.selected?.hasPage == true
+        case #selector(toggleReader):
+            item.title = browser.selected?.reader != nil ? "Hide Reader" : "Show Reader"
+            return browser.selected.map { $0.hasPage && ($0.readable || $0.reader != nil) } ?? false
         case #selector(toggleResponsive):
             item.state = browser.selected?.responsive != nil ? .on : .off
             return browser.selected?.hasPage == true
