@@ -168,6 +168,8 @@ final class Browser: NSObject {
     let dataStore: WKWebsiteDataStore
     /// An incognito window's: no history kept, no session saved, nothing on disk.
     var isPrivate: Bool { !dataStore.isPersistent }
+    /// The profile its window is marked with: none with Personal alone, nor in incognito.
+    var markedProfile: Profile? { Profiles.shared.many && !isPrivate ? profile : nil }
     /// What its fields suggest from: the profile's history, or in incognito, nothing of it.
     var history: History { isPrivate ? History.empty : profile.history }
 

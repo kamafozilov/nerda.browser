@@ -82,7 +82,7 @@ struct TabStrip: View {
             GeometryReader { space in tabs(items, room: space.size.width) }
             HStack(spacing: 6) {
                 DownloadsButton(browser: browser, shown: $downloadsShown, arrowEdge: .bottom)
-                SidebarMenuButton(shown: $menuShown, incognito: browser.isPrivate)
+                SidebarMenuButton(shown: $menuShown, incognito: browser.isPrivate, profile: browser.markedProfile)
             }
             .padding(.leading, 8)
         }

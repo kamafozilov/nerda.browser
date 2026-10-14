@@ -5,6 +5,9 @@ import SwiftUI
 struct SidebarMenuButton: View {
     @Binding var shown: Bool
     var incognito = false
+    /// The window's profile, marked by its symbol in its colour, as Safari's
+    /// toolbar marks it; none with Personal alone.
+    var profile: Profile?
 
     @State private var hovering = false
 
@@ -13,6 +16,10 @@ struct SidebarMenuButton: View {
             HStack(spacing: 3) {
                 if incognito {
                     IncognitoMark(size: 16)
+                } else if let profile {
+                    Image(systemName: profile.symbol)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(profile.color.color)
                 } else {
                     Image(systemName: "gearshape")
                         .font(.system(size: 14, weight: .medium))
@@ -30,8 +37,8 @@ struct SidebarMenuButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(incognito ? "Incognito" : "Menu")
-        .accessibilityLabel(incognito ? "Incognito Menu" : "Menu")
+        .help(incognito ? "Incognito" : profile.map { "\($0.name) Profile" } ?? "Menu")
+        .accessibilityLabel(incognito ? "Incognito Menu" : profile.map { "Menu, \($0.name) Profile" } ?? "Menu")
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
     }
@@ -40,7 +47,9 @@ struct SidebarMenuButton: View {
 /// What the app has besides the tabs, on a panel over the sidebar's bottom
 /// corner: History opens to its side, as a submenu does, and so does Developer,
 /// the page's developer tools; Passwords, Settings and New Tab
-/// with their keys, and an incognito window. Downloads have their own button beside it. Profiles go at its top once there are any.
+/// with their keys, and an incognito window. Downloads have their own button
+/// beside it. Profiles go at its top once there is more than Personal, each
+/// opening its own window, the window's own ticked.
 /// In an incognito window, no History: it isn't kept there.
 /// Drawn by SwiftUI rather than as a system menu, so it can look like the rest.
 struct SidebarMenu: View {
@@ -60,6 +69,14 @@ struct SidebarMenu: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if Profiles.shared.many {
+                ForEach(Profiles.shared.all) { profile in
+                    MenuRow(icon: profile.symbol, tint: profile.color.color, title: profile.name,
+                            checked: !browser.isPrivate && profile === browser.profile) { run { Windows.show(profile) } }
+                        .onHover { if $0 { open = nil } }
+                }
+                MenuDivider()
+            }
             Group {
                 if !browser.isPrivate {
                     MenuRow(icon: "clock.arrow.circlepath", title: "History", submenu: true, lit: open == .history) {
@@ -69,7 +86,7 @@ struct SidebarMenu: View {
                     .onHover { if $0 { open = .history } }
                 }
 
-                MenuRow(icon: "key", title: "Passwords", shortcut: "⌥⌘L") { run { PasswordsWindow.show() } }
+                MenuRow(icon: "key", title: "Passwords", shortcut: "⌥⌘L") { run { PasswordsWindow.show(browser.profile) } }
                     .onHover { if $0 { open = nil } }
                 MenuRow(icon: "gearshape", title: "Settings", shortcut: "⌘,") { run { browser.openSettings() } }
                     .onHover { if $0 { open = nil } }
@@ -175,6 +192,8 @@ extension View {
 
 private struct MenuRow: View {
     var icon: String?
+    /// The icon's colour in place of the grey: a profile's.
+    var tint: Color?
     /// The site whose icon to show in place of `icon`.
     var site: URL?
     /// The incognito mark in place of `icon`.
@@ -209,7 +228,7 @@ private struct MenuRow: View {
                     } else if let icon {
                         Image(systemName: icon)
                             .font(.system(size: 14))
-                            .foregroundStyle(muted)
+                            .foregroundStyle(tint ?? muted)
                     }
                 }
                 .frame(width: 18)

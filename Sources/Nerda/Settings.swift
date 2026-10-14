@@ -510,7 +510,7 @@ private struct PasswordsSettings: View {
     var body: some View {
         SettingsGroup {
             SettingsLink(title: "Saved passwords", detail: "See, copy and change them. Opens with Touch ID or your Mac's password",
-                         icon: "key", action: PasswordsWindow.show)
+                         icon: "key") { PasswordsWindow.show(browser.profile) }
             SettingsRow(title: "Import passwords", detail: "From the file Passwords, Safari or Chrome exports", icon: "tray.and.arrow.down") {
                 Button("Import…", action: browser.importPasswords)
                     .buttonStyle(SettingsButtonStyle())

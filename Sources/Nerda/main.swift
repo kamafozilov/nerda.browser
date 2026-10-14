@@ -466,8 +466,7 @@ final class BrowserWindow: NSWindow {
         // (`titleBar`: the glass, the bars) moves it.
         isMovable = false
         contentMinSize = NSSize(width: 640, height: 420)
-        // The name the Window menu lists it by.
-        title = browser.isPrivate ? "Incognito" : "Nerda"
+        title = Self.title(of: browser)
         if browser.isPrivate { appearance = NSAppearance(named: .darkAqua) }
         // Sized before it has content, so the content is laid out once, at that size.
         fill(NSScreen.main)
@@ -480,6 +479,11 @@ final class BrowserWindow: NSWindow {
         contentView = NSHostingView(rootView: BrowserView(browser: browser, window: self)
             .environment(\.incognito, browser.isPrivate))
         browser.window = self
+    }
+
+    /// The name the Window menu lists it by: its profile's, once there are profiles.
+    static func title(of browser: Browser) -> String {
+        browser.isPrivate ? "Incognito" : Profiles.shared.many ? browser.profile.name : "Nerda"
     }
 
     /// The frame `fill` last gave it: still this, the window was left filling the screen.
@@ -734,6 +738,8 @@ Feedback.shared.start()
 let window = BrowserWindow(browser: browser)
 Windows.regular = window
 window.makeKeyAndOrderFront(nil)
+Windows.reopenProfiles()
+Profiles.removeStoresLeft()
 // Once the window is up: loading them takes the main thread a while.
 if Extensions.enabledAtLaunch { DispatchQueue.main.async { Extensions.shared.start(for: browser) } }
 

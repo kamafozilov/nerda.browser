@@ -78,8 +78,13 @@ private func folder() -> URL {
     #expect(work.dataStore !== home.dataStore && atWork.dataStore === work.dataStore)
     #expect(Profile.main.dataStore.identifier == nil)
 
-    // Read back as they were left.
-    #expect(profiles(in: root).all.map(\.name) == ["Personal", "Work", "Home"])
+    // Read back as they were left, a window left open to open again at launch.
+    work.open = true
+    all.save()
+    let read = profiles(in: root).all
+    #expect(read.map(\.name) == ["Personal", "Work", "Home"])
+    #expect(read.map(\.open) == [false, true, false])
+    #expect(read[1].color == .orange && read[1].symbol == "briefcase")
     atWork.closeAll()
     await all.remove(work)
     await all.remove(home)

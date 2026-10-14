@@ -45,7 +45,9 @@ final class Profile: Identifiable {
     @ObservationIgnored private var store: WKWebsiteDataStore?
     var dataStore: WKWebsiteDataStore {
         if let store { return store }
-        let made = isMain ? WKWebsiteDataStore.default() : WKWebsiteDataStore(forIdentifier: id)
+        guard !isMain else { return .default() }
+        let made = WKWebsiteDataStore(forIdentifier: id)
+        WebNotifications.watch(made)
         store = made
         return made
     }
