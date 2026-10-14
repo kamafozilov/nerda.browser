@@ -813,6 +813,21 @@ private func found(in browser: Browser, by look: () -> Void) async throws -> Fin
     #expect(try await count(matchCase: true, wholeWords: true) == 3)
     browser.findQuery = "haystack"
     #expect(try await count(matchCase: false, wholeWords: false) == 0)
+
+    // Accents count for nothing, as in WebKit's own find, whether written as
+    // one letter or as a letter and its mark, and the match is the whole word.
+    _ = try await page.callAsyncJavaScript("document.body.insertAdjacentHTML('beforeend', '<p>Été, e\u{301}te, über, Straße</p>')",
+                                           contentWorld: .page)
+    browser.findQuery = "ete"
+    #expect(try await count(matchCase: false, wholeWords: false) == 2)
+    #expect(try await count(matchCase: true, wholeWords: false) == 1)
+    #expect(try await page.callAsyncJavaScript("return getSelection().toString()", contentWorld: .page) as? String == "e\u{301}te")
+    browser.findQuery = "uber"
+    #expect(try await count(matchCase: false, wholeWords: true) == 1)
+    #expect(try await page.callAsyncJavaScript("return getSelection().toString()", contentWorld: .page) as? String == "über")
+    browser.findQuery = "strasse"
+    #expect(try await count(matchCase: false, wholeWords: true) == 1)
+    #expect(try await page.callAsyncJavaScript("return getSelection().toString()", contentWorld: .page) as? String == "Straße")
 }
 
 /// Every match is lit while the bar is up, the one on show apart, and none

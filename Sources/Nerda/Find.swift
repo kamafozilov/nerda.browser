@@ -13,7 +13,7 @@ import WebKit
 /// does), with the count then shown as more than it found. A change is only
 /// noted as it happens; the count catches up at the next look.
 // ponytail: text in fields, in components (shadow DOM) and in other sites'
-// frames isn't looked in, and an accent must be typed to be found.
+// frames isn't looked in.
 enum Find {
     /// Where the look got to: the match on show, from 1, of `count`; `more`
     /// when it stopped short of the page's end.
@@ -160,7 +160,30 @@ enum Find {
                 starts.push(text.length);
                 text += node.data;
             }
-            return { text, nodes, starts };
+            return { text, nodes, starts, ...fold(text) };
+        }
+
+        // Accents let go of, as WebKit's own find does, with Match Case too:
+        // "ete" finds "été", "uber" "über", "strasse" "Straße". Each unit of
+        // what is left maps back to the letter it came from (`from`, `to`),
+        // a mark dropped onto the letter before it, so a match lights the
+        // whole of its letters.
+        function fold(text) {
+            if (!/[^\x00-\x7f]/.test(text)) return { folded: text };
+            let folded = '';
+            const from = [], to = [];
+            for (let i = 0; i < text.length;) {
+                const code = text.codePointAt(i);
+                const size = code > 0xffff ? 2 : 1;
+                const letter = text.slice(i, i + size);
+                const plain = code < 0xc0 ? letter : letter === 'ß' ? 'ss' : letter === 'ẞ' ? 'SS'
+                    : letter.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                if (!plain && to.length) to[to.length - 1] = i + size;
+                for (let k = 0; k < plain.length; k++) { from.push(i); to.push(i + size); }
+                folded += plain;
+                i += size;
+            }
+            return { folded, from, to };
         }
 
         function rangeIn(doc, { nodes, starts }, from, to) {
@@ -221,13 +244,15 @@ enum Find {
                 state.texts = now.map(place => ({ ...place, ...read(place) }));
             }
             const word = wholeWords ? ['(?<![\\p{L}\\p{N}\\p{M}_])', '(?![\\p{L}\\p{N}\\p{M}_])'] : ['', ''];
-            const pattern = new RegExp(word[0] + query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+') + word[1],
+            const pattern = new RegExp(word[0] + fold(query).folded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+') + word[1],
                                        matchCase ? 'gu' : 'giu');
             Object.assign(state, { key, matches: [], more: state.cut });
             for (const shown of state.texts) {
-                for (const found of shown.text.matchAll(pattern)) {
+                for (const found of shown.folded.matchAll(pattern)) {
                     if (state.matches.length >= limit) { state.more = true; break; }
-                    const range = rangeIn(shown.doc, shown, found.index, found.index + found[0].length);
+                    const end = found.index + found[0].length;
+                    const range = shown.from ? rangeIn(shown.doc, shown, shown.from[found.index], shown.to[end - 1])
+                        : rangeIn(shown.doc, shown, found.index, end);
                     state.matches.push({ win: shown.win, doc: shown.doc, range });
                     highlightsIn(shown.win, shown.doc).all.add(range);
                 }

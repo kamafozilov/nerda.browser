@@ -72,7 +72,9 @@ private struct FindOptions: View {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 7, weight: .bold))
             }
-            .foregroundStyle(hovering ? Palette.ink : Palette.muted)
+            // In the text's colour while an option is on, where a match
+            // missed for it would otherwise go unexplained.
+            .foregroundStyle(hovering || matchCase || wholeWords ? Palette.ink : Palette.muted)
             .frame(width: 30, height: 24)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -86,6 +88,7 @@ private struct FindOptions: View {
         .fixedSize()
         .help("Find Options")
         .accessibilityLabel("Find Options")
+        .accessibilityValue([matchCase ? "Match Case" : nil, wholeWords ? "Whole Words" : nil].compactMap(\.self).joined(separator: ", "))
         .onHover { hovering = $0 }
     }
 }
