@@ -145,3 +145,31 @@ private func saved(_ host: String, pinned: Bool = false) -> Session.Tab {
     try await until { asking.title == "answered" }
     #expect(asking.title == "answered")
 }
+
+/// A page opened from a file keeps what it loads from the folders around
+/// it when its tab wakes from sleep and when it is reloaded: WebKit lets
+/// the page read them on each load, its saved history's included, where
+/// read access asked for its own folder alone would leave out `../`.
+@MainActor
+@Test func aFilesPageKeepsWhatIsAroundItWhenWokenOrReloaded() async throws {
+    let root = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let folder = root.appending(path: "page")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let file = folder.appending(path: "index.html")
+    try Data("<script src=../shared.js></script>".utf8).write(to: file)
+    try Data("window.shared = true".utf8).write(to: root.appending(path: "shared.js"))
+
+    let tab = Nerda.Tab(url: file)
+    func sharedRan() async throws -> Bool {
+        let page = tab.webView
+        try await until { !page.isLoading && page.url == file }
+        return try await page.callAsyncJavaScript("return window.shared === true", contentWorld: .page) as? Bool == true
+    }
+    #expect(try await sharedRan())
+    tab.sleep()
+    #expect(try await sharedRan())
+    tab.reload()
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(try await sharedRan())
+}
