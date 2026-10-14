@@ -88,8 +88,8 @@ struct SettingsView: View {
     @State private var languages = PreferredLanguage.chosen
 
     var body: some View {
-        let open = tab.settings ?? .general
-        let found = SettingsPage.allCases.filter { $0.matches(query) }
+        let open = tab.settings.flatMap { $0 != .extensions || Extensions.available ? $0 : nil } ?? .general
+        let found = SettingsPage.allCases.filter { ($0 != .extensions || Extensions.available) && $0.matches(query) }
         // In the pages' order, each once.
         let sections = found.map(\.section).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
 

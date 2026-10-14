@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Extensions are turned off for now, while they are made faster and more reliable: the extensions button, Settings › Extensions and the Add to Nerda button in the Chrome Web Store are gone. Extensions you installed and their settings are kept for when they come back.
+
 ## [0.0.22] - 2026-10-07
 
 ### Added

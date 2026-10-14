@@ -532,9 +532,9 @@ extension Browser {
         let tab = Tab()
         withAnimation(.slide) { add(tab) }
         // An extension's new tab page, once you said it may be one.
-        if !isPrivate, let page = Extensions.shared.newTabPage { return tab.go(to: page) }
+        if !isPrivate, Extensions.started, let page = Extensions.shared.newTabPage { return tab.go(to: page) }
         newTabRequests += 1
-        if !isPrivate { Extensions.shared.offerNewTabPage(into: tab) }
+        if !isPrivate, Extensions.started { Extensions.shared.offerNewTabPage(into: tab) }
     }
 
     /// ⌘, and Settings in the sidebar's menu: the settings, in a tab of their
@@ -714,7 +714,7 @@ let window = BrowserWindow(browser: browser)
 Windows.regular = window
 window.makeKeyAndOrderFront(nil)
 // Once the window is up: loading them takes the main thread a while.
-DispatchQueue.main.async { Extensions.shared.start(for: browser) }
+if Extensions.enabledAtLaunch { DispatchQueue.main.async { Extensions.shared.start(for: browser) } }
 
 #if DEBUG
 // Nerda Dev: which view each key goes to, for when keys stop reaching a
