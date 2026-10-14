@@ -501,6 +501,67 @@ func httpIsTriedOverHTTPSWhereItCanBe(address: String, tried: Bool) {
     #expect(Browser.savedLogin(for: challenge(nil, failures: 0)) == nil)
 }
 
+/// The sign-in sheet names the place, its port only when it is not the
+/// scheme's own, and says when a password would cross the network readable.
+@Test func theSignInSheetSaysWhereAndHowSafely() {
+    func text(_ scheme: String, _ port: Int) -> (title: String, note: String) {
+        Browser.loginText(for: URLProtectionSpace(host: "router.lan", port: port, protocol: scheme, realm: nil,
+                                                  authenticationMethod: NSURLAuthenticationMethodHTTPBasic))
+    }
+    #expect(text("https", 443) == ("Log in to router.lan", "Your login information will be sent securely."))
+    #expect(text("http", 80) == ("Log in to router.lan", "Your login information will not be sent securely."))
+    #expect(text("http", 8080).title == "Log in to router.lan:8080")
+}
+
+/// The sign-in sheet goes, unanswered, once its tab has gone on without
+/// it: to another address, to sleep, or closed. It never stays over
+/// another page.
+@MainActor
+@Test func theSignInSheetGoesWhenItsPageDoes() async throws {
+    let browser = Browser(dataStore: .nonPersistent())
+    defer { browser.closeAll() }
+    /// Whether the sheet over a tab's page would go after `leaving`, and not before.
+    func goes(after leaving: (Nerda.Tab) -> Void) async throws -> Bool {
+        let tab = Tab()
+        browser.add(tab)
+        let page = tab.webView
+        page.loadHTMLString("<p>Staff only</p>", baseURL: URL(string: "https://staff.example/")!)
+        while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+        var gone = false
+        let watch = Task {
+            await browser.left(page)
+            gone = true
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        guard !gone else { return false }
+        leaving(tab)
+        for _ in 0..<100 where !gone { try await Task.sleep(for: .milliseconds(20)) }
+        watch.cancel()
+        return gone
+    }
+    #expect(try await goes { $0.webView.loadHTMLString("<p>Elsewhere</p>", baseURL: URL(string: "https://elsewhere.example/")!) })
+    #expect(try await goes { $0.sleep() })
+    #expect(try await goes { browser.close($0.id) })
+}
+
+/// A site's sign-in is saved and filled in by its own host and port, so a
+/// password for one server of a site isn't offered on another; a proxy's
+/// is never saved or filled in, though it still asks.
+@Test func aSignInIsKeptForItsHostAndPort() {
+    func key(_ host: String, _ scheme: String, _ port: Int) -> String? {
+        Browser.loginKey(for: URLProtectionSpace(host: host, port: port, protocol: scheme, realm: nil,
+                                                 authenticationMethod: NSURLAuthenticationMethodHTTPBasic))
+    }
+    #expect(key("www.Router.lan", "https", 443) == "router.lan")
+    #expect(key("router.lan", "http", 80) == "router.lan")
+    #expect(key("router.lan", "http", 8080) == "router.lan:8080")
+    #expect(Site.matching([Account(host: "router.lan", user: "admin")], key("router.lan", "http", 8080)!).isEmpty)
+    let proxy = URLProtectionSpace(proxyHost: "proxy.lan", port: 3128, type: NSURLProtectionSpaceHTTPProxy, realm: nil,
+                                   authenticationMethod: NSURLAuthenticationMethodHTTPBasic)
+    #expect(Browser.loginKey(for: proxy) == nil)
+    #expect(Browser.loginText(for: proxy).title == "Log in to proxy proxy.lan:3128")
+}
+
 /// A frame from another site than the page's downloads only after a click
 /// in it; one of the page's own site, by itself too.
 @Test(arguments: [
