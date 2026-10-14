@@ -702,12 +702,12 @@ extension Browser: WKNavigationDelegate {
     }
 
     func resume(_ item: Download) {
-        guard downloads.contains(where: { $0 === item }), item.canResume || item.canRetry else { return }
+        guard downloads.contains(where: { $0 === item }), item.canResume || item.canRetry, let old = item.task else { return }
         let data = item.resumeData
-        let request = item.task.originalRequest
+        let request = old.originalRequest
         // Reserve the item before awaiting WebKit so a second click cannot
         // start another download. Keep the same row and extension ownership.
-        item.restart(with: item.task, resuming: data != nil)
+        item.restart(with: old, resuming: data != nil)
         Task {
             // A page awake already, or one of this window's store (an
             // incognito download keeps its cookies), never woken for this.
@@ -819,22 +819,46 @@ extension Browser: WKDownloadDelegate {
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                   suggestedFilename: String) async -> URL? {
         if let item = item(for: download), item.isResuming, let file = item.file { return file }
+        guard let file = await whereToSave(suggestedFilename) else {
+            withAnimation(.slide) { downloads.removeAll { $0.task === download } }
+            return nil
+        }
+        item(for: download)?.file = file
+        return file
+    }
+
+    /// The file a download named so goes to; nil when the question is cancelled.
+    private func whereToSave(_ name: String) async -> URL? {
         if downloadFolder == nil, Downloads.asks, let window {
             let panel = NSSavePanel()
             panel.directoryURL = Downloads.folder
-            panel.nameFieldStringValue = Downloads.destination(for: suggestedFilename, in: Downloads.folder).lastPathComponent
-            guard await panel.beginSheetModal(for: window) == .OK, let file = panel.url else {
-                withAnimation(.slide) { downloads.removeAll { $0.task === download } }
-                return nil
-            }
+            panel.nameFieldStringValue = Downloads.destination(for: name, in: Downloads.folder).lastPathComponent
+            guard await panel.beginSheetModal(for: window) == .OK, let file = panel.url else { return nil }
             // Replacing was agreed to in the panel; WebKit won't write over a file.
             try? FileManager.default.removeItem(at: file)
-            item(for: download)?.file = file
             return file
         }
-        let destination = Downloads.destination(for: suggestedFilename, in: downloadFolder ?? Downloads.folder)
-        item(for: download)?.file = destination
-        return destination
+        return Downloads.destination(for: name, in: downloadFolder ?? Downloads.folder)
+    }
+
+    /// The download button in the bar WebKit draws over a PDF. WebKit has the
+    /// file already and hands it over whole, only to a UI delegate that
+    /// answers this name (SPI, as Safari's); unanswered, the button did nothing.
+    @objc(_webView:saveDataToFile:suggestedFilename:mimeType:originatingURL:)
+    func saveData(_ webView: WKWebView, data: Data?, suggestedFilename: String?, mimeType: String?, originatingURL: URL?) {
+        guard let data else { return }
+        Task {
+            guard let file = await whereToSave(suggestedFilename ?? "") else { return }
+            let item = Download(saving: file, size: Int64(data.count))
+            withAnimation(.slide) { downloads.insert(item, at: 0) }
+            do {
+                try data.write(to: file)
+                item.finish()
+                DistributedNotificationCenter.default().post(name: .init("com.apple.DownloadFileFinished"), object: file.path)
+            } catch {
+                item.fail(error, resumeData: nil)
+            }
+        }
     }
 
     func downloadDidFinish(_ download: WKDownload) {

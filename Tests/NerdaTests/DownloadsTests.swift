@@ -1,4 +1,6 @@
+import Foundation
 import Testing
+import WebKit
 @testable import Nerda
 
 /// A download's thousands of progress reports reach the main thread only as
@@ -20,4 +22,23 @@ import Testing
     #expect(known.last == size)
     // Size unknown: every 256 KB.
     #expect(reports(total: -1, size: size).count == 4_096)
+}
+
+/// A PDF's own download button hands the file over whole: it is saved in
+/// the downloads folder, under a name not taken, and listed as done.
+@MainActor
+@Test func aPDFsDownloadButtonSavesIt() async throws {
+    let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    FileManager.default.createFile(atPath: folder.appending(path: "paper.pdf").path, contents: nil)
+    let browser = Browser()
+    browser.downloadFolder = folder
+
+    browser.saveData(WKWebView(), data: Data("%PDF".utf8), suggestedFilename: "../paper.pdf", mimeType: "application/pdf", originatingURL: nil)
+    while browser.downloads.first?.state != .finished { try await Task.sleep(for: .milliseconds(10)) }
+    let item = try #require(browser.downloads.first)
+    #expect(item.file == folder.appending(path: "paper (1).pdf"))
+    #expect(try Data(contentsOf: folder.appending(path: "paper (1).pdf")) == Data("%PDF".utf8))
+    #expect(item.fraction == 1)
 }
