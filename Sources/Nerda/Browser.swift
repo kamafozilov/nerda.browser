@@ -120,6 +120,8 @@ final class Browser: NSObject {
     @ObservationIgnored private var memoryPressure: (any DispatchSourceMemoryPressure)?
     /// The address last loaded again for a redirect WebKit lost, so it is only tried once.
     @ObservationIgnored private var retried: URL?
+    /// The sites left to http this session; an incognito window's its own.
+    @ObservationIgnored var httpsUpgrade = HTTPSUpgrade()
     /// The frames whose navigation under way a click or a key in the page
     /// started, by WebKit's handle for each (see `mayDownload`).
     @ObservationIgnored private var clickedFrames: Set<NSObject> = []
@@ -622,6 +624,9 @@ extension Browser: WKNavigationDelegate {
         preferences.allowsContentJavaScript = tab(for: webView)?.javaScriptOff != true
         if action.targetFrame?.isMainFrame ?? true {
             siteSettings.applyBlocking(to: preferences, for: action.request.url)
+            if HTTPSUpgrade.isOn, let url = action.request.url, httpsUpgrade.applies(to: url) {
+                preferences.preferredHTTPSNavigationPolicy = .automaticFallbackToHTTP
+            }
         } else if let frame = Self.handle(of: action.targetFrame) {
             if Self.clicked(action) { clickedFrames.insert(frame) } else { clickedFrames.remove(frame) }
         }
@@ -859,6 +864,7 @@ extension Browser: WKNavigationDelegate {
         if SiteSettings.site(webView.url) != nil {
             webView.pageZoom = siteSettings.zoom(for: webView.url) ?? PageZoom.current
         }
+        if HTTPSUpgrade.isOn, let url = webView.url { httpsUpgrade.committed(url) }
         tab.failure = nil
         tab.recordVisit()
         hideChoices(on: tab)

@@ -455,6 +455,32 @@ func onlyThisMacIsTrustedAsItIs(host: String, trusted: Bool) {
     #expect(Browser.isThisMac(host) == trusted)
 }
 
+/// http:// is tried over https only where a certificate could answer.
+@MainActor
+@Test(arguments: [
+    ("http://example.com/a", true), ("http://www.example.com:80/", true), ("http://example.com./", true),
+    ("https://example.com/", false), ("http://example.com:8080/", false), ("http://localhost/", false),
+    ("http://app.localhost/", false), ("http://127.0.0.1/", false), ("http://192.168.1.1/", false),
+    ("http://10.0.0.2/", false), ("http://[::1]/", false), ("http://[fe80::1]/", false), ("http://printer.local/", false),
+    ("http://intranet/", false), ("ftp://example.com/", false), ("file:///tmp/a.html", false),
+])
+func httpIsTriedOverHTTPSWhereItCanBe(address: String, tried: Bool) {
+    #expect(HTTPSUpgrade().applies(to: URL(string: address)!) == tried)
+}
+
+/// A site that came back over http is left to it for the session, by host.
+@MainActor
+@Test func aSiteBackOverHTTPIsLeftToIt() {
+    var upgrade = HTTPSUpgrade()
+    upgrade.committed(URL(string: "https://secure.example/")!)
+    upgrade.committed(URL(string: "http://192.168.1.1/")!)
+    #expect(upgrade.plain.isEmpty)
+    upgrade.committed(URL(string: "http://plain.example/page")!)
+    #expect(!upgrade.applies(to: URL(string: "http://plain.example/other")!))
+    #expect(upgrade.applies(to: URL(string: "http://www.plain.example/")!))
+    #expect(!HTTPSUpgrade().plain.contains("plain.example"))
+}
+
 /// A site's sign-in takes the password offered for it, but not one it has
 /// just turned down; with none, it is the page's to answer.
 @Test func aSignInTakesASavedPasswordOnce() {

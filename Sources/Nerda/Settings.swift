@@ -54,7 +54,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .tabs: ["sleep", "memory", "performance", "inactive", "background", "load", "wait", "lazy", "pinned", "launch", "startup", "preview", "hover", "card"]
         case .passwords: ["autofill", "fill", "save", "never saved", "import", "keychain", "touch id", "accounts", "sign in", "login"]
         case .siteSettings: ["permissions", "camera", "microphone", "location", "notifications", "sites", "allow", "block", "ads"]
-        case .privacy: ["security", "history", "keep history", "delete", "clear", "cookies", "cache", "site data", "ads", "trackers", "adblock", "blocking",
+        case .privacy: ["security", "https", "secure connections", "upgrade", "history", "keep history", "delete", "clear", "cookies", "cache", "site data", "ads", "trackers", "adblock", "blocking",
                         "filters", "easylist", "ublock", "adguard", "incognito", "private", "lock"]
         case .extensions: ["chrome web store", "add-ons", "plugins", "unpacked", "developer"] + Extensions.shared.installed.map(\.name)
         case .shortcuts: ["keyboard", "keys", "hotkeys"] + ShortcutsSettings.groups.flatMap { $0.shortcuts.map(\.title) }
@@ -384,6 +384,7 @@ private struct PrivacySettings: View {
     @Bindable private var blocker = Blocker.shared
     @AppStorage(HistoryKeep.key) private var keep = HistoryKeep.threeMonths
     @AppStorage(IncognitoAutoLock.key) private var lock = IncognitoAutoLock.minute
+    @AppStorage(HTTPSUpgrade.key) private var upgradesToHTTPS = true
 
     var body: some View {
         SettingsGroup(title: "Browsing history") {
@@ -407,6 +408,13 @@ private struct PrivacySettings: View {
             SettingsRow(title: "Manage filters", detail: blocker.chosen.count == 1 ? "1 filter on" : "\(blocker.chosen.count) filters on",
                         icon: "slider.horizontal.3") {
                 FiltersButton()
+            }
+        }
+        SettingsGroup(title: "Security") {
+            SettingsRow(title: "Upgrade connections to HTTPS",
+                        detail: "Open http:// sites over HTTPS when they support it, and over HTTP when they don't",
+                        icon: "lock") {
+                SettingsToggle(title: "Upgrade connections to HTTPS", isOn: $upgradesToHTTPS)
             }
         }
         SettingsGroup(title: "Incognito") {

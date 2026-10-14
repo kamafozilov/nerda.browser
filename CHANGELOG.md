@@ -34,6 +34,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Security
 
+- An http:// address, typed or a link, opens over HTTPS when the site has it, as in Chrome, and over HTTP when it doesn't: that site then opens over HTTP until you quit. Settings › Security & Privacy › Upgrade connections to HTTPS turns it off.
 - A frame from another site inside a page, such as an ad, can start a download only after you click in it, as in Chrome. A page's own downloads start as before.
 - History no longer keeps a name and password written into an address, as in `https://name:password@example.com`; those an earlier version kept are taken out of it the next time Nerda opens.
 
