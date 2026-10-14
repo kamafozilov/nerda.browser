@@ -443,8 +443,9 @@ final class BrowserWindow: NSWindow {
     /// The whole screen short of the menu bar and Dock, every time. Not the
     /// frame it was left at: one stray resize would otherwise stick for good.
     /// An incognito window is always dark, and its own colours (see
-    /// `IncognitoPage`), so it is plain which window is which.
-    init(browser: Browser) {
+    /// `IncognitoPage`), so it is plain which window is which. On `screen`,
+    /// for a tab moved to a window of its own; the main one's otherwise.
+    init(browser: Browser, screen: NSScreen? = NSScreen.main) {
         self.browser = browser
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
@@ -469,7 +470,7 @@ final class BrowserWindow: NSWindow {
         title = Self.title(of: browser)
         if browser.isPrivate { appearance = NSAppearance(named: .darkAqua) }
         // Sized before it has content, so the content is laid out once, at that size.
-        fill(NSScreen.main)
+        fill(screen)
         // The Dock hidden or shown, or the display changed: the screen's free
         // part is another size, and a window still filling it follows.
         NotificationCenter.default.addObserver(
@@ -562,8 +563,8 @@ extension Browser {
     /// ⌘, and Settings in the sidebar's menu: the settings, in a tab of their
     /// own, and only ever one, as in Chrome.
     func openSettings(_ page: SettingsPage? = nil) {
-        // Nerda's own pages open in the regular window, as in Chrome.
-        if isPrivate { return Windows.showRegular().openSettings(page) }
+        // Nerda's own pages open in the profile's own window, as in Chrome.
+        if !keepsPins { return Windows.home(of: self).openSettings(page) }
         if commandBarOpen { hideCommandBar() }
         endAddressEdit()
         if let open = tabs.first(where: { $0.settings != nil }) {
@@ -578,7 +579,7 @@ extension Browser {
     /// ⌘Y, and Show All History in the menus: every page visited, in a tab
     /// of its own, and only ever one, as the settings are.
     func openHistory() {
-        if isPrivate { return Windows.showRegular().openHistory() }
+        if !keepsPins { return Windows.home(of: self).openHistory() }
         if commandBarOpen { hideCommandBar() }
         endAddressEdit()
         if let open = tabs.first(where: \.showsHistory) { return selectedID = open.id }
@@ -590,7 +591,7 @@ extension Browser {
     /// Clear History…, in the menus and on the history page: the history page,
     /// with Delete browsing data over it.
     func clearHistory() {
-        if isPrivate { return Windows.showRegular().clearHistory() }
+        if !keepsPins { return Windows.home(of: self).clearHistory() }
         openHistory()
         clearingHistory = true
     }
@@ -739,6 +740,7 @@ let window = BrowserWindow(browser: browser)
 Windows.regular = window
 window.makeKeyAndOrderFront(nil)
 Windows.reopenProfiles()
+Windows.reopenSecondary()
 Profiles.removeStoresLeft()
 // Once the window is up: loading them takes the main thread a while.
 if Extensions.enabledAtLaunch { DispatchQueue.main.async { Extensions.shared.start(for: browser) } }

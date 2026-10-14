@@ -26,6 +26,8 @@ final class AppMenu: NSObject {
             .separator(),
             item("Select Next Tab", #selector(nextTab), "\t", .control, target: self),
             item("Select Previous Tab", #selector(previousTab), "\t", [.control, .shift], target: self),
+            item("Move Tab to New Window", #selector(moveTabToNewWindow), target: self),
+            item("Merge All Windows", #selector(mergeAllWindows), target: self),
             .separator(),
             item("Task Manager", #selector(openTaskManager), target: self),
             item("Passwords", #selector(openPasswords), "l", [.command, .option], target: self),
@@ -284,6 +286,13 @@ final class AppMenu: NSObject {
     @objc private func importBookmarks() { kept.importBookmarks() }
     @objc private func exportBookmarks() { kept.exportBookmarks() }
     @objc private func toggleBookmark() { browser.toggleBookmark() }
+
+    @objc private func moveTabToNewWindow() {
+        guard let id = browser.selectedID else { return }
+        Windows.moveToNewWindow(id, from: browser, on: Windows.nextScreen(after: browser.window))
+    }
+
+    @objc private func mergeAllWindows() { Windows.merge(into: browser.profile) }
     @objc private func toggleResponsive() { browser.toggleResponsive() }
     @objc private func toggleReader() { browser.toggleReader() }
     @objc private func viewSource() { browser.viewSource() }
@@ -389,7 +398,12 @@ extension AppMenu: NSMenuItemValidation {
             return item.action != #selector(zoom(_:)) || item.tag != 0 || (tab.reader ?? tab.webView).pageZoom != PageZoom.current
         case #selector(toggleBookmark):
             item.title = browser.selected?.bookmark == nil ? "Bookmark This Tab" : "Remove Bookmark"
-            return !browser.isPrivate && browser.selected?.hasPage == true
+            return browser.keepsPins && browser.selected?.hasPage == true
+        case #selector(moveTabToNewWindow):
+            // A window of its own already: nothing would change.
+            return browser.selectedID != nil && (browser.keepsPins || browser.tabs.count > 1)
+        case #selector(mergeAllWindows):
+            return !browser.isPrivate && Windows.hasSecondary(of: browser.profile)
         case #selector(translatePage):
             // Into the first of your languages it can go into, as Safari's.
             let target = browser.selected?.translationTargets.first
@@ -553,8 +567,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// An incognito window's closing lets go of it, and with the last one,
-    /// of all it held (see `Windows`). A profile's stays closed at the next launch.
+    /// of all it held (see `Windows`), as a secondary one's does. A profile's
+    /// stays closed at the next launch.
     func windowWillClose(_ notification: Notification) {
+        if browser.isSecondary { return Windows.closedSecondary(self) }
         browser.closeAll()
         if browser.isPrivate { Windows.closed(self) } else { Windows.mark(browser.profile, open: false) }
     }

@@ -30,6 +30,8 @@ nonisolated struct Session: Codable, Equatable, Sendable {
     /// Which of them was on screen.
     var selected: Int?
     var closed: [ClosedTab]? = nil
+    /// A secondary window's place, for it to open on the same display.
+    var frame: CGRect? = nil
 
     struct ClosedTab: Codable, Equatable, Sendable, Identifiable {
         var id = UUID()
@@ -87,6 +89,7 @@ extension Browser {
     /// happens, and those that went somewhere since are read again.
     func session(readingEveryPage: Bool) -> Session {
         var session = Session(tabs: [], closed: recentlyClosed.isEmpty ? nil : recentlyClosed)
+        if isSecondary { session.frame = window?.frame }
         for tab in tabs {
             guard let saved = tab.saved(readingPage: readingEveryPage || tab.id == selectedID) else { continue }
             if tab.id == selectedID { session.selected = session.tabs.count }

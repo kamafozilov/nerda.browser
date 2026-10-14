@@ -319,6 +319,7 @@ extension Browser {
 
     /// A bookmark's tab on screen: the one open, or else a new one, at its address.
     func open(bookmark id: Bookmarks.Item.ID) {
+        if isSecondary { return Windows.home(of: self).open(bookmark: id) }
         if let tab = tab(of: id) { return select(tab.id) }
         guard let url = bookmarks.item(id)?.url else { return }
         let tab = Tab()
@@ -331,7 +332,7 @@ extension Browser {
     /// (past the end: the end), and from then on, that bookmark's tab: out
     /// of the list, or off the tiles, into the bookmarks.
     func bookmark(_ id: Tab.ID, in folder: Bookmarks.Item.ID? = nil, at index: Int = .max) {
-        guard !isPrivate, let tab = tabs.first(where: { $0.id == id }), tab.hasPage, tab.bookmark == nil,
+        guard keepsPins, let tab = tabs.first(where: { $0.id == id }), tab.hasPage, tab.bookmark == nil,
               let site = tab.site else { return }
         if tab.isPinned { move(id, pinned: false, to: 0) }
         let item = Bookmarks.Item(title: tab.title, url: site)

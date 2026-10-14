@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- Move a tab to a window of its own, to watch a video or read on another display: drag it out of the sidebar or the tab strip and let go on the other screen, or choose Move to New Window from its menu or the Window menu, which opens it on the next display. The page goes on as it was, without loading again. The new window shows only its tabs: your pinned sites and bookmarks stay in the main window. Drag a tab onto another window, or use Move to Window, to put it there, and Window › Merge All Windows brings them all back. Windows you leave open come back on their display when Nerda opens.
+
 ## [0.0.23] - 2026-10-14
 
 ### Added

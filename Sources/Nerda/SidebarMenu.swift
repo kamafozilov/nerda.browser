@@ -299,16 +299,19 @@ struct TabMenu: View {
             if tab.hasPage {
                 Button("Reload") { tab.reload() }
                 Button(tab.isMuted ? "Unmute Tab" : "Mute Tab") { browser.toggleMute(id) }
-                // Incognito keeps nothing pinned, nor bookmarks.
-                if !browser.isPrivate, let bookmark = tab.bookmark {
+                // Incognito keeps nothing pinned, nor bookmarks; a secondary
+                // window leaves them to the profile's own.
+                if browser.keepsPins, let bookmark = tab.bookmark {
                     Button("Remove Bookmark") { withAnimation(.slide) { browser.removeBookmark(bookmark) } }
-                } else if !browser.isPrivate {
+                } else if browser.keepsPins {
                     Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { withAnimation(.slide) { browser.setPinned(!tab.isPinned, id) } }
                     AddToBookmarks(browser: browser, id: id)
                 }
                 if let url = tab.shareable { ShareLink("Share", item: url) }
                 Divider()
             }
+            MoveTab(browser: browser, id: id)
+            Divider()
             TabsLayoutMenu(browser: browser)
             Divider()
             Button("Close Tab") { withAnimation(.slide) { browser.close(id) } }
@@ -325,6 +328,40 @@ struct TabMenu: View {
     private func close(_ tabs: [Tab]) {
         if tabs.contains(where: { $0.id == browser.selectedID }) { browser.select(id) }
         withAnimation(.slide) { tabs.forEach { browser.close($0.id) } }
+    }
+}
+
+/// Move to New Window, as in Safari and Chrome: on the next display, if there
+/// is one. With other windows open, a menu of them too, each by the tab on
+/// screen in it.
+private struct MoveTab: View {
+    let browser: Browser
+    let id: Tab.ID
+
+    var body: some View {
+        let windows = Windows.others(of: browser)
+        // A window of its own already: nothing would change.
+        let alone = !browser.keepsPins && browser.tabs.count == 1
+        if windows.isEmpty {
+            Button("Move to New Window", action: moveToNewWindow)
+                .disabled(alone)
+        } else {
+            Menu("Move to Window") {
+                Button("New Window", action: moveToNewWindow)
+                    .disabled(alone)
+                Divider()
+                ForEach(windows, id: \.self) { target in
+                    Button(target.selected.map { $0.title.isEmpty ? "New Tab" : $0.title } ?? "Window") {
+                        withAnimation(.slide) { browser.move(id, to: target) }
+                        target.window?.makeKeyAndOrderFront(nil)
+                    }
+                }
+            }
+        }
+    }
+
+    private func moveToNewWindow() {
+        Windows.moveToNewWindow(id, from: browser, on: Windows.nextScreen(after: browser.window))
     }
 }
 
