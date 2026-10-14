@@ -12,7 +12,7 @@ final class History {
     /// Always empty: what an incognito window's fields suggest from.
     static let empty = History()
     static let file = Edition.folder.appending(path: "history.json")
-    private static let limit = 20_000
+    nonisolated static let limit = 20_000
     /// How quickly a visit counts for less: half as much two weeks on.
     private static let halfLife: TimeInterval = 14 * 24 * 60 * 60
     /// How long after a change it is written: whatever else changes by then
@@ -213,6 +213,15 @@ final class History {
         return visit
     }
 
+    /// A page imported joined to the same page here: the larger of the two
+    /// counts, not their sum, as importing the same browser again would
+    /// count its visits twice.
+    nonisolated private static func imported(_ old: Visit, _ new: Visit) -> Visit {
+        var visit = merged(old, new)
+        visit.count = max(old.count, new.count)
+        return visit
+    }
+
     /// Takes in what `load` read, waiting for the rest of it if need be:
     /// before a save, which would write only this run's pages over it, and
     /// before pages are taken out, which would come back with it. Pages
@@ -236,6 +245,34 @@ final class History {
             visits[new.url] = visit
             reindex(visit)
         }
+    }
+
+    /// Pages from another browser's history (File › Import From Browser…),
+    /// each joined to the same page here (`imported`), and written
+    /// once. Merged and indexed off the main thread: 20,000 pages take ~100 ms.
+    /// How many of them are kept, as those past the limit or older than
+    /// Settings keeps go as it is written.
+    func add(_ imported: [Visit]) async -> Int {
+        settle()
+        let before = visits, entries = entries
+        let made = await Task.detached(priority: .userInitiated) {
+            var visits = before
+            for visit in imported { visits[visit.url] = visits[visit.url].map { Self.imported($0, visit) } ?? visit }
+            let made = Self.indexed(visits, reusing: entries)
+            return Loaded(visits: visits, entries: made.entries, index: made.index)
+        }.value
+        if visits == before {
+            visits = made.visits
+            self.entries = made.entries
+            built = made.index
+        } else {
+            // Visited or taken out meanwhile: merged again, here, into what there is now.
+            for visit in imported { visits[visit.url] = visits[visit.url].map { Self.imported($0, visit) } ?? visit }
+            built = nil
+        }
+        dirty = true
+        save(waiting: false)
+        return Set(imported.map(\.url)).count { visits[$0] != nil }
     }
 
     /// A page from the web was opened. Pages on disk, and the like, are not kept.

@@ -66,6 +66,7 @@ final class AppMenu: NSObject {
             item("Export as PDF…", #selector(exportPDF), target: self),
             item("Print…", #selector(printPage), "p", target: self),
             .separator(),
+            item("Import From Browser…", #selector(importFromBrowser), target: self),
             item("Import Passwords…", #selector(importPasswords), target: self),
             item("Import Bookmarks…", #selector(importBookmarks), target: self),
             item("Export Bookmarks…", #selector(exportBookmarks), target: self),
@@ -268,6 +269,8 @@ final class AppMenu: NSObject {
     @objc private func nextTab() { browser.selectTab(after: 1) }
     @objc private func previousTab() { browser.selectTab(after: -1) }
     @objc private func importPasswords() { browser.importPasswords() }
+    // Into the regular window, as incognito keeps no history.
+    @objc private func importFromBrowser() { Windows.showRegular().importFromBrowser() }
     @objc private func importBookmarks() { regular.importBookmarks() }
     @objc private func exportBookmarks() { regular.exportBookmarks() }
     @objc private func toggleBookmark() { browser.toggleBookmark() }
@@ -358,7 +361,7 @@ extension AppMenu: NSMenuItemValidation {
         // regular window, or unlocks first (a new incognito window), is not.
         if browser.locked {
             return [#selector(openSettings), #selector(openHistory), #selector(newIncognitoWindow),
-                    #selector(checkForUpdates), #selector(importPasswords), #selector(importBookmarks), #selector(exportBookmarks), #selector(openBookmark(_:)),
+                    #selector(checkForUpdates), #selector(importFromBrowser), #selector(importPasswords), #selector(importBookmarks), #selector(exportBookmarks), #selector(openBookmark(_:)),
                     #selector(choosePicture), #selector(useOwnPictures)].contains(item.action)
         }
         switch item.action {
