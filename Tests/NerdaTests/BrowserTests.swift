@@ -449,6 +449,7 @@ private let somewhere = URL(string: "https://example.com")!
 @Test(arguments: [
     ("localhost", true), ("app.localhost", true), ("127.0.0.1", true), ("127.1.2.3", true), ("::1", true), ("[::1]", true),
     ("localhost.example.com", false), ("128.0.0.1", false), ("127.0.0.256", false), ("127.evil.com", false), ("192.168.1.1", false),
+    ("127.+0.0.1", false), ("127.0.0.-0", false), ("127.0.0.1.evil.com", false), ("evil-localhost", false), ("::ffff:7f00:1", false),
 ])
 func onlyThisMacIsTrustedAsItIs(host: String, trusted: Bool) {
     #expect(Browser.isThisMac(host) == trusted)

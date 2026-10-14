@@ -851,11 +851,14 @@ extension Browser: WKNavigationDelegate {
     }
 
     /// localhost and its names, and the loopback addresses (127.x.x.x, ::1).
+    /// macOS answers every name under localhost with this Mac itself. Digits
+    /// only: a number may otherwise carry a sign ("+1").
     nonisolated static func isThisMac(_ host: String) -> Bool {
         let host = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         let parts = host.split(separator: ".", omittingEmptySubsequences: false)
         return host == "localhost" || host.hasSuffix(".localhost") || host == "::1"
-            || (parts.count == 4 && parts.first == "127" && parts.allSatisfy { UInt8($0) != nil })
+            || (parts.count == 4 && parts.first == "127"
+                && parts.allSatisfy { $0.allSatisfy { $0.isASCII && $0.isNumber } && UInt8($0) != nil })
     }
 
     /// The page's process died (out of memory, or a WebKit bug): it would stay
