@@ -411,8 +411,61 @@ private let somewhere = URL(string: "https://example.com")!
     #expect(Tab(url: URL(string: "http://localhost:3000/app")!).title == "localhost:3000")
 
     let tab = Tab(url: URL(string: "https://news.ycombinator.com")!)
-    tab.failure = (URL(string: "https://gogle.cmo")!, "Not found")
+    tab.failure = Tab.Failure(url: URL(string: "https://gogle.cmo")!, message: "Not found")
     #expect(tab.title == "gogle.cmo")
+}
+
+/// A page that can't be opened says why in plain words, a certificate's
+/// trouble by name; the rest keep WebKit's own.
+@Test func aPageThatCantOpenSaysWhy() {
+    func reason(_ code: Int, refused: Bool = false, _ certificate: Nerda.Tab.Failure.Certificate? = nil) -> String? {
+        Tab.Failure.reason(code: code, host: "example.com", refused: refused, certificate: certificate)
+    }
+    #expect(reason(NSURLErrorNotConnectedToInternet) == "Your Mac isn't connected to the internet. The page opens once it is.")
+    #expect(reason(NSURLErrorCannotFindHost) == "Can't find the server at example.com. Check the address for a typo.")
+    #expect(reason(NSURLErrorTimedOut) == "example.com took too long to answer.")
+    #expect(reason(NSURLErrorCannotConnectToHost) == "Can't connect to the server at example.com.")
+    #expect(reason(NSURLErrorCannotConnectToHost, refused: true) == "example.com refused to connect.")
+    #expect(reason(NSURLErrorServerCertificateHasBadDate) == "The certificate of example.com has expired.")
+    #expect(reason(NSURLErrorServerCertificateUntrusted, .wrongHost) == "The certificate is for another site, not example.com.")
+    #expect(reason(NSURLErrorServerCertificateUntrusted, .selfSigned)
+            == "The certificate of example.com is signed by the site itself, so your Mac can't check it.")
+    #expect(reason(NSURLErrorServerCertificateUntrusted) == "The certificate of example.com isn't from an issuer your Mac trusts.")
+    #expect(reason(NSURLErrorBadServerResponse) == nil)
+}
+
+/// Nothing listening at the address: the server turned the connection
+/// away, and a new tab has nowhere to go back to.
+@MainActor
+@Test func aRefusedConnectionSaysSo() async throws {
+    // A port just free: the system's pick, let go again.
+    let probe = socket(AF_INET, SOCK_STREAM, 0)
+    var address = sockaddr_in(sin_len: UInt8(MemoryLayout<sockaddr_in>.size), sin_family: sa_family_t(AF_INET),
+                              sin_port: 0, sin_addr: in_addr(s_addr: inet_addr("127.0.0.1")), sin_zero: (0, 0, 0, 0, 0, 0, 0, 0))
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(probe, $0, length) } }
+    _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(probe, $0, &length) } }
+    close(probe)
+    let browser = Browser(dataStore: .nonPersistent())
+    let tab = browser.open(URL(string: "http://127.0.0.1:\(UInt16(bigEndian: address.sin_port))/")!)
+    for _ in 0..<250 where tab.failure == nil { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(tab.failure?.message == "127.0.0.1 refused to connect.")
+    #expect(tab.failure?.offline == false)
+    #expect(tab.canLeaveFailure == false)
+
+    // From a page, Go Back is that page again.
+    let refused = tab.failure!.url
+    let page = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).html")
+    try "<p>Here</p>".write(to: page, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: page) }
+    tab.go(to: page)
+    for _ in 0..<250 where tab.failure != nil { try await Task.sleep(for: .milliseconds(20)) }
+    tab.go(to: refused)
+    for _ in 0..<250 where tab.failure == nil { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(tab.canLeaveFailure)
+    tab.leaveFailure()
+    #expect(tab.failure == nil)
+    #expect(tab.site == page)
 }
 
 /// A popup, or a link opened in a new tab, hands back to the page that opened it.

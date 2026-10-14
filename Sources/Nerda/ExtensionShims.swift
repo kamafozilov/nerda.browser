@@ -3807,7 +3807,7 @@ enum ExtensionAuth {
               ExtensionShims.allowed(id, context: context).contains("identity"),
               let tab = browser.tab(for: webView)
         else { return false }
-        tab.failure = (url, "No site at that address.")
+        tab.failure = Tab.Failure(url: url, message: "No site at that address.")
         return true
     }
 }

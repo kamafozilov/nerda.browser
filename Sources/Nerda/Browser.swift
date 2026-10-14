@@ -1006,7 +1006,50 @@ extension Browser: WKNavigationDelegate {
         guard let tab = tab(for: webView) else { return }
         let setOff = tab.loading.flatMap { $0.navigation === navigation ? $0.site : nil }
         guard let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL ?? setOff ?? webView.url ?? tab.site else { return }
-        tab.failure = (url, error.localizedDescription)
+        guard error.domain == NSURLErrorDomain else {
+            return tab.failure = Tab.Failure(url: url, message: error.localizedDescription)
+        }
+        let host = url.host(percentEncoded: false) ?? ""
+        // Turned away by the server, not just not reached: under the error, the socket's own.
+        let socket = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        let refused = socket?.domain == NSPOSIXErrorDomain && socket?.code == Int(ECONNREFUSED)
+        let offline = error.code == NSURLErrorNotConnectedToInternet
+        if offline {
+            Task {
+                await Online.back()
+                if tab.failure?.offline == true, tab.failure?.url == url, tab.page === webView { tab.reload() }
+            }
+        }
+        // The secure connection failing, or the server's certificate (-1200 to -1204).
+        let certificate = (NSURLErrorServerCertificateNotYetValid...NSURLErrorSecureConnectionFailed).contains(error.code)
+        guard certificate, let trust = Self.trust(of: error, host: host) else {
+            let message = Tab.Failure.reason(code: error.code, host: host, refused: refused) ?? error.localizedDescription
+            return tab.failure = Tab.Failure(url: url, message: message, offline: offline)
+        }
+        // A certificate is looked at closer, to say what is wrong with it.
+        let chain = (SecTrustCopyCertificateChain(trust) as? [SecCertificate] ?? []).map { SecCertificateCopyData($0) as Data }
+        Task {
+            let problem = await Tab.Failure.problem(chain: chain, host: host)
+            // A load set off meanwhile has its own say.
+            guard tab.page === webView, navigation == nil || tab.loading?.navigation === navigation else { return }
+            let message = Tab.Failure.reason(code: error.code, host: host, certificate: problem) ?? error.localizedDescription
+            tab.failure = Tab.Failure(url: url, message: message, trust: trust)
+        }
+    }
+
+    /// The certificate a site gave, as WebKit hands it over with the error:
+    /// its trust, or else its chain, checked as a server's for `host`.
+    private static func trust(of error: NSError, host: String) -> SecTrust? {
+        if let value = error.userInfo[NSURLErrorFailingURLPeerTrustErrorKey] as AnyObject?,
+           CFGetTypeID(value) == SecTrustGetTypeID() {
+            return (value as! SecTrust)
+        }
+        let chain = (error.userInfo["NSErrorPeerCertificateChainKey"] as? [AnyObject] ?? [])
+            .filter { CFGetTypeID($0) == SecCertificateGetTypeID() }.map { $0 as! SecCertificate }
+        var trust: SecTrust?
+        guard !chain.isEmpty, SecTrustCreateWithCertificates(chain as CFArray, SecPolicyCreateSSL(true, host as CFString),
+                                                             &trust) == errSecSuccess else { return nil }
+        return trust
     }
 
     /// A certificate the Mac doesn't trust is refused, as ever, except on this
@@ -1177,8 +1220,8 @@ extension Browser: WKNavigationDelegate {
         // Nothing is left to protect: closing or quitting needn't ask.
         tab.hasUnsavedWork = false
         if again || edited, let url = webView.url ?? tab.site {
-            tab.failure = (url, again ? "The page crashed each time it was opened."
-                                      : "The page crashed. Changes you made in it may not have been saved.")
+            tab.failure = Tab.Failure(url: url, message: again ? "The page crashed each time it was opened."
+                                                               : "The page crashed. Changes you made in it may not have been saved.")
         } else if tab.id == selectedID {
             webView.reload()
         } else {

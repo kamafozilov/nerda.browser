@@ -644,7 +644,7 @@ private struct PermissionPrompt: View {
     }
 }
 
-private struct PromptButton: View {
+struct PromptButton: View {
     let title: String
     var prominent = false
     let action: () -> Void

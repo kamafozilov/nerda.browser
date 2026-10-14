@@ -503,7 +503,8 @@ extension Tab {
             }
             guard !Task.isCancelled else { return }
             let found = try? await page.callAsyncJavaScript(Reader.probe, contentWorld: Reader.world) as? Bool
-            guard !Task.isCancelled, self.page === page, page.url == url else { return }
+            // A load that failed leaves the last page under its error, at its address.
+            guard !Task.isCancelled, self.page === page, page.url == url, failure == nil else { return }
             readable = found == true
         }
     }
