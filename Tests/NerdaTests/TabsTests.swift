@@ -216,3 +216,32 @@ private final class LinkOpener: NSObject {
     #expect(opener.opened == 3)
     #expect(page.takeLinkAsk() == .incognito)
 }
+
+/// With Load background tabs when shown, a link opened behind keeps its
+/// address and makes no page until it is shown; saved, it stays unloaded.
+@MainActor
+@Test func aBackgroundTabWaitsUntilShown() async throws {
+    let folder = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appending(path: "page.html")
+    try Data("<title>Arrived</title>".utf8).write(to: file)
+
+    let browser = Browser()
+    browser.open(URL(string: "about:blank")!)
+    let front = browser.selectedID
+    let site = browser.openBehind(URL(string: "https://www.example.test/a")!, waiting: true)
+    let waiting = browser.openBehind(file, waiting: true)
+    #expect(browser.selectedID == front)
+    #expect(site.page == nil && site.isAsleep && site.hasPage)
+    #expect(site.title == "example.test")
+    #expect(waiting.page == nil)
+    let saved = try #require(browser.session.tabs.first { $0.url == file })
+    #expect(saved.state == nil)
+
+    browser.select(waiting.id)
+    // On screen, PageView asks for the page, which wakes it to its address.
+    let page = waiting.webView
+    try await until { waiting.title == "Arrived" }
+    #expect(page.url == file)
+    #expect(site.page == nil)
+}

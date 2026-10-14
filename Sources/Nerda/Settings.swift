@@ -51,7 +51,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
                         "downloads", "folder", "ask where to save", "bookmarks", "import", "export", "quit", "warn", "about", "version", "updates", "automatically"]
         case .appearance: ["theme", "dark", "light", "zoom", "tab style", "vertical", "horizontal", "sidebar", "transparency", "tinted", "transparent", "glass",
                            "new tab", "wallpaper", "picture", "background", "ai chats", "chatgpt", "claude"]
-        case .tabs: ["sleep", "memory", "performance", "inactive", "pinned", "launch", "startup", "preview", "hover", "card"]
+        case .tabs: ["sleep", "memory", "performance", "inactive", "background", "load", "wait", "lazy", "pinned", "launch", "startup", "preview", "hover", "card"]
         case .passwords: ["autofill", "fill", "save", "never saved", "import", "keychain", "touch id", "accounts", "sign in", "login"]
         case .siteSettings: ["permissions", "camera", "microphone", "location", "notifications", "sites", "allow", "block", "ads"]
         case .privacy: ["security", "history", "keep history", "delete", "clear", "cookies", "cache", "site data", "ads", "trackers", "adblock", "blocking",
@@ -430,10 +430,11 @@ private struct PrivacySettings: View {
     }
 }
 
-/// How tabs live: how soon one left alone sleeps, what loads at launch, and
-/// the card a tab shows under the pointer.
+/// How tabs live: how soon one left alone sleeps, when one opened behind
+/// loads, what loads at launch, and the card a tab shows under the pointer.
 private struct TabsSettings: View {
     @AppStorage(TabSleep.key) private var sleep = TabSleep.halfHour
+    @AppStorage(Browser.waitsKey) private var waits = false
     @AppStorage(Session.loadsPinsKey) private var loadsPins = true
     @AppStorage(TabPreviews.key) private var previews = true
 
@@ -448,6 +449,11 @@ private struct TabsSettings: View {
                                    DropdownOption(id: "\($0.rawValue)", title: $0.name, separated: $0 == .fourHours)
                                },
                                selected: "\(sleep.rawValue)") { sleep = Int($0).flatMap(TabSleep.init) ?? .halfHour }
+            }
+            SettingsRow(title: "Load background tabs when shown",
+                        detail: "A link opened behind the page loads only once you go to its tab",
+                        icon: "hourglass") {
+                SettingsToggle(title: "Load background tabs when shown", isOn: $waits)
             }
         }
         SettingsGroup(title: "Startup") {

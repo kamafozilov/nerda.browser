@@ -68,7 +68,7 @@ enum Reader {
                   let tab = (webView as? ReaderPage)?.tab else { return .cancel }
             if Browser.onlyChangesFragment(from: webView.url, to: url) { return .allow }
             if action.modifierFlags.contains(.command) || action.buttonNumber == 4, let browser = tab.delegate as? Browser {
-                withAnimation(.slide) { _ = browser.open(url, inBackground: true) }
+                withAnimation(.slide) { _ = browser.openBehind(url) }
             } else {
                 tab.go(to: url)
             }

@@ -215,6 +215,23 @@ final class Browser: NSObject {
         return tab
     }
 
+    /// Settings › Tabs › Load background tabs when shown. Off, as in Safari
+    /// and Chrome, which load them at once.
+    static let waitsKey = "backgroundTabsWait"
+    static var backgroundTabsWait: Bool { UserDefaults.standard.bool(forKey: waitsKey) }
+
+    /// A link opened behind the page by hand: ⌘-click, the middle button,
+    /// Open Link in New Tab. `waiting`, it keeps its address and loads
+    /// nothing until it is shown, as a tab from the last run does.
+    @discardableResult
+    func openBehind(_ url: URL, waiting: Bool = Browser.backgroundTabsWait) -> Tab {
+        guard waiting else { return open(url, inBackground: true) }
+        // A title known from a visit before; otherwise the site's name.
+        let tab = Tab(waitingFor: url, title: history.visits[url]?.title ?? "")
+        add(tab, inBackground: true)
+        return tab
+    }
+
     /// Pinned tabs come first, in their own order; the rest follow, newest
     /// first, under the sidebar's New Tab, or across the top, newest `last`,
     /// by its + button.
@@ -501,8 +518,14 @@ extension Browser: WKUIDelegate {
             if ["http", "https"].contains(url.scheme?.lowercased() ?? "") { Windows.openIncognito(url) }
             return nil
         }
+        // Open Link in New Tab: behind this one, as a ⌘-click's; one that
+        // waits to be shown is made without the page WebKit asks for.
+        if ask == .behind, Self.backgroundTabsWait, let url = action.request.url,
+           ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            withAnimation(.slide) { _ = openBehind(url) }
+            return nil
+        }
         let tab = Tab(configuration: configuration, opener: tab(for: webView))
-        // Open Link in New Tab: behind this one, as a ⌘-click's.
         withAnimation(.slide) { add(tab, inBackground: ask == .behind) }
         return tab.webView
     }
@@ -690,7 +713,7 @@ extension Browser: WKNavigationDelegate {
 
         // ⌘-click: a tab of its own, behind this one.
         if action.navigationType == .linkActivated, action.modifierFlags.contains(.command) {
-            withAnimation(.slide) { open(url, inBackground: true) }
+            withAnimation(.slide) { _ = openBehind(url) }
             return .cancel
         }
         // A middle click (the buttons as a mask: 4 is the middle one) is opened

@@ -223,6 +223,14 @@ final class Tab: Identifiable {
         isAsleep = false
     }
 
+    /// A tab opened behind the page that waits to load until it is shown
+    /// (`Browser.openBehind`): asleep, as one from an earlier run, but with
+    /// nothing to wake to save its address, and its visit still to count.
+    init(waitingFor url: URL, title: String = "") {
+        self.url = url
+        pageTitle = title
+    }
+
     /// A tab from an earlier run, asleep: it shows its title and icon, and
     /// only loads, back where it was, once it is shown.
     init(restoring saved: Session.Tab) {
@@ -547,7 +555,7 @@ final class Tab: Identifiable {
             guard message.frameInfo.isMainFrame, let page = message.webView, let browser = page.uiDelegate as? Browser,
                   let address = message.body as? String, let url = URL(string: address),
                   ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
-            withAnimation(.slide) { browser.open(url, inBackground: true) }
+            withAnimation(.slide) { _ = browser.openBehind(url) }
         }
     }
 
