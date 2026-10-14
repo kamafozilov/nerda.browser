@@ -842,13 +842,62 @@ extension Browser: WKNavigationDelegate {
     /// A certificate the Mac doesn't trust is refused, as ever, except on this
     /// Mac itself: a local server with a certificate of its own, as developers
     /// run, opens, as Chrome and Search let it. Nothing can be in between there.
+    /// A site's own sign-in (Basic, Digest, NTLM, Kerberos) takes the password
+    /// already saved for it, and a site asking who you are by certificate the
+    /// one in the keychain from an issuer it names, when there is one only.
+    /// Without an answer WebKit goes on as it would: the page is never stopped.
     func webView(_ webView: WKWebView, respondTo challenge: URLAuthenticationChallenge) async
         -> (URLSession.AuthChallengeDisposition, URLCredential?) {
         let space = challenge.protectionSpace
-        guard space.authenticationMethod == NSURLAuthenticationMethodServerTrust, let trust = space.serverTrust,
-              Self.isThisMac(space.host) else { return (.performDefaultHandling, nil) }
-        return (.useCredential, URLCredential(trust: trust))
+        var credential: URLCredential?
+        switch space.authenticationMethod {
+        case NSURLAuthenticationMethodServerTrust:
+            if let trust = space.serverTrust, Self.isThisMac(space.host) { credential = URLCredential(trust: trust) }
+        case NSURLAuthenticationMethodHTTPBasic, NSURLAuthenticationMethodHTTPDigest,
+             NSURLAuthenticationMethodNTLM, NSURLAuthenticationMethodNegotiate:
+            credential = Self.savedLogin(for: challenge)
+            if credential == nil { credential = await askForLogin(challenge) }
+        case NSURLAuthenticationMethodClientCertificate:
+            // A site that names no issuer would take any certificate, and
+            // with it who you are: that one is never sent without asking.
+            let names = space.distinguishedNames ?? []
+            let identities = await Self.identities(issuedBy: names)
+            var identity = names.isEmpty || identities.count != 1 ? nil : identities.first
+            if identity == nil, !identities.isEmpty { identity = await chooseCertificate(identities) }
+            credential = identity.map { URLCredential(identity: $0, certificates: nil, persistence: .forSession) }
+        default:
+            break
+        }
+        return credential.map { (.useCredential, $0) } ?? (.performDefaultHandling, nil)
     }
+
+    /// The password WebKit offers for a sign-in, or the one the Mac keeps for
+    /// the place; none once it has been turned down, which would only go
+    /// round again.
+    nonisolated static func savedLogin(for challenge: URLAuthenticationChallenge) -> URLCredential? {
+        guard challenge.previousFailureCount == 0 else { return nil }
+        return [challenge.proposedCredential, URLCredentialStorage.shared.defaultCredential(for: challenge.protectionSpace)]
+            .lazy.compactMap(\.self).first(where: \.hasPassword)
+    }
+
+    /// Certificates with their key in the keychain, issued under one of
+    /// `names` (each a DER distinguished name), or every one with none.
+    @concurrent nonisolated static func identities(issuedBy names: [Data]) async -> [SecIdentity] {
+        var query: [CFString: Any] = [kSecClass: kSecClassIdentity, kSecMatchLimit: kSecMatchLimitAll, kSecReturnRef: true]
+        if !names.isEmpty { query[kSecMatchIssuers] = names }
+        var found: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &found) == errSecSuccess else { return [] }
+        return found as? [SecIdentity] ?? []
+    }
+
+    /// The sheet asking for a site's name and password when none is saved,
+    /// to be designed with the owner. Until then the page shows the site's
+    /// own answer to no sign-in.
+    private func askForLogin(_ challenge: URLAuthenticationChallenge) async -> URLCredential? { nil }
+
+    /// The sheet choosing among certificates the site would take, to be
+    /// designed with the owner. Until then none is sent.
+    private func chooseCertificate(_ identities: [SecIdentity]) async -> SecIdentity? { nil }
 
     /// localhost and its names, and the loopback addresses (127.x.x.x, ::1).
     /// macOS answers every name under localhost with this Mac itself. Digits

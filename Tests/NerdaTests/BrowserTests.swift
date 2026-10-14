@@ -455,6 +455,26 @@ func onlyThisMacIsTrustedAsItIs(host: String, trusted: Bool) {
     #expect(Browser.isThisMac(host) == trusted)
 }
 
+/// A site's sign-in takes the password offered for it, but not one it has
+/// just turned down; with none, it is the page's to answer.
+@Test func aSignInTakesASavedPasswordOnce() {
+    final class Sender: NSObject, URLAuthenticationChallengeSender {
+        func use(_ credential: URLCredential, for challenge: URLAuthenticationChallenge) {}
+        func continueWithoutCredential(for challenge: URLAuthenticationChallenge) {}
+        func cancel(_ challenge: URLAuthenticationChallenge) {}
+    }
+    let space = URLProtectionSpace(host: "\(UUID().uuidString).test", port: 443, protocol: "https",
+                                   realm: "Staff", authenticationMethod: NSURLAuthenticationMethodHTTPBasic)
+    func challenge(_ credential: URLCredential?, failures: Int) -> URLAuthenticationChallenge {
+        URLAuthenticationChallenge(protectionSpace: space, proposedCredential: credential, previousFailureCount: failures,
+                                   failureResponse: nil, error: nil, sender: Sender())
+    }
+    let saved = URLCredential(user: "kamron", password: "secret", persistence: .forSession)
+    #expect(Browser.savedLogin(for: challenge(saved, failures: 0)) == saved)
+    #expect(Browser.savedLogin(for: challenge(saved, failures: 1)) == nil)
+    #expect(Browser.savedLogin(for: challenge(nil, failures: 0)) == nil)
+}
+
 /// A frame from another site than the page's downloads only after a click
 /// in it; one of the page's own site, by itself too.
 @Test(arguments: [
