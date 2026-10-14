@@ -817,11 +817,26 @@ extension Browser: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         tab(for: webView)?.departureApproved = false
+        show(error, in: webView, opening: navigation)
+    }
+
+    /// A page that breaks off after it began to show (the connection lost
+    /// halfway) says why too, rather than staying half drawn.
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        show(error, in: webView, opening: navigation)
+    }
+
+    private func show(_ error: Error, in webView: WKWebView, opening navigation: WKNavigation?) {
         let error = error as NSError
-        // Stopped, overtaken by another load, or turned into a download: nothing went wrong.
-        if error.code == NSURLErrorCancelled || (error.domain == "WebKitErrorDomain" && error.code == 102) { return }
-        guard let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL else { return }
-        tab(for: webView)?.failure = (url, error.localizedDescription)
+        // Stopped, overtaken by another load, turned into a download (WebKit's
+        // 102), or handed to a plug-in (204): nothing went wrong.
+        if error.code == NSURLErrorCancelled || (error.domain == "WebKitErrorDomain" && [102, 204].contains(error.code)) { return }
+        // Not every error says its address: then it is the one being opened,
+        // as the page had it when it set off, or the one on show.
+        guard let tab = tab(for: webView) else { return }
+        let setOff = tab.loading.flatMap { $0.navigation === navigation ? $0.site : nil }
+        guard let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL ?? setOff ?? webView.url ?? tab.site else { return }
+        tab.failure = (url, error.localizedDescription)
     }
 
     /// A certificate the Mac doesn't trust is refused, as ever, except on this

@@ -1046,6 +1046,21 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     #expect(tab.failure == nil)
 }
 
+/// A page that breaks off once it has begun to show says why, at its own
+/// address when the error gives none; one stopped or overtaken says nothing.
+@MainActor
+@Test func aPageThatBreaksOffSaysWhy() {
+    let browser = Browser()
+    browser.open(somewhere)
+    let tab = browser.tabs[0]
+    for (domain, code) in [(NSURLErrorDomain, NSURLErrorCancelled), ("WebKitErrorDomain", 102), ("WebKitErrorDomain", 204)] {
+        browser.webView(tab.webView, didFail: nil, withError: NSError(domain: domain, code: code))
+        #expect(tab.failure == nil)
+    }
+    browser.webView(tab.webView, didFail: nil, withError: NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost))
+    #expect(tab.failure?.url.host == "example.com")
+}
+
 /// A page out of sight that crashes sleeps, and loads when next shown.
 @MainActor
 @Test func aCrashedTabOutOfSightWaitsToBeShown() {

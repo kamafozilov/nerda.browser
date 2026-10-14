@@ -17,6 +17,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - A video in full screen fills the whole screen when the Mac shows scroll bars (a mouse connected, or Always in System Settings), where the page's scroll bar kept a strip down its right.
 - Download Linked File in a link's right-click menu saves the file and lists it in Downloads, where it did nothing.
 - The download button in the bar over a PDF saves the PDF to your downloads folder, or where you choose with Settings › General › Ask where to save each file, and lists it in Downloads. It did nothing.
+- A page that breaks off partway, as when the connection drops, says why, as one that can't be opened at all does, where it stayed half drawn without a word.
 
 ### Security
 
