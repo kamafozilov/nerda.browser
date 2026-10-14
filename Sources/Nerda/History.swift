@@ -18,6 +18,9 @@ final class History {
     /// How long after a change it is written: whatever else changes by then
     /// goes in the same write, and a crash loses no more than that.
     private static let saveDelay: Duration = .seconds(5)
+    /// Visits counted at most: far more than anyone makes, and room to add,
+    /// so a count from a file edited by hand can't overflow and end Nerda.
+    nonisolated static let mostVisits = 1_000_000_000
 
     nonisolated struct Visit: Codable, Equatable, Sendable {
         let url: URL
@@ -161,9 +164,53 @@ final class History {
             try? data.write(to: file.deletingLastPathComponent().appending(path: "history-unreadable.json"))
             return nil
         }
-        let visits = Dictionary(list.map { ($0.url, $0) }) { first, _ in first }
+        var visits: [URL: Visit] = [:]
+        var cleaned = false
+        for saved in list {
+            var visit = saved
+            visit.count = min(max(visit.count, 0), mostVisits)
+            // A name and password an earlier version kept in an address are
+            // taken off, and the page joins the one without them.
+            guard let url = withoutCredentials(saved.url) else {
+                cleaned = true
+                continue
+            }
+            if url != saved.url {
+                visit = Visit(url: url, title: visit.title, count: visit.count, last: visit.last)
+                cleaned = true
+            }
+            visits[visit.url] = visits[visit.url].map { merged($0, visit) } ?? visit
+        }
+        // Written without them at once, not at the next visit.
+        if cleaned { write(Array(visits.values), to: file) }
         let made = indexed(visits, reusing: [:])
         return Loaded(visits: visits, entries: made.entries, index: made.index)
+    }
+
+    /// `url` without a name and password written into it (`https://me:secret@…`):
+    /// they were never part of which page it is, and the history file is no
+    /// place for a password. Nil if they can't be taken off.
+    nonisolated static func withoutCredentials(_ url: URL) -> URL? {
+        guard url.user != nil || url.password != nil else { return url }
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        parts.user = nil
+        parts.password = nil
+        return parts.url
+    }
+
+    /// Two counts of visits together, held to `mostVisits`.
+    nonisolated static func adding(_ count: Int, _ more: Int) -> Int {
+        let sum = count.addingReportingOverflow(more)
+        return sum.overflow ? mostVisits : min(max(sum.partialValue, 0), mostVisits)
+    }
+
+    /// The same page twice: its visits added up, the later date, and a title
+    /// if either had one.
+    nonisolated private static func merged(_ one: Visit, _ other: Visit) -> Visit {
+        var visit = one.last >= other.last ? one : other
+        visit.count = adding(one.count, other.count)
+        if visit.title.isEmpty { visit.title = one.last >= other.last ? other.title : one.title }
+        return visit
     }
 
     /// Takes in what `load` read, waiting for the rest of it if need be:
@@ -182,7 +229,7 @@ final class History {
         for new in meanwhile {
             var visit = new
             if let old = visits[new.url] {
-                visit.count += old.count
+                visit.count = Self.adding(visit.count, old.count)
                 visit.last = max(old.last, new.last)
                 if new.title.isEmpty { visit.title = old.title }
             }
@@ -193,9 +240,9 @@ final class History {
 
     /// A page from the web was opened. Pages on disk, and the like, are not kept.
     func visit(_ url: URL, title: String, at date: Date = .now) {
-        guard ["http", "https"].contains(url.scheme) else { return }
+        guard ["http", "https"].contains(url.scheme), let url = Self.withoutCredentials(url) else { return }
         var visit = visits[url] ?? Visit(url: url, title: "", count: 0, last: date)
-        visit.count += 1
+        visit.count = Self.adding(visit.count, 1)
         visit.last = date
         if !title.isEmpty { visit.title = title }
         visits[url] = visit
@@ -205,9 +252,14 @@ final class History {
 
     /// The page's title came, after the visit, as it does.
     func name(_ url: URL, _ title: String) {
-        guard !title.isEmpty, var visit = visits[url], visit.title != title else { return }
+        guard !title.isEmpty, let url = Self.withoutCredentials(url), var visit = visits[url], visit.title != title
+        else { return }
         visit.title = title
-        visits[url] = visit
+        // Into `visits`' own storage (`@Observable` makes it): the history
+        // page and a new tab's field aren't drawn again at each tick of a
+        // title, but show it the next time they look, opened or as pages
+        // come or go.
+        _visits[url] = visit
         reindex(visit)
         // Written with the next save, not a save of its own: some pages count
         // in their title ("(3) Inbox", a timer), each tick a rewrite of it all.
@@ -217,7 +269,7 @@ final class History {
     /// One page taken out, from the history page.
     func remove(_ url: URL) {
         settle()
-        guard visits.removeValue(forKey: url) != nil else { return }
+        guard let url = Self.withoutCredentials(url), visits.removeValue(forKey: url) != nil else { return }
         if let old = entries.removeValue(forKey: url), var index = built {
             built = nil
             if let at = Self.place(of: old, in: index) { index.remove(at: at) }

@@ -54,13 +54,14 @@ extension Browser {
     /// New tabs aren't saved: they are nowhere. Left on one, or with none to
     /// open, it starts on a new tab, as other browsers do.
     func restore(from file: URL, loadingPins: Bool = Session.loadsPins) {
+        restore(tabs.isEmpty ? Session.read(from: file) : nil, from: file, loadingPins: loadingPins)
+    }
+
+    /// The same, with `session` already read from `file` (`Session.reading`).
+    func restore(_ session: Session?, from file: URL, loadingPins: Bool = Session.loadsPins) {
         sessionFile = file
         defer { if tabs.isEmpty { add(Tab()) } }
-        guard tabs.isEmpty, let data = try? Data(contentsOf: file) else { return }
-        guard let session = try? JSONDecoder().decode(Session.self, from: data) else {
-            try? data.write(to: file.deletingLastPathComponent().appending(path: "session-unreadable.json"))
-            return
-        }
+        guard tabs.isEmpty, let session else { return }
         if !isPrivate { recentlyClosed = Array((session.closed ?? []).suffix(25)) }
         add(session.tabs.map(Tab.init(restoring:)))
         guard !tabs.isEmpty else { return }
@@ -80,10 +81,14 @@ extension Browser {
     }
 
     /// The tabs now, as they would be saved.
-    var session: Session {
+    var session: Session { session(readingEveryPage: true) }
+
+    /// Without `readingEveryPage`, only the page on screen, where scrolling
+    /// happens, and those that went somewhere since are read again.
+    func session(readingEveryPage: Bool) -> Session {
         var session = Session(tabs: [], closed: recentlyClosed.isEmpty ? nil : recentlyClosed)
         for tab in tabs {
-            guard let saved = tab.saved else { continue }
+            guard let saved = tab.saved(readingPage: readingEveryPage || tab.id == selectedID) else { continue }
             if tab.id == selectedID { session.selected = session.tabs.count }
             session.tabs.append(saved)
         }
@@ -96,15 +101,17 @@ extension Browser {
         saveSession(waiting: true)
     }
 
-    /// Only reading the pages' state needs the main thread. Whether anything
-    /// changed is told from the tabs as they are, not from their encoding: a
-    /// sleeping tab's state, the bulk of the file, is the same bytes each time,
-    /// and encoding them all, every few seconds, took tens of ms with 100 tabs.
-    /// What did change is encoded and written after, off the main thread.
+    /// Only reading the pages' state needs the main thread, and only those
+    /// that may have changed are read, but for quitting, when every one is.
+    /// Whether anything changed is told from the tabs as they are, not from
+    /// their encoding: a sleeping tab's state, the bulk of the file, is the
+    /// same bytes each time, and encoding them all, every few seconds, took
+    /// tens of ms with 100 tabs. What did change is encoded and written
+    /// after, off the main thread.
     func saveSession(waiting: Bool) {
         pendingSave?.cancel()
         guard let sessionFile else { return }
-        let session = session
+        let session = session(readingEveryPage: waiting)
         if session != savedSession {
             savedSession = session
             Session.writer.async { [weak self] in
@@ -130,6 +137,42 @@ nonisolated extension Session {
     /// Writes one at a time, in the order asked: a save that waits (quitting)
     /// comes after those on their way, never before.
     static let writer = DispatchQueue(label: "dev.nerda.session", qos: .utility)
+
+    /// What `file` holds, or nil for no file, or one that can't be read: that
+    /// one is set aside, as it may be from a newer version.
+    static func read(from file: URL) -> Session? {
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        guard let session = try? JSONDecoder().decode(Session.self, from: data) else {
+            setAside(data, beside: file)
+            return nil
+        }
+        return session
+    }
+
+    /// Starts reading `file` off the main thread, for launch to go on
+    /// meanwhile; what it gives waits for the reading to end. The tabs'
+    /// pages make it the biggest file read before the window comes up.
+    static func reading(_ file: URL) -> () -> Session? {
+        let done = DispatchGroup()
+        nonisolated(unsafe) var session: Session?
+        DispatchQueue.global(qos: .userInteractive).async(group: done) { session = read(from: file) }
+        return {
+            done.wait()
+            return session
+        }
+    }
+
+    /// A copy of a file that can't be read, dated, beside it; the last few
+    /// are kept, so one set aside isn't lost to the next.
+    static func setAside(_ data: Data, beside file: URL, at date: Date = .now, keeping: Int = 3) {
+        let folder = file.deletingLastPathComponent()
+        let name = "session-unreadable-"
+        let stamp = date.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false).timeSeparator(.omitted))
+        try? data.write(to: folder.appending(path: name + stamp + ".json"))
+        let copies = ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
+            .filter { $0.hasPrefix(name) }.sorted()
+        for old in copies.dropLast(keeping) { try? FileManager.default.removeItem(at: folder.appending(path: old)) }
+    }
 
     /// False if it couldn't be written, to be tried again.
     static func write(_ session: Session, to file: URL) -> Bool {

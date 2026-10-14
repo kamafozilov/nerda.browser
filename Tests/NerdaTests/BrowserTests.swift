@@ -877,7 +877,53 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     let browser = Browser()
     browser.restore(from: file)
     #expect(browser.tabs.count == 1 && browser.selected?.isBlank == true)
-    #expect(FileManager.default.fileExists(atPath: folder.appending(path: "session-unreadable.json").path))
+    let copies = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasPrefix("session-unreadable-") }
+    #expect(copies.count == 1)
+
+    // Each one set aside is dated, and only the last few are kept.
+    let other = folder.appending(path: "other")
+    try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+    let day = Date(timeIntervalSince1970: 1_790_000_000)
+    for minutes in 1...4 {
+        Session.setAside(Data(), beside: other.appending(path: "session.json"), at: day.addingTimeInterval(Double(minutes) * 60))
+    }
+    #expect(try FileManager.default.contentsOfDirectory(atPath: other.path).sorted() == [
+        "session-unreadable-2026-09-21T141520.json", "session-unreadable-2026-09-21T141620.json",
+        "session-unreadable-2026-09-21T141720.json",
+    ])
+}
+
+/// A save reads only the pages that may have changed: the one on screen,
+/// and one that went somewhere since, out of sight or not.
+@MainActor
+@Test func aSaveReadsAgainOnlyPagesThatMoved() async throws {
+    let folder = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let pages = try ["a", "b", "c"].map { name in
+        let page = folder.appending(path: "\(name).html")
+        try "<title>Page \(name)</title><p>\(name)</p>".write(to: page, atomically: true, encoding: .utf8)
+        return page
+    }
+    let browser = Browser()
+    browser.open(pages[0])
+    let behind = browser.tabs[0]
+    try await arrive(behind, at: pages[0])
+    browser.open(pages[2])
+    try await arrive(browser.tabs[0], at: pages[2])
+    let first = browser.session(readingEveryPage: false)
+    #expect(first == browser.session(readingEveryPage: false))
+
+    // Out of sight, it goes on to another page: saved with its history.
+    behind.webView.load(URLRequest(url: pages[1]))
+    try await arrive(behind, at: pages[1])
+    let second = browser.session(readingEveryPage: false)
+    #expect(second.tabs[1].url == pages[1] && second.tabs[1].state != first.tabs[1].state)
+    #expect(second == browser.session)
+
+    let restored = Browser()
+    restored.restore(second, from: folder.appending(path: "session.json"))
+    try await arrive(restored.tabs[1], at: pages[1])
+    #expect(restored.tabs[1].webView.canGoBack)
 }
 
 /// Closing the window closes its tabs, but keeps them for next time, as
@@ -1931,6 +1977,26 @@ private final class BlockerNavigation: NSObject, WKNavigationDelegate {
     #expect(decoded.allSatisfy { $0.count <= 12 })
     #expect(decoded.allSatisfy { part in part.count { ($0["action"] as? [String: String])?["type"] == "ignore-previous-rules" } == exceptions })
     #expect(decoded.reduce(0) { $0 + $1.count { ($0["action"] as? [String: String])?["type"] == "block" } } == 5)
+}
+
+/// Bookmarks are written off the main thread, in the order they changed,
+/// and are there to read again once what is on its way is waited for.
+@MainActor
+@Test func bookmarksAreWrittenInTheBackground() throws {
+    let folder = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appending(path: "bookmarks.json")
+    let bookmarks = Bookmarks()
+    bookmarks.load(from: file)
+    let a = Bookmarks.Item(title: "a", url: somewhere)
+    bookmarks.add(a)
+    bookmarks.add(Bookmarks.Item(title: "b", url: somewhere))
+    bookmarks.rename(a.id, to: "renamed")
+    Bookmarks.writer.sync {}
+
+    let again = Bookmarks()
+    again.load(from: file)
+    #expect(again.items == bookmarks.items && again.items.map(\.title) == ["renamed", "b"])
 }
 
 /// Bookmarks go into folders and out again, and are put where a drop aims,

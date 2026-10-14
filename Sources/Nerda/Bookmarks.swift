@@ -49,8 +49,18 @@ final class Bookmarks {
         self.items = items
     }
 
+    /// Encoded and written off the main thread, as History is: a folder
+    /// opened or a bookmark dragged is a write of them all.
     private func save() {
         guard let file else { return }
+        let items = items
+        Self.writer.async { Self.write(items, to: file) }
+    }
+
+    /// Writes one at a time, in the order asked; quitting waits for it.
+    nonisolated static let writer = DispatchQueue(label: "dev.nerda.bookmarks", qos: .utility)
+
+    nonisolated private static func write(_ items: [Item], to file: URL) {
         do {
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(items).write(to: file, options: .atomic)

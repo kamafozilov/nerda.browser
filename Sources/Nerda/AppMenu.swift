@@ -577,6 +577,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func save(waiting: Bool = true) {
         browser.saveSession()
         History.shared.save(waiting: waiting)
+        // Written as they change: only what is on its way is waited for.
+        if waiting { Bookmarks.writer.sync {} }
     }
 
     /// The toolbar is empty: in full screen it goes with the menu bar, rather

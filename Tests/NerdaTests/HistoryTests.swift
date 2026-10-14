@@ -139,3 +139,76 @@ private func historyFile() throws -> URL {
         == ["https://www.youtube.com/", "https://www.google.com/search?q=yo", "https://www.google.com/search?q=yoga"])
     #expect(history.sites(startingWith: "yo", limit: 1).map(\.url.absoluteString) == ["https://www.youtube.com/"])
 }
+
+/// A name and password written into an address never reach the history
+/// file, and those an earlier version kept leave it as soon as it is read.
+@MainActor
+@Test func historyKeepsNoPasswordsInAddresses() throws {
+    let file = try historyFile()
+    defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+    let page = URL(string: "https://example.com/admin")!
+    let history = History()
+    history.load(from: file)
+    history.visit(URL(string: "https://me:secret@example.com/admin")!, title: "")
+    history.name(URL(string: "https://me:secret@example.com/admin")!, "Admin")
+    history.save()
+    #expect(history.visits.keys.map(\.absoluteString) == [page.absoluteString])
+    #expect(history.visits[page]?.title == "Admin")
+    #expect(!String(decoding: try Data(contentsOf: file), as: UTF8.self).contains("secret"))
+
+    // Kept with them by an earlier version: joined to the page without them,
+    // and written again at once, nothing else visited.
+    let old = [History.Visit(url: URL(string: "https://me:secret@old.example/")!, title: "Old", count: 2, last: .now),
+               History.Visit(url: URL(string: "https://old.example/")!, title: "", count: 3, last: .now.addingTimeInterval(-60))]
+    try JSONEncoder().encode(old).write(to: file)
+    let loaded = History()
+    loaded.load(from: file)
+    #expect(loaded.visits[URL(string: "https://old.example/")!] == History.Visit(
+        url: URL(string: "https://old.example/")!, title: "Old", count: 5, last: old[0].last))
+    #expect(!String(decoding: try Data(contentsOf: file), as: UTF8.self).contains("secret"))
+}
+
+/// Counts from a file edited by hand are held to a sane range, and added
+/// to without overflowing.
+@MainActor
+@Test func historyCountsCantOverflow() throws {
+    let file = try historyFile()
+    defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+    let big = URL(string: "https://big.example/")!, negative = URL(string: "https://negative.example/")!
+    try JSONEncoder().encode([History.Visit(url: big, title: "Big", count: .max, last: .now),
+                              History.Visit(url: negative, title: "Negative", count: -5, last: .now)]).write(to: file)
+    let history = History()
+    history.load(from: file)
+    history.visit(big, title: "Big")
+    #expect(history.visits[big]?.count == History.mostVisits)
+    #expect(history.visits[negative]?.count == 0)
+
+    // Pages visited while it is read are added to what was read.
+    try JSONEncoder().encode([History.Visit(url: big, title: "Big", count: .max, last: .now)]).write(to: file)
+    let meanwhile = History()
+    meanwhile.load(from: file, waiting: false)
+    meanwhile.visit(big, title: "")
+    meanwhile.settle()
+    #expect(meanwhile.visits[big]?.count == History.mostVisits)
+}
+
+/// A page's new title doesn't draw again the views that list pages, as a
+/// page counting in its title would at every tick; they find it the next
+/// time they look. A new page does draw them again.
+@MainActor
+@Test func aNewTitleDoesntRedrawWhatListsPages() {
+    let history = History()
+    let page = URL(string: "https://mail.example/")!
+    history.visit(page, title: "Inbox")
+    final class Flag: @unchecked Sendable { var raised = false }
+    let told = Flag()
+    withObservationTracking { _ = history.recent(10) } onChange: { told.raised = true }
+    history.name(page, "(3) Inbox")
+    #expect(!told.raised)
+    #expect(history.recent(1).first?.title == "(3) Inbox")
+    #expect(history.pages(containing: ["(3)"]).count == 1)
+    #expect(history.visits[page]?.title == "(3) Inbox")
+
+    history.visit(URL(string: "https://other.example/")!, title: "Other")
+    #expect(told.raised)
+}

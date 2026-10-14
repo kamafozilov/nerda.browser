@@ -22,6 +22,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Security
 
 - A frame from another site inside a page, such as an ad, can start a download only after you click in it, as in Chrome. A page's own downloads start as before.
+- History no longer keeps a name and password written into an address, as in `https://name:password@example.com`; those an earlier version kept are taken out of it the next time Nerda opens.
 
 ## [0.0.22] - 2026-10-07
 
