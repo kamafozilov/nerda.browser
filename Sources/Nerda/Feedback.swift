@@ -104,7 +104,7 @@ final class Feedback: NSObject, MXMetricManagerSubscriber {
         alert.accessoryView = Self.preview(body)
         let answer = { (answer: NSApplication.ModalResponse) in
             guard answer == .alertFirstButtonReturn else { return }
-            withAnimation(.slide) { browser.open(url) }
+            withAnimation(.slide) { _ = browser.open(url) }
             sent()
         }
         if let window = browser.window { alert.beginSheetModal(for: window, completionHandler: answer) }

@@ -173,7 +173,7 @@ private func saved(_ host: String, pinned: Bool = false) -> Session.Tab {
     browser.open(URL(string: "about:blank")!)
     let asking = browser.open(URL(string: "data:text/html,<title>waiting</title>")!, inBackground: true)
     try await until { asking.title == "waiting" }
-    asking.webView.evaluateJavaScript("setTimeout(() => { confirm('Leave?'); document.title = 'answered'; })", completionHandler: nil)
+    _ = try await asking.webView.evaluateJavaScript("setTimeout(() => { confirm('Leave?'); document.title = 'answered'; })")
     try await Task.sleep(for: .milliseconds(300))
     #expect(asking.title == "waiting")
 

@@ -590,7 +590,7 @@ extension Browser {
     /// ⌥⌘U: the page's source, in a tab of its own beside it.
     func viewSource() {
         guard let site = selected?.site, site.scheme != ViewSource.scheme, let url = ViewSource.url(for: site) else { return }
-        withAnimation(.slide) { open(url) }
+        withAnimation(.slide) { _ = open(url) }
     }
 
     /// ⌥⌘R: Responsive Design Mode on, at the page's own size, or off.
@@ -602,7 +602,7 @@ extension Browser {
     /// Somewhere picked from the switcher or the History menu: on the new tab
     /// on screen, if that is where you are, or else in a tab of its own.
     func go(to url: URL) {
-        if let tab = selected, tab.isBlank { tab.go(to: url) } else { withAnimation(.slide) { open(url) } }
+        if let tab = selected, tab.isBlank { tab.go(to: url) } else { withAnimation(.slide) { _ = open(url) } }
     }
 
     func showCommandBar() {

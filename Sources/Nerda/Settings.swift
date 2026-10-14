@@ -979,13 +979,13 @@ private struct SettingsCheckbox: ToggleStyle {
 
 /// Configure, by Manage filters: the filter lists, opened under it.
 private struct FiltersButton: View {
-    @Environment(\.openDropdown) private var open
+    @Environment(\.dropdown) private var dropdown
     @State private var frame = CGRect.zero
 
     var body: some View {
         Button {
-            open(Dropdown(anchor: frame, below: true, options: [], selected: nil, choose: { _ in },
-                          panel: (AnyView(FiltersPanel()), CGSize(width: 330, height: 440))))
+            dropdown.wrappedValue = Dropdown(anchor: frame, below: true, options: [], selected: nil, choose: { _ in },
+                                             panel: (AnyView(FiltersPanel()), CGSize(width: 330, height: 440)))
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "slider.horizontal.3")
@@ -1807,7 +1807,7 @@ private struct Grip: View {
 /// which is chosen, and what choosing does. Drawn over everything by the
 /// settings (`DropdownPanel`), so no card or dialog cuts it off.
 struct Dropdown {
-    static let space = "settings"
+    nonisolated static let space = "settings"
 
     let anchor: CGRect
     /// Under the button (to add something), or over it, the chosen one where it was.
@@ -1832,7 +1832,8 @@ struct DropdownOption {
 }
 
 extension EnvironmentValues {
-    @Entry var openDropdown: (Dropdown) -> Void = { _ in }
+    /// Where a `DropdownButton` puts its list (`dropdownHost`).
+    @Entry var dropdown: Binding<Dropdown?> = .constant(nil)
 }
 
 extension View {
@@ -1846,7 +1847,7 @@ extension View {
     /// Where the `DropdownButton`s in it open their lists: over all of it.
     func dropdownHost(_ dropdown: Binding<Dropdown?>) -> some View {
         coordinateSpace(.named(Dropdown.space))
-            .environment(\.openDropdown) { dropdown.wrappedValue = $0 }
+            .environment(\.dropdown, dropdown)
             .overlay(alignment: .topLeading) {
                 if let open = dropdown.wrappedValue { DropdownPanel(dropdown: open) { dropdown.wrappedValue = nil } }
             }
@@ -1868,13 +1869,13 @@ private struct DropdownButton: View {
     var fill = false
     let choose: (String) -> Void
 
-    @Environment(\.openDropdown) private var open
+    @Environment(\.dropdown) private var dropdown
     @State private var frame = CGRect.zero
 
     var body: some View {
         Button {
-            open(Dropdown(anchor: frame, below: below, options: options,
-                          selected: selected, choose: choose))
+            dropdown.wrappedValue = Dropdown(anchor: frame, below: below, options: options,
+                                             selected: selected, choose: choose)
         } label: {
             HStack(spacing: 6) {
                 if let icon { Image(systemName: icon) }

@@ -3262,7 +3262,9 @@ enum ExtensionShims {
         // without this. One turned off or removed is never started again by
         // a keep that arrives after it went.
         case "background.keep":
-            if owner.contexts[id] === context, context.webExtension.hasBackgroundContent { context.loadBackgroundContent { _ in } }
+            // Not waited for: WebKit sometimes never answers (see background.wake).
+            func keep() { context.loadBackgroundContent { _ in } }
+            if owner.contexts[id] === context, context.webExtension.hasBackgroundContent { keep() }
             return nil
         // Whether this extension was loaded before in this run of the
         // browser — an "install" then is really a restart (see the shim).

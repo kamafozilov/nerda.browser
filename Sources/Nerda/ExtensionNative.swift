@@ -110,8 +110,12 @@ enum ExtensionNative {
                 // counts.
                 if beating == nil {
                     beating = Timer.scheduledTimer(withTimeInterval: 25, repeats: true) { timer in
-                        guard !port.isDisconnected else { timer.invalidate(); return }
-                        port.sendMessage(["__nerdaNative": "alive"], completionHandler: nil)
+                        let open = MainActor.assumeIsolated {
+                            guard !port.isDisconnected else { return false }
+                            port.sendMessage(["__nerdaNative": "alive"], completionHandler: nil)
+                            return true
+                        }
+                        if !open { timer.invalidate() }
                     }
                 }
                 return

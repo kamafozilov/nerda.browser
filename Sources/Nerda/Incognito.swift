@@ -31,7 +31,7 @@ enum Windows {
         }
         watchForAway()
         if let url, let last = incognito.last {
-            withAnimation(.slide) { last.browser.open(url) }
+            withAnimation(.slide) { _ = last.browser.open(url) }
             return last.window.makeKeyAndOrderFront(nil)
         }
         let browser = Browser(dataStore: incognito.first?.browser.dataStore ?? .nonPersistent())
