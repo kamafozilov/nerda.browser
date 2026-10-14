@@ -1,3 +1,4 @@
+import SecurityInterface
 import SwiftUI
 @preconcurrency import Translation
 import WebKit
@@ -126,6 +127,9 @@ final class Browser: NSObject {
     @ObservationIgnored private var retried: URL?
     /// The sites left to http this session; an incognito window's its own.
     @ObservationIgnored var httpsUpgrade = HTTPSUpgrade()
+    /// The certificate chosen for each host this session, sent from then on
+    /// without asking, as in Safari; an incognito window's its own.
+    @ObservationIgnored var chosenCertificates: [String: SecIdentity] = [:]
     /// The frames whose navigation under way a click or a key in the page
     /// started, by WebKit's handle for each (see `mayDownload`).
     @ObservationIgnored private var clickedFrames: Set<NSObject> = []
@@ -295,7 +299,7 @@ final class Browser: NSObject {
     /// The keyboard back on the page on screen, once something of ours
     /// that had it (a field) is done with it.
     func focusPage() {
-        if let page = selected.flatMap({ $0.reader ?? $0.page }) { page.window?.makeFirstResponder(page) }
+        if let page = selected?.shown { page.window?.makeFirstResponder(page) }
     }
 
     /// Puts a tab at `position` among the pinned tabs, or among the rest
@@ -445,7 +449,7 @@ final class Browser: NSObject {
     private func find(step: Int) {
         findTyping?.cancel()
         // Reader's article, while it shows.
-        guard let page = selected.flatMap({ $0.reader ?? $0.page }), !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return clearFound() }
+        guard let page = selected?.shown, !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return clearFound() }
         if foundOn !== page { clearFound() }
         foundOn = page
         let query = findQuery
@@ -537,6 +541,19 @@ extension Browser: WKUIDelegate {
             if ["http", "https"].contains(url.scheme?.lowercased() ?? "") { Windows.openIncognito(url) }
             return nil
         }
+        let opener = tab(for: webView)
+        // A window opened by the page itself, on load or on a timer, would
+        // take you away to it: only one from a click or a key opens, unless
+        // the site may open them all. The rest are kept for the address bar
+        // to tell of and open after all, as Safari's Block and Notify. An
+        // extension's pages open theirs as they always have, and so does
+        // a link opened from its right-click menu.
+        if ask == nil, opener?.madeFor == nil, !siteSettings.options(for: opener?.site).allowsPopups, !Self.clicked(action) {
+            if let opener {
+                opener.blockedPopups = Array((opener.blockedPopups + [action.request.url ?? URL(string: "about:blank")!]).suffix(20))
+            }
+            return nil
+        }
         // Open Link in New Tab: behind this one, as a ⌘-click's; one that
         // waits to be shown is made without the page WebKit asks for.
         if ask == .behind, Self.backgroundTabsWait, let url = action.request.url,
@@ -544,9 +561,33 @@ extension Browser: WKUIDelegate {
             withAnimation(.slide) { _ = openBehind(url) }
             return nil
         }
-        let tab = Tab(configuration: configuration, opener: tab(for: webView))
+        let tab = Tab(configuration: configuration, opener: opener)
         withAnimation(.slide) { add(tab, inBackground: ask == .behind) }
         return tab.webView
+    }
+
+    /// The windows the tab's page was kept from opening that can still be
+    /// opened, each in a tab of its own that hands back to the page when it
+    /// closes. Those its script was to fill can't be: the script has moved on.
+    func showBlockedPopups(of tab: Tab) {
+        let addresses = tab.blockedPopups.filter { ["http", "https"].contains($0.scheme?.lowercased() ?? "") }
+        tab.blockedPopups = []
+        for url in addresses {
+            let popup = Tab()
+            popup.opener = tab.id
+            withAnimation(.slide) { add(popup) }
+            popup.go(to: url)
+        }
+    }
+
+    /// Always Allow on This Site: its windows open from now on, and those just
+    /// kept back open now.
+    func allowPopups(of tab: Tab) {
+        guard let site = tab.site else { return }
+        var options = siteSettings.options(for: site)
+        options.allowsPopups = true
+        changeSiteOptions(options, for: site)
+        showBlockedPopups(of: tab)
     }
 
     func webViewDidClose(_ webView: WKWebView) {
@@ -568,7 +609,7 @@ extension Browser: WKUIDelegate {
                  defaultText: String?, initiatedByFrame frame: WKFrameInfo) async -> String? {
         let field = NSTextField(string: defaultText ?? "")
         field.frame.size.width = 280
-        let answer = await ask(Self.says(frame), prompt, over: webView, buttons: ["OK", "Cancel"], field: field)
+        let answer = await ask(Self.says(frame), prompt, over: webView, buttons: ["OK", "Cancel"], accessory: field, focus: field)
         return answer == .alertFirstButtonReturn ? field.stringValue : nil
     }
 
@@ -587,17 +628,43 @@ extension Browser: WKUIDelegate {
     }
 
     /// A sheet over the page, once its tab is on screen: a question should
-    /// show what it is about.
-    private func ask(_ title: String, _ message: String, over webView: WKWebView,
-                     buttons: [String] = ["OK"], field: NSTextField? = nil) async -> NSApplication.ModalResponse {
+    /// show what it is about. `whileThere`: cancelled once the page has
+    /// gone on without an answer (`left`), rather than left over the next.
+    private func ask(_ title: String, _ message: String, over webView: WKWebView, buttons: [String] = ["OK"],
+                     accessory: NSView? = nil, focus: NSView? = nil, whileThere: Bool = false) async -> NSApplication.ModalResponse {
         guard let window = await window(showing: webView) else { return .cancel }
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
         buttons.forEach { alert.addButton(withTitle: $0) }
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
+        alert.accessoryView = accessory
+        alert.window.initialFirstResponder = focus
+        // Tab goes through the fields of the accessory, then the buttons.
+        alert.window.autorecalculatesKeyViewLoop = true
+        let watch = whileThere ? Task {
+            await left(webView)
+            if !Task.isCancelled { window.endSheet(alert.window, returnCode: .cancel) }
+        } : nil
+        defer { watch?.cancel() }
         return await alert.beginSheetModal(for: window)
+    }
+
+    /// Returns once the page has gone on from where it was: to another
+    /// address (typed, a redirect, its script), stopped loading, as when
+    /// WebKit gives up the load, or let go of, asleep or with its tab.
+    func left(_ webView: WKWebView) async {
+        guard let tab = tab(for: webView) else { return }
+        let url = tab.url, loading = tab.isLoading
+        while tab.page === webView, tabs.contains(where: { $0 === tab }), tab.url == url, tab.isLoading || !loading {
+            await withCheckedContinuation { changed in
+                withObservationTracking {
+                    _ = (tab.url, tab.isLoading, tab.isAsleep, tabs)
+                } onChange: {
+                    changed.resume()
+                }
+            }
+            if Task.isCancelled { return }
+        }
     }
 
     /// The page's own window, once its tab is the one on screen. A page out of
@@ -883,6 +950,7 @@ extension Browser: WKNavigationDelegate {
         }
         if HTTPSUpgrade.isOn, let url = webView.url { httpsUpgrade.committed(url) }
         tab.failure = nil
+        if !tab.blockedPopups.isEmpty { tab.blockedPopups = [] }
         tab.recordVisit()
         hideChoices(on: tab)
         // A new document has nothing on show.
@@ -938,16 +1006,60 @@ extension Browser: WKNavigationDelegate {
         guard let tab = tab(for: webView) else { return }
         let setOff = tab.loading.flatMap { $0.navigation === navigation ? $0.site : nil }
         guard let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL ?? setOff ?? webView.url ?? tab.site else { return }
-        tab.failure = (url, error.localizedDescription)
+        guard error.domain == NSURLErrorDomain else {
+            return tab.failure = Tab.Failure(url: url, message: error.localizedDescription)
+        }
+        let host = url.host(percentEncoded: false) ?? ""
+        // Turned away by the server, not just not reached: under the error, the socket's own.
+        let socket = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        let refused = socket?.domain == NSPOSIXErrorDomain && socket?.code == Int(ECONNREFUSED)
+        let offline = error.code == NSURLErrorNotConnectedToInternet
+        if offline {
+            Task {
+                await Online.back()
+                if tab.failure?.offline == true, tab.failure?.url == url, tab.page === webView { tab.reload() }
+            }
+        }
+        // The secure connection failing, or the server's certificate (-1200 to -1204).
+        let certificate = (NSURLErrorServerCertificateNotYetValid...NSURLErrorSecureConnectionFailed).contains(error.code)
+        guard certificate, let trust = Self.trust(of: error, host: host) else {
+            let message = Tab.Failure.reason(code: error.code, host: host, refused: refused) ?? error.localizedDescription
+            return tab.failure = Tab.Failure(url: url, message: message, offline: offline)
+        }
+        // A certificate is looked at closer, to say what is wrong with it.
+        let chain = (SecTrustCopyCertificateChain(trust) as? [SecCertificate] ?? []).map { SecCertificateCopyData($0) as Data }
+        Task {
+            let problem = await Tab.Failure.problem(chain: chain, host: host)
+            // A load set off meanwhile has its own say.
+            guard tab.page === webView, navigation == nil || tab.loading?.navigation === navigation else { return }
+            let message = Tab.Failure.reason(code: error.code, host: host, certificate: problem) ?? error.localizedDescription
+            tab.failure = Tab.Failure(url: url, message: message, trust: trust)
+        }
+    }
+
+    /// The certificate a site gave, as WebKit hands it over with the error:
+    /// its trust, or else its chain, checked as a server's for `host`.
+    private static func trust(of error: NSError, host: String) -> SecTrust? {
+        if let value = error.userInfo[NSURLErrorFailingURLPeerTrustErrorKey] as AnyObject?,
+           CFGetTypeID(value) == SecTrustGetTypeID() {
+            return (value as! SecTrust)
+        }
+        let chain = (error.userInfo["NSErrorPeerCertificateChainKey"] as? [AnyObject] ?? [])
+            .filter { CFGetTypeID($0) == SecCertificateGetTypeID() }.map { $0 as! SecCertificate }
+        var trust: SecTrust?
+        guard !chain.isEmpty, SecTrustCreateWithCertificates(chain as CFArray, SecPolicyCreateSSL(true, host as CFString),
+                                                             &trust) == errSecSuccess else { return nil }
+        return trust
     }
 
     /// A certificate the Mac doesn't trust is refused, as ever, except on this
     /// Mac itself: a local server with a certificate of its own, as developers
     /// run, opens, as Chrome and Search let it. Nothing can be in between there.
     /// A site's own sign-in (Basic, Digest, NTLM, Kerberos) takes the password
-    /// already saved for it, and a site asking who you are by certificate the
-    /// one in the keychain from an issuer it names, when there is one only.
-    /// Without an answer WebKit goes on as it would: the page is never stopped.
+    /// already saved for it, or asks for one, and a site asking who you are
+    /// by certificate the one chosen for it this session, or else asks which,
+    /// even with only one: a certificate tells the site who you are. Without
+    /// an answer WebKit goes on as it would: the page is never stopped.
     func webView(_ webView: WKWebView, respondTo challenge: URLAuthenticationChallenge) async
         -> (URLSession.AuthChallengeDisposition, URLCredential?) {
         let space = challenge.protectionSpace
@@ -958,14 +1070,15 @@ extension Browser: WKNavigationDelegate {
         case NSURLAuthenticationMethodHTTPBasic, NSURLAuthenticationMethodHTTPDigest,
              NSURLAuthenticationMethodNTLM, NSURLAuthenticationMethodNegotiate:
             credential = Self.savedLogin(for: challenge)
-            if credential == nil { credential = await askForLogin(challenge) }
+            if credential == nil { credential = await askForLogin(challenge, on: webView) }
         case NSURLAuthenticationMethodClientCertificate:
-            // A site that names no issuer would take any certificate, and
-            // with it who you are: that one is never sent without asking.
-            let names = space.distinguishedNames ?? []
-            let identities = await Self.identities(issuedBy: names)
-            var identity = names.isEmpty || identities.count != 1 ? nil : identities.first
-            if identity == nil, !identities.isEmpty { identity = await chooseCertificate(identities) }
+            let host = space.host.lowercased()
+            let identities = await Self.identities(issuedBy: space.distinguishedNames ?? [])
+            var identity = chosenCertificates[host].flatMap { chosen in identities.first { CFEqual($0, chosen) } }
+            if identity == nil, !identities.isEmpty {
+                identity = await chooseCertificate(identities, for: space.host, on: webView)
+                if let identity { chosenCertificates[host] = identity }
+            }
             credential = identity.map { URLCredential(identity: $0, certificates: nil, persistence: .forSession) }
         default:
             break
@@ -992,14 +1105,92 @@ extension Browser: WKNavigationDelegate {
         return found as? [SecIdentity] ?? []
     }
 
-    /// The sheet asking for a site's name and password when none is saved,
-    /// to be designed with the owner. Until then the page shows the site's
-    /// own answer to no sign-in.
-    private func askForLogin(_ challenge: URLAuthenticationChallenge) async -> URLCredential? { nil }
+    /// Safari's sheet for a site's own sign-in, over its page once its tab is
+    /// on screen: filled in with the account saved for that very host and
+    /// port (`loginKey`), or after a wrong password, with the name just tried.
+    /// A password that gets in is offered to keep, as one typed into a page
+    /// is (`signInLanded`); a proxy's is neither filled in nor offered.
+    /// Cancelled, the page shows the site's own answer to no sign-in; the
+    /// sheet goes by itself once the tab has gone on without it.
+    private func askForLogin(_ challenge: URLAuthenticationChallenge, on webView: WKWebView) async -> URLCredential? {
+        let space = challenge.protectionSpace
+        let key = Self.loginKey(for: space)
+        let clear = space.protocol == NSURLProtectionSpaceHTTP
+        // Asked again: the last try was turned down, and is nothing to keep.
+        let tried = tab(for: webView)?.signIn
+        tab(for: webView)?.signIn = nil
+        guard await window(showing: webView) != nil else { return nil }
+        var user = ""
+        var password = ""
+        if challenge.previousFailureCount > 0 {
+            user = challenge.proposedCredential?.user ?? (key != nil && tried?.host == key ? tried?.user : nil) ?? ""
+        } else if Passwords.fills, let key,
+                  let account = await vault.accounts(for: key, clear: clear).first(where: { $0.host == key }) {
+            user = account.user
+            password = await vault.password(for: account) ?? ""
+        }
 
-    /// The sheet choosing among certificates the site would take, to be
-    /// designed with the owner. Until then none is sent.
-    private func chooseCertificate(_ identities: [SecIdentity]) async -> SecIdentity? { nil }
+        let name = NSTextField(string: user)
+        let secret = NSSecureTextField(string: password)
+        name.setAccessibilityLabel("User Name")
+        secret.setAccessibilityLabel("Password")
+        for field in [name, secret] { field.widthAnchor.constraint(equalToConstant: 200).isActive = true }
+        let form = NSGridView(views: [[NSTextField(labelWithString: "User Name:"), name],
+                                      [NSTextField(labelWithString: "Password:"), secret]])
+        form.rowAlignment = .firstBaseline
+        form.column(at: 0).xPlacement = .trailing
+        form.rowSpacing = 8
+        form.frame.size = form.fittingSize
+
+        let (title, note) = Self.loginText(for: space)
+        let answer = await ask(title, note, over: webView, buttons: ["Log In", "Cancel"],
+                               accessory: form, focus: user.isEmpty ? name : secret, whileThere: true)
+        guard answer == .alertFirstButtonReturn else { return nil }
+        if let key, !secret.stringValue.isEmpty, let tab = tab(for: webView) {
+            tab.signIn = SentSignIn(host: key, user: name.stringValue, password: secret.stringValue, clear: clear, at: .now)
+        }
+        return URLCredential(user: name.stringValue, password: secret.stringValue, persistence: .forSession)
+    }
+
+    /// Where a site's sign-in is saved and filled in from: its host, with
+    /// the port when it isn't the scheme's own, as two servers of one site
+    /// (a router's pages and its printer's) each have their own. None for a
+    /// proxy, whose password is not a site's to keep or offer.
+    nonisolated static func loginKey(for space: URLProtectionSpace) -> String? {
+        space.isProxy() ? nil : Site.key(place(of: space))
+    }
+
+    /// The host, with its port when it isn't the scheme's own.
+    private nonisolated static func place(of space: URLProtectionSpace) -> String {
+        guard space.port > 0, ["http": 80, "https": 443][space.protocol?.lowercased() ?? ""] != space.port else { return space.host }
+        return "\(space.host):\(space.port)"
+    }
+
+    /// What the sign-in sheet says: where you log in, and whether the
+    /// password goes there in the clear.
+    nonisolated static func loginText(for space: URLProtectionSpace) -> (title: String, note: String) {
+        let place = space.isProxy() ? "proxy \(place(of: space))" : place(of: space)
+        return ("Log in to \(place)", space.receivesCredentialSecurely
+                ? "Your login information will be sent securely."
+                : "Your login information will not be sent securely.")
+    }
+
+    /// The Mac's own sheet for choosing among the certificates the site would
+    /// take, each with its name, issuer and expiry, as Safari shows it: over
+    /// the page once its tab is on screen. Cancelled, none is sent.
+    private func chooseCertificate(_ identities: [SecIdentity], for host: String, on webView: WKWebView) async -> SecIdentity? {
+        guard let window = await window(showing: webView), let panel = SFChooseIdentityPanel.shared() else { return nil }
+        panel.setInformativeText("Choose the certificate to use with this site, then click Continue.")
+        panel.setDefaultButtonTitle("Continue")
+        panel.setAlternateButtonTitle("Cancel")
+        let end = SheetEnd()
+        let chosen = await withCheckedContinuation { done in
+            end.done = { done.resume(returning: $0 == NSApplication.ModalResponse.OK.rawValue) }
+            panel.beginSheet(for: window, modalDelegate: end, didEnd: #selector(SheetEnd.sheetDidEnd(_:returnCode:contextInfo:)),
+                             contextInfo: nil, identities: identities, message: "\(host) asks for a certificate to identify you.")
+        }
+        return withExtendedLifetime(end) { chosen ? panel.identity()?.takeUnretainedValue() : nil }
+    }
 
     /// localhost and its names, and the loopback addresses (127.x.x.x, ::1).
     /// macOS answers every name under localhost with this Mac itself. Digits
@@ -1029,13 +1220,24 @@ extension Browser: WKNavigationDelegate {
         // Nothing is left to protect: closing or quitting needn't ask.
         tab.hasUnsavedWork = false
         if again || edited, let url = webView.url ?? tab.site {
-            tab.failure = (url, again ? "The page crashed each time it was opened."
-                                      : "The page crashed. Changes you made in it may not have been saved.")
+            tab.failure = Tab.Failure(url: url, message: again ? "The page crashed each time it was opened."
+                                                               : "The page crashed. Changes you made in it may not have been saved.")
         } else if tab.id == selectedID {
             webView.reload()
         } else {
             tab.sleep()
         }
+    }
+}
+
+/// Hears a SecurityInterface sheet end, which it tells by selector, as
+/// sheets did before blocks.
+final class SheetEnd: NSObject {
+    var done: ((Int) -> Void)?
+
+    @objc func sheetDidEnd(_ sheet: NSWindow, returnCode: Int, contextInfo: UnsafeMutableRawPointer?) {
+        done?(returnCode)
+        done = nil
     }
 }
 

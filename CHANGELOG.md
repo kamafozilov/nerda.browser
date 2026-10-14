@@ -9,6 +9,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Added
 
+- A site that asks you to log in before it opens, as a router or a company's intranet does, asks in a sheet over its page, filled in with the password you saved for it. A wrong password asks again with your user name kept, and one that gets you in is offered to save, as one typed into a page is.
 - Translate a page in a language that isn't one of yours with the Translate button at the end of the address bar, or View › Translation, as in Safari. It is translated on your Mac, nothing is sent anywhere, and the tab goes on translating the pages you open in it until you choose Show Original.
 - Find on Page (⌘F) shows how many matches there are ("3 of 12"), lights every one of them on the page, the one on show in yellow, and brings it to the middle of the window. The magnifying glass in the find bar has Match Case and Whole Words, as in Safari, and remembers them.
 - Reader, as in Safari: on an article, the Reader button beside the address shows it alone, in plain type that follows light and dark, without the menus, ads and comments round it. Click it again, or use View › Show Reader (⌃⌘R), to go back to the page as you left it.
@@ -16,9 +17,12 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Settings › Tabs › Load background tabs when shown: a link you open behind the page, with ⌘-click, the middle button or Open Link in New Tab, shows its tab at once but loads only when you go to it, so opening many takes no time or memory meanwhile. It is off unless you turn it on, as Safari and Chrome load them at once.
 - AutoFill, as in Safari: click a box of a form for your saved addresses and cards, and pick one to fill in the whole address or card. A card goes in after Touch ID or your Mac's password, and its security code is never saved.
 - After you send a form with a new address, or a new card on a secure page, Nerda offers to save it, never in an incognito window. Settings › AutoFill turns Contact info and Credit cards on or off, and adds, edits or removes them.
+- A site that signs you in with a certificate, as some company and government sites do, asks which of yours from the keychain to send, in a sheet listing each with its issuer and expiry date, as in Safari. The one you choose goes to that site without asking again while its window stays open.
+- A page that tries to open a pop-up window by itself, rather than from your click, shows a button at the end of the address bar: click it to open the pop-up after all, or to always allow pop-ups on that site. Site Settings beside the address has a Pop-ups row to allow or block them for each site.
 
 ### Changed
 
+- A page that can't be opened says why in plain words: no internet, no server at that address, too long to answer, a connection refused, or what is wrong with the site's certificate (expired, for another site, signed by the site itself, or from an issuer your Mac doesn't trust), with Show Certificate to look at it. Reload and Go Back buttons are under it, and a page that failed while your Mac was offline opens by itself once it is back online.
 - Extensions are turned off for now, while they are made faster and more reliable: the extensions button, Settings › Extensions and the Add to Nerda button in the Chrome Web Store are gone. Extensions you installed and their settings are kept for when they come back.
 - Open Link in New Tab, in a link's right-click menu, opens the tab behind the one you're on, as ⌘-click does and as in Safari and Chrome. It said Open Link in New Window and took you to the tab; hold ⌥ with the menu open for Open Link in New Tab and Go to It, which still does.
 - Zoom In (⌘+) and Zoom Out (⌘−) zoom the site, as in Safari, where they zoomed one tab: its other tabs follow, and its pages open at that zoom from then on, until Actual Size (⌘0) forgets it. Site Settings beside the address has the site's Zoom too. An incognito window keeps it only until it closes.

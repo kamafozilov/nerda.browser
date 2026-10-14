@@ -74,6 +74,11 @@ struct AddressBar: View {
                 }
             }
             .padding(.leading, 4)
+            if let tab, !tab.blockedPopups.isEmpty {
+                BlockedPopups(browser: browser, popups: tab.blockedPopups, scheme: scheme)
+                    .id(tab.id)
+                    .padding(.leading, 4)
+            }
             // At the address's end, as Safari's.
             if let tab, tab.pageLanguage != nil, !browser.editingAddress {
                 TranslateButton(tab: tab) { browser.openSettings(.general) }
@@ -219,6 +224,65 @@ private struct AddressField: View {
         if let query = url.query(percentEncoded: false) { rest += "?" + query }
         if let fragment = url.fragment(percentEncoded: false) { rest += "#" + fragment }
         return (site, rest)
+    }
+}
+
+/// At the address's end, as Safari's: the page tried to open a window by
+/// itself and was kept from it. Clicked, it opens what it can of them, or
+/// lets the site open its pop-ups from now on.
+private struct BlockedPopups: View {
+    let browser: Browser
+    let popups: [URL]
+    /// The window's light or dark, as Site Settings has it.
+    let scheme: ColorScheme
+    @State private var shown = false
+
+    var body: some View {
+        // What a script was to fill (about:blank) can't be opened after.
+        let showable = popups.filter { ["http", "https"].contains($0.scheme?.lowercased() ?? "") }
+        BarButton(icon: "rectangle.on.rectangle.slash", help: "Pop-up Blocked") { shown.toggle() }
+            .accessibilityLabel("Pop-up Blocked")
+            .background {
+                Color.clear
+                    .popover(isPresented: $shown, arrowEdge: .bottom) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(popups.count == 1 ? "Pop-up blocked" : "\(popups.count) pop-ups blocked")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Palette.ink)
+                                Text(showable.count == 1 ? showable[0].absoluteString
+                                     : popups.count == 1 ? "This site tried to open a window by itself."
+                                     : "This site tried to open windows by itself.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Palette.muted)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 12)
+                            .padding(.bottom, 6)
+                            Divider().padding(.horizontal, 12).padding(.vertical, 4)
+                            VStack(spacing: 2) {
+                                if !showable.isEmpty {
+                                    PopoverRow(symbol: "arrow.up.forward.app",
+                                               title: showable.count == 1 ? "Show Pop-up" : "Show Pop-ups") {
+                                        shown = false
+                                        if let tab = browser.selected { browser.showBlockedPopups(of: tab) }
+                                    }
+                                }
+                                PopoverRow(symbol: "checkmark.circle", title: "Always Allow on This Site") {
+                                    shown = false
+                                    if let tab = browser.selected { browser.allowPopups(of: tab) }
+                                }
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.bottom, 6)
+                        }
+                        .frame(width: 300)
+                        .popoverGlass()
+                    }
+                    .environment(\.colorScheme, scheme)
+            }
     }
 }
 

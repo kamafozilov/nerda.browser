@@ -57,7 +57,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .passwords: ["autofill", "fill", "save", "never saved", "import", "keychain", "touch id", "accounts", "sign in", "login"]
         case .autofill: ["contact info", "addresses", "credit cards", "debit cards", "payment", "forms", "fill", "name", "email", "phone",
                          "shipping", "billing", "checkout"]
-        case .siteSettings: ["permissions", "camera", "microphone", "location", "notifications", "sites", "allow", "block", "ads"]
+        case .siteSettings: ["permissions", "camera", "microphone", "location", "notifications", "pop-ups", "popups", "sites", "allow", "block", "ads"]
         case .privacy: ["security", "https", "secure connections", "upgrade", "history", "keep history", "delete", "clear", "cookies", "cache", "site data", "ads", "trackers", "adblock", "blocking",
                         "filters", "easylist", "ublock", "adguard", "incognito", "private", "lock"]
         case .extensions: ["chrome web store", "add-ons", "plugins", "unpacked", "developer"] + Extensions.shared.installed.map(\.name)
@@ -681,11 +681,12 @@ private struct SitePermissionsSettings: View {
             case .block: "\(kind.title) blocked"
             }
         }
+        if options.allowsPopups { parts.append("Pop-ups allowed") }
         if !options.blocksAds { parts.append("Ads not blocked") }
         return parts.joined(separator: " · ")
     }
 
-    /// Each permission to pick again, ads, and a way back to what every site gets.
+    /// Each permission to pick again, pop-ups, ads, and a way back to what every site gets.
     private func menu(for url: URL) -> some View {
         let options = settings.resolved(for: url)
         return Menu {
@@ -693,6 +694,10 @@ private struct SitePermissionsSettings: View {
                 Picker(kind.title, selection: Binding(get: { options[keyPath: kind.key] }, set: { change(kind.key, to: $0, for: url) })) {
                     ForEach(kind.choices) { Text($0.title).tag($0) }
                 }
+            }
+            Picker("Pop-ups", selection: Binding(get: { options.allowsPopups }, set: { change(\.allowsPopups, to: $0, for: url) })) {
+                Text(SiteSettings.Permission.allow.title).tag(true)
+                Text(SiteSettings.Permission.block.title).tag(false)
             }
             Toggle("Block Ads and Trackers", isOn: Binding(get: { options.blocksAds }, set: { change(\.blocksAds, to: $0, for: url) }))
             Divider()

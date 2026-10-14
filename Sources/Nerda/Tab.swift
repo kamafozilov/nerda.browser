@@ -1,3 +1,5 @@
+import Network
+import SecurityInterface
 import SwiftUI
 import WebKit
 
@@ -28,7 +30,8 @@ final class Tab: Identifiable {
     private(set) var canGoBack = false
     private(set) var canGoForward = false
     private(set) var progress = 0.0
-    /// The page's zoom, for the sidebar to show while it isn't the one pages open at.
+    /// The zoom of what shows, the page or Reader, for the sidebar to show
+    /// while it isn't the one pages open at.
     private(set) var pageZoom: CGFloat = 1
     /// The colour the page gives its top (its theme colour), or else its
     /// background: the address bar wears it, so it reads as part of the page.
@@ -36,8 +39,12 @@ final class Tab: Identifiable {
     /// Set when the last address could not be opened: the page shows why
     /// instead, and Reload tries that address again. Extensions are told of
     /// the address, as Chrome tells of its error page's.
-    var failure: (url: URL, message: String)? {
-        didSet { if failure?.url != oldValue?.url, Extensions.started { Extensions.shared.changed(self, .URL) } }
+    var failure: Failure? {
+        didSet {
+            if failure?.url != oldValue?.url, Extensions.started { Extensions.shared.changed(self, .URL) }
+            // What shows is why, not the page left under it: nothing to read.
+            if failure != nil { closeReader(checked: false) }
+        }
     }
     /// Kept at the top of the sidebar as a tile, and never put to sleep for
     /// being idle: the sites always open. ⌘W lets its page go, tile and all
@@ -191,15 +198,24 @@ final class Tab: Identifiable {
     var translationTargets: [String] = []
     /// The language chosen to translate into, for the tab's pages from then on.
     var translatedTo: String?
-    /// The page's text is on its way to be translated.
-    var translating = false
+    /// The page's text is on its way to be translated. Once it has all come
+    /// back, Reader, if it shows, reads it too.
+    var translating = false {
+        didSet { if oldValue, !translating, reader != nil { Task { await refreshReader() } } }
+    }
     var hasUnsavedWork = false
     @ObservationIgnored var departureApproved = false
     /// The page reads as an article: the address bar offers Reader (see Reader).
     var readable = false
     /// Reader, open over the page, which stays as it was under it.
-    var reader: ReaderPage?
+    var reader: ReaderPage? {
+        didSet { pageZoom = (reader ?? page)?.pageZoom ?? pageZoom }
+    }
     @ObservationIgnored var readerCheck: Task<Void, Never>?
+    /// Where the windows the page tried to open by itself, and was kept from,
+    /// would have gone (about:blank for one its script was to fill), for the
+    /// address bar to say so; until the next page.
+    var blockedPopups: [URL] = []
 
     /// The page's own title; until it has one, the site's name, or for an
     /// address without one (file:, about:blank), the address itself.
@@ -374,7 +390,7 @@ final class Tab: Identifiable {
                 MainActor.assumeIsolated { self?.progress = page.estimatedProgress }
             },
             page.observe(\.pageZoom, options: .initial) { [weak self] page, _ in
-                MainActor.assumeIsolated { self?.pageZoom = page.pageZoom }
+                MainActor.assumeIsolated { if self?.reader == nil { self?.pageZoom = page.pageZoom } }
             },
             page.observe(\.themeColor) { [weak self] _, _ in
                 MainActor.assumeIsolated { self?.pageRecolored() }
@@ -747,6 +763,19 @@ final class Tab: Identifiable {
         History.shared.visit(url, title: page.title ?? "")
     }
 
+    /// Go Back from a page that couldn't be opened: to the page still under
+    /// it, when a link from there failed, or else back in its history.
+    var canLeaveFailure: Bool { failure != nil && (failedOverPage || canGoBack) }
+
+    func leaveFailure() {
+        if failedOverPage { failure = nil } else { page?.goBack() }
+    }
+
+    private var failedOverPage: Bool {
+        guard let failure, let shown = page?.backForwardList.currentItem?.url else { return false }
+        return shown != failure.url
+    }
+
     /// Reload, or after a failure, another go at the address that failed.
     /// From origin, the page and what it loads are fetched anew, not taken
     /// from the cache.
@@ -804,6 +833,8 @@ final class Tab: Identifiable {
             browser.setZoom(next, for: url)
         } else {
             page.pageZoom = next
+            // Reader has no observer to tell the sidebar.
+            pageZoom = next
         }
     }
 
@@ -924,10 +955,10 @@ final class Tab: Identifiable {
         configuration.setValue(processPool, forKey: "processPool")
         WebNotifications.start(pool: processPool)
         configuration.applicationNameForUserAgent = applicationName
-        // A window a page opens only from a click or a key, as in Safari: on
-        // the Mac, WebKit otherwise lets a page open them whenever it likes,
-        // on load or on a timer, and each one takes you away to it.
-        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        // Every window a page opens is put to the browser, which opens only
+        // those from a click or a key, as Safari does, and tells of the rest
+        // (`Browser.createWebViewWith`). Turned off, WebKit drops them unheard.
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         // WebKit's full screen, under our own (see Fullscreen). Pages a page
         // opens (popups) are given this configuration's, script and all.
         configuration.preferences.isElementFullscreenEnabled = true
@@ -1198,26 +1229,150 @@ private final class PageSlot: NSView {
     required init?(coder: NSCoder) { fatalError() }
 }
 
-/// In place of a page that could not be opened: what went wrong. ⌘R tries again.
+extension Tab {
+    /// Why an address couldn't be opened, as the page in its place says it.
+    struct Failure {
+        let url: URL
+        var message: String
+        /// The Mac was offline: the page opens again once it is back (`Online`).
+        var offline = false
+        /// The certificate the site gave, when it was the trouble, for Show Certificate.
+        var trust: SecTrust?
+
+        enum Certificate { case expired, notYetValid, wrongHost, selfSigned, untrusted }
+
+        /// What went wrong, in plain words, for the errors people meet; nil
+        /// for the rest, which keep WebKit's own words. `refused`: the server
+        /// was reached and turned the connection away.
+        nonisolated static func reason(code: Int, host: String, refused: Bool = false, certificate: Certificate? = nil) -> String? {
+            switch code {
+            case NSURLErrorNotConnectedToInternet:
+                return "Your Mac isn't connected to the internet. The page opens once it is."
+            case NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed:
+                return "Can't find the server at \(host). Check the address for a typo."
+            case NSURLErrorTimedOut:
+                return "\(host) took too long to answer."
+            case NSURLErrorCannotConnectToHost:
+                return refused ? "\(host) refused to connect." : "Can't connect to the server at \(host)."
+            case NSURLErrorNetworkConnectionLost:
+                return "The connection to \(host) was lost."
+            case NSURLErrorSecureConnectionFailed:
+                return "A secure connection to \(host) can't be made."
+            case NSURLErrorServerCertificateHasBadDate, NSURLErrorServerCertificateUntrusted,
+                 NSURLErrorServerCertificateHasUnknownRoot, NSURLErrorServerCertificateNotYetValid:
+                // Without the certificate to look at, what the error itself says.
+                let problem = certificate ?? [NSURLErrorServerCertificateHasBadDate: .expired,
+                                              NSURLErrorServerCertificateNotYetValid: .notYetValid][code] ?? .untrusted
+                return switch problem {
+                case .expired: "The certificate of \(host) has expired."
+                case .notYetValid: "The certificate of \(host) isn't valid yet. Check that your Mac's date and time are right."
+                case .wrongHost: "The certificate is for another site, not \(host)."
+                case .selfSigned: "The certificate of \(host) is signed by the site itself, so your Mac can't check it."
+                case .untrusted: "The certificate of \(host) isn't from an issuer your Mac trusts."
+                }
+            case NSURLErrorClientCertificateRejected:
+                return "\(host) didn't accept your certificate."
+            case NSURLErrorClientCertificateRequired:
+                return "\(host) asks for a certificate to identify you, and none was sent."
+            case NSURLErrorFileDoesNotExist:
+                return "There's no file at this address."
+            default:
+                return nil
+            }
+        }
+
+        /// What is wrong with the certificates a site gave (each as DER, the
+        /// site's own first), by the Mac's own check of them as a server's for
+        /// `host`, off the main thread: it may wait on the network.
+        @concurrent nonisolated static func problem(chain: [Data], host: String) async -> Certificate {
+            let certificates = chain.compactMap { SecCertificateCreateWithData(nil, $0 as CFData) }
+            var trust: SecTrust?
+            guard let leaf = certificates.first,
+                  SecTrustCreateWithCertificates(certificates as CFArray, SecPolicyCreateSSL(true, host as CFString),
+                                                 &trust) == errSecSuccess, let trust else { return .untrusted }
+            var error: CFError?
+            guard !SecTrustEvaluateWithError(trust, &error) else { return .untrusted }
+            switch error.map(CFErrorGetCode) {
+            case Int(errSecCertificateExpired): return .expired
+            case Int(errSecCertificateNotValidYet): return .notYetValid
+            case Int(errSecHostNameMismatch): return .wrongHost
+            default:
+                guard let subject = SecCertificateCopyNormalizedSubjectSequence(leaf) as Data? else { return .untrusted }
+                return subject == SecCertificateCopyNormalizedIssuerSequence(leaf) as Data? ? .selfSigned : .untrusted
+            }
+        }
+    }
+}
+
+/// Whether the Mac can reach a network, for a page that failed for want of
+/// one: it opens again once the Mac is back online, as in Chrome.
+enum Online {
+    private static var wasOnline: Bool?
+    private static var waiting: [CheckedContinuation<Void, Never>] = []
+    /// Started at the first wait, and kept: it costs next to nothing.
+    private static let monitor: NWPathMonitor = {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { path in
+            let online = path.status == .satisfied
+            MainActor.assumeIsolated { changed(online) }
+        }
+        monitor.start(queue: .main)
+        return monitor
+    }()
+
+    /// Returns when the Mac comes back online from offline. Not at once when
+    /// it is online already: a page that failed then would only fail again.
+    static func back() async {
+        _ = monitor
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    private static func changed(_ online: Bool) {
+        defer { wasOnline = online }
+        guard online, wasOnline == false else { return }
+        let back = waiting
+        waiting = []
+        for wait in back { wait.resume() }
+    }
+}
+
+/// In place of a page that could not be opened: what went wrong, and what
+/// can be done about it, as Safari's and Chrome's say.
 struct PageFailure: View {
-    let message: String
+    /// The buttons find the tab when pressed, as the address bar's do.
+    let browser: Browser
+    let failure: Tab.Failure
 
     var body: some View {
         VStack(spacing: 8) {
             Text("Can't Open This Page")
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(Palette.ink)
-            Text(message)
+            Text(failure.message)
                 .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(.center)
-            Text("Press ⌘R to try again.")
-                .font(.callout)
-                .foregroundStyle(Palette.muted)
-                .padding(.top, 8)
+            HStack(spacing: 8) {
+                if failure.trust != nil, browser.window != nil {
+                    PromptButton(title: "Show Certificate", action: showCertificate)
+                }
+                if browser.selected?.canLeaveFailure == true {
+                    PromptButton(title: "Go Back") { browser.selected?.leaveFailure() }
+                }
+                PromptButton(title: "Reload", prominent: true) { browser.selected?.reload() }
+                    .help("Reload  ⌘R")
+            }
+            .padding(.top, 8)
         }
         .frame(maxWidth: 420)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.ground)
+    }
+
+    /// The Mac's own sheet of the certificate and the chain above it, as Safari shows.
+    private func showCertificate() {
+        guard let trust = failure.trust, let window = browser.window else { return }
+        SFCertificatePanel.shared()?.beginSheet(for: window, modalDelegate: nil, didEnd: nil, contextInfo: nil,
+                                                trust: trust, showGroup: true)
     }
 }
 

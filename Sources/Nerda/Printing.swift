@@ -5,19 +5,21 @@ import WebKit
 /// (`window.print()`): the page laid out in pages as the Mac prints it, in a
 /// sheet over its window.
 extension Browser {
-    /// The page on screen, in the Mac's print sheet.
+    /// The page on screen, or Reader's article while it shows, as Safari
+    /// prints it, in the Mac's print sheet.
     func printPage() {
-        guard let page = selected?.page, let window = page.window, window.attachedSheet == nil else { return }
+        guard let page = selected?.shown, let window = page.window, window.attachedSheet == nil else { return }
         Printing.run(Printing.operation(for: page), over: window)
     }
 
-    /// The page on screen in pages, as it would print, saved as a PDF where you choose.
+    /// The page on screen, or Reader's article, in pages as it would print,
+    /// saved as a PDF where you choose.
     func exportPDF() {
-        guard let tab = selected, let page = tab.page, let window = page.window, window.attachedSheet == nil else { return }
+        guard let tab = selected, let page = tab.shown, let window = page.window, window.attachedSheet == nil else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.pdf]
         panel.directoryURL = Downloads.folder
-        panel.nameFieldStringValue = Printing.fileName(for: tab.title)
+        panel.nameFieldStringValue = Printing.fileName(for: tab.reader?.title ?? tab.title)
         panel.beginSheetModal(for: window) { answer in
             guard answer == .OK, let file = panel.url else { return }
             let info = Printing.info()

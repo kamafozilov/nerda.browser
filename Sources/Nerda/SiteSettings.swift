@@ -77,6 +77,8 @@ final class SiteSettings {
         var microphone = Permission.ask
         var location = Permission.ask
         var notifications = Permission.ask
+        /// Windows the site opens by itself, not from a click, open too.
+        var allowsPopups = false
     }
     /// Each site with a choice of its own, by origin.
     private(set) var sites: [String: Options]
@@ -213,6 +215,7 @@ extension SiteSettings.Options {
         microphone = try saved.decodeIfPresent(SiteSettings.Permission.self, forKey: .microphone) ?? options.microphone
         location = try saved.decodeIfPresent(SiteSettings.Permission.self, forKey: .location) ?? options.location
         notifications = try saved.decodeIfPresent(SiteSettings.Permission.self, forKey: .notifications) ?? options.notifications
+        allowsPopups = try saved.decodeIfPresent(Bool.self, forKey: .allowsPopups) ?? options.allowsPopups
     }
 }
 
@@ -460,6 +463,13 @@ private struct SitePanel: View {
                                    selection: Binding(get: { permission }, set: { change(kind.key, to: $0) }))
                     }
                 }
+                // Never asked: a site opening a window by itself doesn't wait
+                // for an answer. Allowed here, or from the address bar.
+                SettingRow(symbol: options.allowsPopups ? "rectangle.on.rectangle" : "rectangle.on.rectangle.slash", title: "Pop-ups") {
+                    ChoiceMenu(title: "Pop-ups", choices: [SiteSettings.Permission.allow, .block], name: \.title, standard: .block,
+                               selection: Binding(get: { options.allowsPopups ? .allow : .block },
+                                                  set: { change(\.allowsPopups, to: $0 == .allow) }))
+                }
             }
             .padding(.horizontal, 6)
             Divider().padding(.horizontal, 12).padding(.vertical, 4)
@@ -634,7 +644,7 @@ private struct PermissionPrompt: View {
     }
 }
 
-private struct PromptButton: View {
+struct PromptButton: View {
     let title: String
     var prominent = false
     let action: () -> Void

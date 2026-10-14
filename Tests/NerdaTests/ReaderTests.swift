@@ -157,3 +157,170 @@ func readerIsNotOfferedForOtherPages(_ html: String) async throws {
     #expect(tab.page === page)
     #expect(try await page.callAsyncJavaScript("return window.still", contentWorld: .page) as? Bool == true)
 }
+
+/// An address that can't be opened, typed over an article in Reader, shows
+/// why with no Reader button: the article left under the error isn't
+/// offered, then or once the tab is back at its address.
+@MainActor
+@Test func aPageThatFailsOffersNoReader() async throws {
+    let (browser, tab, _) = try await shownReader()
+    defer { browser.closeAll() }
+    tab.go(to: URL(string: "https://127.0.0.1:1/")!)
+    for _ in 0..<250 where tab.failure == nil { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(tab.failure != nil)
+    #expect(tab.reader == nil)
+    #expect(!tab.readable)
+    // The page's own check, a second after its address went back.
+    try await Task.sleep(for: .milliseconds(1500))
+    #expect(!tab.readable)
+}
+
+/// A tab with the article in Reader, its article in.
+@MainActor
+private func shownReader() async throws -> (Browser, Nerda.Tab, ReaderPage) {
+    let browser = Browser(dataStore: .nonPersistent())
+    let tab = Tab()
+    browser.add(tab)
+    tab.webView.loadHTMLString(article, baseURL: address)
+    for _ in 0..<250 where !tab.readable { try await Task.sleep(for: .milliseconds(20)) }
+    await tab.toggleReader()
+    let reader = try #require(tab.reader)
+    for _ in 0..<250 where !reader.loaded || reader.isLoading {
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    return (browser, tab, reader)
+}
+
+/// What Reader's text reads, from a world of the test's own.
+@MainActor
+private func text(of reader: ReaderPage) async -> String {
+    (try? await reader.callAsyncJavaScript("return document.body.textContent", contentWorld: .defaultClient) as? String) ?? ""
+}
+
+/// Stands in for WebKit's own Open Link in New Window.
+private final class LinkOpener: NSObject {
+    @objc func open(_ sender: Any?) {}
+}
+
+/// A link followed without a click, as the right-click menu's Open Link is.
+private final class MenuAction: WKNavigationAction {
+    let url: URL
+    init(_ url: URL) { self.url = url }
+    override var request: URLRequest { URLRequest(url: url) }
+    override var navigationType: WKNavigationType { .other }
+    override var modifierFlags: NSEvent.ModifierFlags { [] }
+    override var buttonNumber: Int { 0 }
+}
+
+/// A link's right-click menu in Reader is a page's: Open Link in New Tab
+/// leaves the tab behind, ⌥'s Go to It goes there, and Open Link goes in
+/// the tab itself, leaving Reader.
+@MainActor
+@Test func readerLinksOpenFromTheMenuAsOnThePage() async throws {
+    _ = NSApplication.shared
+    let (browser, tab, reader) = try await shownReader()
+    let front = browser.selectedID
+    let menu = NSMenu()
+    let opener = LinkOpener()
+    let item = NSMenuItem(title: "Open Link in New Window", action: #selector(LinkOpener.open(_:)), keyEquivalent: "")
+    item.identifier = NSUserInterfaceItemIdentifier("WKMenuItemIdentifierOpenLinkInNewWindow")
+    item.target = opener
+    menu.addItem(item)
+    let event = try #require(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                                windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    reader.willOpenMenu(menu, with: event)
+    #expect(menu.items.prefix(2).map(\.title) == ["Open Link in New Tab", "Open Link in New Tab and Go to It"])
+
+    let link = URL(string: "https://news.example.com/2026/09/the-start")!
+    func open() {
+        _ = reader.uiDelegate?.webView?(reader, createWebViewWith: reader.configuration, for: MenuAction(link),
+                                        windowFeatures: WKWindowFeatures())
+    }
+    menu.performActionForItem(at: 0)
+    open()
+    #expect(browser.tabs.count == 2)
+    #expect(browser.selectedID == front)
+    menu.performActionForItem(at: 1)
+    open()
+    #expect(browser.tabs.count == 3)
+    #expect(browser.selectedID != front)
+
+    let links = try #require(reader.navigationDelegate as? Reader.Links)
+    #expect(await links.webView(reader, decidePolicyFor: MenuAction(link)) == .cancel)
+    #expect(tab.url == link)
+    #expect(tab.reader == nil)
+}
+
+/// File › Print… while Reader shows prints the article, as Safari does, not the page under it.
+@MainActor
+@Test func printingWhileReaderShowsPrintsTheArticle() async throws {
+    let (_, tab, reader) = try await shownReader()
+    #expect(tab.shown === reader)
+    #expect(Printing.operation(for: try #require(tab.shown)).jobTitle == "A Long Walk")
+    await tab.toggleReader()
+    #expect(tab.shown === tab.page)
+}
+
+/// ⌘+ in Reader zooms the article alone, and the sidebar's badge says how
+/// far; the page under it keeps its site's zoom.
+@MainActor
+@Test func readerZoomsOnItsOwn() async throws {
+    let (_, tab, reader) = try await shownReader()
+    let page = try #require(tab.page)
+    let before = page.pageZoom
+    tab.zoom(1)
+    #expect(reader.pageZoom > before)
+    #expect(page.pageZoom == before)
+    #expect(tab.pageZoom == reader.pageZoom)
+    await tab.toggleReader()
+    #expect(tab.pageZoom == before)
+}
+
+/// A page translated while Reader shows: Reader reads it as translated, in
+/// the language it went into, once its text has come back, and then the
+/// page's own words again with Show Original.
+@MainActor
+@Test func readerReadsThePageAsTranslated() async throws {
+    let (_, tab, reader) = try await shownReader()
+    let page = try #require(tab.page)
+    tab.pageLanguage = "en"
+    tab.translationTargets = ["de"]
+    tab.translatedTo = "de"
+    let translate = "for (const p of document.querySelectorAll('p')) p.firstChild.data = p.firstChild.data.replace(from, to)"
+    _ = try await page.callAsyncJavaScript(translate, arguments: ["from": "First,", "to": "Erstens,"], contentWorld: .defaultClient)
+    tab.translating = true
+    tab.translating = false
+    for _ in 0..<100 where !(await text(of: reader)).contains("Erstens,") { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(await text(of: reader).contains("Erstens,"))
+    #expect(try await reader.callAsyncJavaScript("return document.documentElement.lang", contentWorld: .defaultClient) as? String == "de")
+    #expect(tab.reader === reader)
+
+    _ = try await page.callAsyncJavaScript(translate, arguments: ["from": "Erstens,", "to": "First,"], contentWorld: .defaultClient)
+    tab.showOriginal()
+    for _ in 0..<100 where (await text(of: reader)).contains("Erstens,") { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(await text(of: reader).contains("First, The road"))
+    #expect(try await reader.callAsyncJavaScript("return document.documentElement.lang", contentWorld: .defaultClient) as? String == "en")
+}
+
+/// Find on Page in Reader counts the article's matches, selects the one on
+/// show and lights them, the one on show in Safari's yellow, as on a page.
+@MainActor
+@Test func findInReaderLightsTheMatches() async throws {
+    let (browser, _, reader) = try await shownReader()
+    browser.showFindBar()
+    browser.findQuery = "road"
+    browser.find()
+    for _ in 0..<100 where browser.findMatches == nil { try await Task.sleep(for: .milliseconds(20)) }
+    let count = try #require(browser.findMatches?.count)
+    #expect(count > 1)
+    #expect(browser.findMatches?.index == 1)
+    let lit = try await reader.callAsyncJavaScript("""
+        return [CSS.highlights.get('nerda-find')?.size ?? 0, CSS.highlights.get('nerda-find-current')?.size ?? 0,
+                getSelection().toString(), getComputedStyle(document.body, '::highlight(nerda-find-current)').backgroundColor]
+        """, contentWorld: .defaultClient) as? [Any]
+    #expect(lit?[0] as? Int == count)
+    #expect(lit?[1] as? Int == 1)
+    #expect(lit?[2] as? String == "road")
+    #expect(lit?[3] as? String == "rgb(255, 214, 10)")
+    browser.hideFindBar()
+}
