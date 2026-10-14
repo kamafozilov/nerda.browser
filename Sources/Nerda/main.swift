@@ -395,6 +395,10 @@ private struct PageCard: View {
                 PasswordOfferBar(browser: browser, offer: offer)
                     .padding(.top, 12)
                     .transition(.opacity.combined(with: .move(edge: .top)))
+            } else if let offer = browser.autofillOffers.first(where: { $0.tab == browser.selectedID }) {
+                AutoFillOfferBar(browser: browser, offer: offer)
+                    .padding(.top, 12)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .overlay(alignment: .topLeading) {

@@ -100,6 +100,8 @@ final class Browser: NSObject {
     /// sign-in's password offered to keep (see Passwords).
     var passwordChoices: PasswordChoices?
     var passwordOffer: PasswordOffer?
+    /// Addresses and cards a form sent, offered to keep one at a time (see AutoFill).
+    var autofillOffers: [AutoFillOffer] = []
     /// Counts what changes the list, so an answer from the keychain that
     /// comes after the caret has moved on is let go.
     @ObservationIgnored var choicesAsked = 0
@@ -343,6 +345,7 @@ final class Browser: NSObject {
         }
         tabs.remove(at: index)
         if passwordOffer?.tab == id { passwordOffer = nil }
+        autofillOffers.removeAll { $0.tab == id }
         if selectedID == id {
             selectedID = recent.last?.id ?? (tabs.indices.contains(index) ? tabs[index].id : tabs.last?.id)
         }
@@ -382,7 +385,8 @@ final class Browser: NSObject {
     /// Closing the window closes its tabs, as Safari does: nothing keeps
     /// playing, or holding memory, behind a window that is gone. They are
     /// still saved, as Chrome keeps its last window: they come back with the
-    /// window, or at the next launch.
+    /// window, or at the next launch. A password or card offered to keep
+    /// goes too, rather than stay in memory with no window to show it.
     func closeAll() {
         saveSession()
         sessionFile = nil
@@ -390,6 +394,9 @@ final class Browser: NSObject {
         tabs.removeAll()
         selectedID = nil
         commandBarOpen = false
+        passwordChoices = nil
+        passwordOffer = nil
+        autofillOffers = []
     }
 
     /// The sidebar's list: the tabs not pinned, nor a bookmark's.
@@ -902,7 +909,10 @@ extension Browser: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         tab(for: webView)?.pageDidLoad()
         tab(for: webView)?.checkReadable()
-        if let tab = tab(for: webView) { signInLanded(on: tab) }
+        if let tab = tab(for: webView) {
+            signInLanded(on: tab)
+            formLanded(on: tab)
+        }
         WebStore.tell(webView)
         sessionChanged()
     }
