@@ -212,3 +212,33 @@ private func historyFile() throws -> URL {
     history.visit(URL(string: "https://other.example/")!, title: "Other")
     #expect(told.raised)
 }
+
+/// Typing doesn't wait for history: the rows for what was typed before stay
+/// up until those for what is typed now are looked up off the main thread,
+/// the same rows as found at once. A look cancelled by typing on gives up.
+@MainActor
+@Test func historyIsLookedUpAsYouTypeWithoutWaiting() async {
+    let history = History()
+    for _ in 1...2 { history.visit(URL(string: "https://www.youtube.com/")!, title: "YouTube") }
+    history.visit(URL(string: "https://www.youtube.com/watch?v=1")!, title: "Your video")
+    let found = CommandBar.Found()
+    let yo = CommandBar.suggestions(for: "yo", guesses: [], history: history, found: found)
+    let you = CommandBar.suggestions(for: "you", guesses: [], history: history)
+    #expect(you.map(\.url.absoluteString) == ["https://www.youtube.com/", "https://www.google.com/search?q=you",
+                                              "https://www.youtube.com/watch?v=1"])
+
+    #expect(CommandBar.suggestions(for: "you", guesses: [], history: history, found: found, waiting: false).map(\.url)
+        == yo.map(\.url))
+    let looked = await CommandBar.lookUp("you", in: history.snapshot)
+    #expect(CommandBar.suggestions(for: "you", guesses: [], history: history, found: CommandBar.Found("you", looked),
+                                   waiting: false).map(\.url) == you.map(\.url))
+
+    // The sites you went to last don't stay up under what is typed.
+    let recent = CommandBar.Found()
+    #expect(!CommandBar.suggestions(for: "", guesses: [], history: history, found: recent).isEmpty)
+    #expect(CommandBar.suggestions(for: "you", guesses: [], history: history, found: recent, waiting: false).isEmpty)
+
+    let cancelled = Task { await CommandBar.lookUp("you", in: history.snapshot) }
+    cancelled.cancel()
+    #expect(await cancelled.value.rows.map(\.url.absoluteString) == ["https://www.google.com/search?q=you"])
+}

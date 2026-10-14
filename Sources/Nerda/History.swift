@@ -14,7 +14,7 @@ final class History {
     static let file = Edition.folder.appending(path: "history.json")
     nonisolated static let limit = 20_000
     /// How quickly a visit counts for less: half as much two weeks on.
-    private static let halfLife: TimeInterval = 14 * 24 * 60 * 60
+    nonisolated private static let halfLife: TimeInterval = 14 * 24 * 60 * 60
     /// How long after a change it is written: whatever else changes by then
     /// goes in the same write, and a crash loses no more than that.
     private static let saveDelay: Duration = .seconds(5)
@@ -42,7 +42,7 @@ final class History {
 
     /// A page as what is typed is matched against it: its site, and its title
     /// and address with case and accents folded away, as bytes to look through.
-    nonisolated private final class Entry: Sendable {
+    nonisolated fileprivate final class Entry: Sendable {
         let visit: Visit
         let site: String?
         let text: [UInt8]
@@ -351,73 +351,98 @@ final class History {
         index.prefix(count).map(\.visit)
     }
 
-    /// The sites visited last, latest first, each once: as the page of it
-    /// last seen, to go back to where you were.
-    func recentSites(_ count: Int) -> [Visit] {
-        var seen = Set<String>()
-        var sites: [Visit] = []
-        for entry in index {
-            guard sites.count < count else { break }
-            if seen.insert(entry.site ?? entry.visit.url.absoluteString).inserted { sites.append(entry.visit) }
-        }
-        return sites
-    }
-
-    /// The sites you go to whose name starts with `text` ("yo" for
-    /// youtube.com), or with nothing typed, all of them, most used first, the
-    /// first `limit` of them. Each as its front page, whichever pages of it
-    /// were visited.
+    /// The sites you go to whose name starts with `text`; see `Snapshot`.
     func sites(startingWith text: String, limit: Int = .max, now: Date = .now) -> [Visit] {
-        let typed = text.lowercased()
-        let prefix = typed.hasPrefix("www.") ? String(typed.dropFirst(4)) : typed
-        // Each site added up as its pages go by, each page scored once: a
-        // site you use has thousands. Its best page gives its address; its
-        // front page, the latest, its title.
-        var bySite: [String: (best: Visit, bestScore: Double, score: Double, count: Int, last: Date, front: String?)] = [:]
-        for entry in index {
-            guard let site = entry.site, site.hasPrefix(prefix) else { continue }
-            let score = score(entry.visit, now)
-            let front = entry.isFront ? entry.visit.title : nil
-            guard var found = bySite[site] else {
-                bySite[site] = (entry.visit, score, score, entry.visit.count, entry.visit.last, front)
-                continue
-            }
-            if score > found.bestScore { (found.best, found.bestScore) = (entry.visit, score) }
-            found.score += score
-            found.count += entry.visit.count
-            found.last = max(found.last, entry.visit.last)
-            found.front = found.front ?? front
-            bySite[site] = found
-        }
-        return bySite.values.sorted { $0.score > $1.score }.prefix(limit).map { site in
-            var root = URLComponents()
-            root.scheme = site.best.url.scheme
-            root.host = site.best.url.host()
-            root.port = site.best.url.port
-            root.path = "/"
-            return Visit(url: root.url ?? site.best.url, title: site.front ?? "", count: site.count, last: site.last)
-        }
+        snapshot.sites(startingWith: text, limit: limit, now: now)
     }
 
-    /// Pages with every word of `text` starting a word of their title or
-    /// address, most used first, the first `limit` of them: "swi" finds
-    /// Swift, "wift" doesn't.
+    /// Pages with every word of `text` starting a word of theirs; see `Snapshot`.
     func pages(matching text: String, limit: Int = .max, now: Date = .now) -> [Visit] {
-        // Typed with punctuation in it ("swift-book"), a word is found anywhere.
-        let words = Self.fold(text).split(separator: " ").map {
-            (bytes: Array($0.utf8), anywhere: !$0.allSatisfy { $0.isLetter || $0.isNumber })
+        snapshot.pages(matching: text, limit: limit, now: now)
+    }
+
+    /// The pages as they are now, to look through off the main thread, as
+    /// the address bar does as you type.
+    var snapshot: Snapshot { Snapshot(index: index) }
+
+    /// Every page, latest first, as `index` was when it was taken. Its
+    /// entries never change once made, so it is safe to share across threads.
+    /// Looking for sites or pages gives up, with nothing, once the task
+    /// asking is cancelled (typing on): what it would find is no longer wanted.
+    nonisolated struct Snapshot: Sendable {
+        fileprivate let index: [Entry]
+
+        /// The sites visited last, latest first, each once: as the page of it
+        /// last seen, to go back to where you were.
+        func recentSites(_ count: Int) -> [Visit] {
+            var seen = Set<String>()
+            var sites: [Visit] = []
+            for entry in index {
+                guard sites.count < count else { break }
+                if seen.insert(entry.site ?? entry.visit.url.absoluteString).inserted { sites.append(entry.visit) }
+            }
+            return sites
         }
-        guard !words.isEmpty else { return [] }
-        // The best `limit` kept in order as they are found, rather than all sorted.
-        // ponytail: insertion, O(pages × limit); fine for the few rows asked for.
-        var best: [(visit: Visit, score: Double)] = []
-        for entry in index where words.allSatisfy({ Self.find($0.bytes, in: entry.text, anywhere: $0.anywhere) }) {
-            let score = score(entry.visit, now)
-            guard best.count < limit || score > best[best.count - 1].score else { continue }
-            best.insert((entry.visit, score), at: best.firstIndex { $0.score < score } ?? best.count)
-            if best.count > limit { best.removeLast() }
+
+        /// The sites you go to whose name starts with `text` ("yo" for
+        /// youtube.com), or with nothing typed, all of them, most used first, the
+        /// first `limit` of them. Each as its front page, whichever pages of it
+        /// were visited.
+        func sites(startingWith text: String, limit: Int = .max, now: Date = .now) -> [Visit] {
+            let typed = text.lowercased()
+            let prefix = typed.hasPrefix("www.") ? String(typed.dropFirst(4)) : typed
+            // Each site added up as its pages go by, each page scored once: a
+            // site you use has thousands. Its best page gives its address; its
+            // front page, the latest, its title.
+            var bySite: [String: (best: Visit, bestScore: Double, score: Double, count: Int, last: Date, front: String?)] = [:]
+            for (n, entry) in index.enumerated() {
+                if n % 1024 == 0, Task.isCancelled { return [] }
+                guard let site = entry.site, site.hasPrefix(prefix) else { continue }
+                let score = History.score(entry.visit, now)
+                let front = entry.isFront ? entry.visit.title : nil
+                guard var found = bySite[site] else {
+                    bySite[site] = (entry.visit, score, score, entry.visit.count, entry.visit.last, front)
+                    continue
+                }
+                if score > found.bestScore { (found.best, found.bestScore) = (entry.visit, score) }
+                found.score += score
+                found.count += entry.visit.count
+                found.last = max(found.last, entry.visit.last)
+                found.front = found.front ?? front
+                bySite[site] = found
+            }
+            return bySite.values.sorted { $0.score > $1.score }.prefix(limit).map { site in
+                var root = URLComponents()
+                root.scheme = site.best.url.scheme
+                root.host = site.best.url.host()
+                root.port = site.best.url.port
+                root.path = "/"
+                return Visit(url: root.url ?? site.best.url, title: site.front ?? "", count: site.count, last: site.last)
+            }
         }
-        return best.map(\.visit)
+
+        /// Pages with every word of `text` starting a word of their title or
+        /// address, most used first, the first `limit` of them: "swi" finds
+        /// Swift, "wift" doesn't.
+        func pages(matching text: String, limit: Int = .max, now: Date = .now) -> [Visit] {
+            // Typed with punctuation in it ("swift-book"), a word is found anywhere.
+            let words = History.fold(text).split(separator: " ").map {
+                (bytes: Array($0.utf8), anywhere: !$0.allSatisfy { $0.isLetter || $0.isNumber })
+            }
+            guard !words.isEmpty else { return [] }
+            // The best `limit` kept in order as they are found, rather than all sorted.
+            // ponytail: insertion, O(pages × limit); fine for the few rows asked for.
+            var best: [(visit: Visit, score: Double)] = []
+            for (n, entry) in index.enumerated() {
+                if n % 1024 == 0, Task.isCancelled { return [] }
+                guard words.allSatisfy({ History.find($0.bytes, in: entry.text, anywhere: $0.anywhere) }) else { continue }
+                let score = History.score(entry.visit, now)
+                guard best.count < limit || score > best[best.count - 1].score else { continue }
+                best.insert((entry.visit, score), at: best.firstIndex { $0.score < score } ?? best.count)
+                if best.count > limit { best.removeLast() }
+            }
+            return best.map(\.visit)
+        }
     }
 
     /// Pages with each of `words` anywhere in their title or address, case
@@ -464,7 +489,7 @@ final class History {
     }
 
     /// Visits, counted for less the longer ago the last was.
-    private func score(_ visit: Visit, _ now: Date) -> Double {
+    nonisolated private static func score(_ visit: Visit, _ now: Date) -> Double {
         Double(visit.count) * pow(0.5, max(0, now.timeIntervalSince(visit.last)) / Self.halfLife)
     }
 
