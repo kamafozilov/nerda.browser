@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+@preconcurrency import Translation
 import os
 
 /// The whole window: the sidebar, and the page beside it, on the window's
@@ -193,6 +194,12 @@ struct BrowserView: View {
             if browser.locked { IncognitoLock() }
         }
         .ignoresSafeArea()
+        // Where the Mac asks to download a language, the first time a page is
+        // translated into it; asked again for each pair the tab on screen is
+        // translated between.
+        .translationTask(browser.translationConfiguration) { session in
+            await browser.translator.run(session, in: browser)
+        }
         // The traffic lights belong to the sidebar: they go as soon as it starts
         // to, and come once it has all but arrived, so that nothing sits on the
         // page on its own and the sidebar's toggle never slides across them.

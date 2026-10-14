@@ -120,6 +120,11 @@ final class AppMenu: NSObject {
                 // ⌘⇧R, as Chrome's and Firefox's hard reload.
                 item("Hard Reload Page", #selector(hardReload), "r", [.command, .shift], target: self),
                 item("Mute Tab", #selector(toggleMute), target: self),
+                // As Safari's View › Translation, which has no key either.
+                submenu("Translation", [
+                    item("Translate", #selector(translatePage), target: self),
+                    item("Show Original", #selector(showOriginal), target: self),
+                ]),
                 .separator(),
                 zoom("Zoom In", 1, "+"),
                 // ⌘= as well as ⌘+: they're the same key on most keyboards.
@@ -245,6 +250,11 @@ final class AppMenu: NSObject {
     @objc private func printPage() { browser.printPage() }
     @objc private func exportPDF() { browser.exportPDF() }
     @objc private func toggleMute() { browser.selectedID.map(browser.toggleMute) }
+    @objc private func translatePage() {
+        guard let tab = browser.selected, let language = tab.translationTargets.first else { return }
+        tab.translate(to: language)
+    }
+    @objc private func showOriginal() { browser.selected?.showOriginal() }
     @objc private func reload() { browser.selected?.reload() }
     @objc private func hardReload() { browser.selected?.reload(fromOrigin: true) }
     @objc private func goBack() { browser.selected?.webView.goBack() }
@@ -362,6 +372,13 @@ extension AppMenu: NSMenuItemValidation {
         case #selector(toggleBookmark):
             item.title = browser.selected?.bookmark == nil ? "Bookmark This Tab" : "Remove Bookmark"
             return !browser.isPrivate && browser.selected?.hasPage == true
+        case #selector(translatePage):
+            // Into the first of your languages it can go into, as Safari's.
+            let target = browser.selected?.translationTargets.first
+            item.title = (target ?? PreferredLanguage.chosen.first).map { "Translate to \(Translator.name($0))" } ?? "Translate"
+            return target != nil && browser.selected?.translation?.target != target
+        case #selector(showOriginal):
+            return browser.selected?.translation != nil
         case #selector(toggleMute):
             item.title = browser.selected?.isMuted == true ? "Unmute Tab" : "Mute Tab"
             return browser.selected?.hasPage == true

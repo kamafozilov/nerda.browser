@@ -178,6 +178,14 @@ final class Tab: Identifiable {
     /// The page's uncaught JavaScript errors since it loaded, on this Mac
     /// only (`isOnThisMac`), for the address bar's Console button.
     var errors = 0
+    /// The page's language, once it is in, when it is none of yours: the
+    /// address bar offers to translate it into these of yours (`Translator`).
+    var pageLanguage: String?
+    var translationTargets: [String] = []
+    /// The language chosen to translate into, for the tab's pages from then on.
+    var translatedTo: String?
+    /// The page's text is on its way to be translated.
+    var translating = false
     var hasUnsavedWork = false
     @ObservationIgnored var departureApproved = false
 
@@ -691,6 +699,9 @@ final class Tab: Identifiable {
         departureApproved = false
         if let page { Self.set(page, "_setDrawsBackground:", true) }
         errors = 0
+        pageLanguage = nil
+        translationTargets = []
+        translating = false
     }
 
     /// The page went somewhere (another address, back or forward, a load
@@ -828,11 +839,13 @@ final class Tab: Identifiable {
         }
     }
 
-    /// Once the page is in, and only if /favicon.ico gave nothing: the icon
-    /// the page itself names, fetched from inside the page, so it comes with
-    /// the page's cookies past checks (Cloudflare's) that turn a bare request away.
+    /// Once the page is in: its language, for Translate; and only if
+    /// /favicon.ico gave nothing, the icon the page itself names, fetched
+    /// from inside the page, so it comes with the page's cookies past checks
+    /// (Cloudflare's) that turn a bare request away.
     func pageDidLoad() {
         pageMoved()
+        Task { await Translator.detect(on: self) }
         guard let page, let site = Favicons.origin(of: url), Favicons.shared.icon(site).image == nil else { return }
         Task {
             let icon = try? await page.callAsyncJavaScript(Self.findIcon, contentWorld: .defaultClient) as? String
@@ -902,6 +915,7 @@ final class Tab: Identifiable {
         configuration.userContentController.addUserScript(unseenMedia)
         configuration.userContentController.addUserScript(pageErrors)
         configuration.userContentController.add(pageErrorCounts, contentWorld: .defaultClient, name: "pageError")
+        configuration.userContentController.add(Translator.messages, contentWorld: .defaultClient, name: "translate")
         configuration.userContentController.addUserScript(JSONViewer.script)
         configuration.setURLSchemeHandler(ViewSource.handler, forURLScheme: ViewSource.scheme)
         // WebKit samples the page's top edge only when asked, allowing this

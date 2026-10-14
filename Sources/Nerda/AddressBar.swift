@@ -73,6 +73,11 @@ struct AddressBar: View {
                 }
             }
             .padding(.leading, 4)
+            // At the address's end, as Safari's.
+            if let tab, tab.pageLanguage != nil, !browser.editingAddress {
+                TranslateButton(tab: tab) { browser.openSettings(.general) }
+                    .padding(.leading, 4)
+            }
             if let tab, tab.isOnThisMac {
                 DevButtons(browser: browser)
                     .padding(.leading, 4)

@@ -1,4 +1,5 @@
 import SwiftUI
+@preconcurrency import Translation
 import WebKit
 
 /// One browser window: its tabs, newest first, which one is showing, and what
@@ -44,6 +45,8 @@ final class Browser: NSObject {
                 selected?.page?.evaluateJavaScript(PictureInPicture.exit)
             }
             if selectedID != oldValue, Extensions.started { Extensions.shared.activated(self, from: oldValue) }
+            // Its page may be the one to translate now.
+            if selectedID != oldValue { translator.nudge() }
             sessionChanged()
         }
     }
@@ -96,6 +99,8 @@ final class Browser: NSObject {
     @ObservationIgnored var vault = Vault.shared
     /// The same for bookmarks.
     @ObservationIgnored var bookmarks = Bookmarks.shared
+    /// Translates the tab on screen, while it is translated (`translationTask`).
+    @ObservationIgnored let translator = Translator()
 
     /// A tab taking more than `heavy` sleeps after this long unseen, pinned
     /// or not. Most pages take 100–400 MB; x.com and Gmail kept 650–750 MB
@@ -122,6 +127,14 @@ final class Browser: NSObject {
     @ObservationIgnored weak var window: NSWindow?
 
     var selected: Tab? { tabs.first { $0.id == selectedID } }
+
+    /// The languages the tab on screen is translated between, for the
+    /// window's translation session; none while it isn't.
+    var translationConfiguration: TranslationSession.Configuration? {
+        selected?.translation.map {
+            .init(source: Locale.Language(identifier: $0.source), target: Locale.Language(identifier: $0.target))
+        }
+    }
 
     /// Where its pages keep cookies, cache and site data: the one on disk, or
     /// for an incognito window, one in memory, gone with the window.
