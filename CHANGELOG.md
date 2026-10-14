@@ -19,6 +19,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - Extensions are turned off for now, while they are made faster and more reliable: the extensions button, Settings › Extensions and the Add to Nerda button in the Chrome Web Store are gone. Extensions you installed and their settings are kept for when they come back.
 - Open Link in New Tab, in a link's right-click menu, opens the tab behind the one you're on, as ⌘-click does and as in Safari and Chrome. It said Open Link in New Window and took you to the tab; hold ⌥ with the menu open for Open Link in New Tab and Go to It, which still does.
+- Zoom In (⌘+) and Zoom Out (⌘−) zoom the site, as in Safari, where they zoomed one tab: its other tabs follow, and its pages open at that zoom from then on, until Actual Size (⌘0) forgets it. Site Settings beside the address has the site's Zoom too. An incognito window keeps it only until it closes.
 
 ### Fixed
 

@@ -336,7 +336,7 @@ private struct AppearanceSettings: View {
                                options: Theme.allCases.map { DropdownOption(id: $0.rawValue, title: $0.name, symbol: $0.symbol) },
                                selected: theme.rawValue) { theme = Theme(rawValue: $0) ?? .system }
             }
-            SettingsRow(title: "Zoom level", detail: "The size pages open at. ⌘+ and ⌘− change it for one page", icon: "plus.magnifyingglass") {
+            SettingsRow(title: "Zoom level", detail: "The size pages open at. ⌘+ and ⌘− change it for one site", icon: "plus.magnifyingglass") {
                 DropdownButton(label: PageZoom.name(zoom),
                                options: PageZoom.levels.map { DropdownOption(id: "\($0)", title: PageZoom.name($0)) },
                                selected: "\(CGFloat(zoom))") { zoom = Double($0) ?? 1 }

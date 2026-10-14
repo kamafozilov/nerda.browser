@@ -854,6 +854,11 @@ extension Browser: WKNavigationDelegate {
         retried = nil
         guard let tab = tab(for: webView) else { return }
         tab.pageDidCommit()
+        // Each site's page opens at its site's zoom, or else the one pages
+        // open at; one with no site (a file) keeps its tab's.
+        if SiteSettings.site(webView.url) != nil {
+            webView.pageZoom = siteSettings.zoom(for: webView.url) ?? PageZoom.current
+        }
         tab.failure = nil
         tab.recordVisit()
         hideChoices(on: tab)

@@ -783,9 +783,9 @@ final class Tab: Identifiable {
     }
 
     /// One step in or out (+1, −1), or back to the zoom pages open at (0).
-    // ponytail: per tab; Safari keeps zoom per site across launches.
+    /// A page's zoom is its site's, as in Safari: kept for its other tabs and
+    /// next visits, and forgotten by 0. Reader's, while it shows, is its own.
     func zoom(_ step: Int) {
-        // Reader's text, while it shows.
         let page = reader ?? webView
         let now = page.pageZoom
         let next: CGFloat? = switch step {
@@ -793,7 +793,18 @@ final class Tab: Identifiable {
         case 1...: PageZoom.levels.first { $0 > now + 0.01 }
         default: PageZoom.levels.last { $0 < now - 0.01 }
         }
-        if let next { page.pageZoom = next }
+        guard let next else { return }
+        if reader == nil, let url, SiteSettings.site(url) != nil, let browser = delegate as? Browser {
+            browser.setZoom(next, for: url)
+        } else {
+            page.pageZoom = next
+        }
+    }
+
+    /// Its site's zoom changed (`Browser.setZoom`): the page takes it, asleep or awake.
+    func siteZoomChanged(to zoom: CGFloat) {
+        page?.pageZoom = zoom
+        if slept != nil { slept?.zoom = zoom }
     }
 
     /// The zoom pages open at changed: a page left at the old one takes the

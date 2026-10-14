@@ -2053,6 +2053,43 @@ private final class BlockerNavigation: NSObject, WKNavigationDelegate {
     for tab in [plain, zoomed, asleep] { tab.silence() }
 }
 
+/// A zoom is kept by the site's name, www. or not, http or https, across
+/// launches; the zoom pages open at forgets it.
+@MainActor
+@Test func siteZoomIsKeptByTheSitesName() throws {
+    let suite = "nerda-site-zoom-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let settings = SiteSettings(defaults: defaults)
+    settings.setZoom(1.25, for: URL(string: "https://www.example.com/a")!)
+    #expect(settings.zoom(for: URL(string: "http://example.com/b")) == 1.25)
+    #expect(settings.zoom(for: URL(string: "https://sub.example.com")) == nil)
+    #expect(settings.zoom(for: URL(string: "https://example.com:8443")) == nil)
+    #expect(settings.zoom(for: URL(string: "file:///tmp/a.html")) == nil)
+    #expect(SiteSettings(defaults: defaults).zoom(for: somewhere) == 1.25)
+    settings.setZoom(PageZoom.current, for: somewhere)
+    #expect(settings.zoom(for: somewhere) == nil)
+    #expect(SiteSettings(defaults: defaults).zooms.isEmpty)
+}
+
+/// A site's zoom goes to each of its tabs, asleep ones too; incognito keeps
+/// it to its own window, never in the regular settings.
+@MainActor
+@Test func siteZoomReachesItsTabsAndStaysOutOfIncognitosSettings() {
+    let browser = Browser(dataStore: .nonPersistent())
+    let site = Nerda.Tab(restoring: Session.Tab(url: somewhere, title: "", state: nil, zoom: 1, pinned: nil, home: nil))
+    let same = Nerda.Tab(restoring: Session.Tab(url: URL(string: "https://www.example.com/page")!, title: "", state: nil, zoom: 1, pinned: nil, home: nil))
+    let other = Nerda.Tab(restoring: Session.Tab(url: URL(string: "https://example.org")!, title: "", state: nil, zoom: 1, pinned: nil, home: nil))
+    browser.add([site, same, other])
+    browser.setZoom(1.5, for: somewhere)
+    #expect(browser.siteSettings !== SiteSettings.shared)
+    #expect(browser.siteSettings.zoom(for: somewhere) == 1.5)
+    #expect(SiteSettings.shared.zoom(for: somewhere) == nil)
+    #expect(same.webView.pageZoom == 1.5)
+    #expect(other.webView.pageZoom == 1)
+    for tab in [site, same, other] { tab.silence() }
+}
+
 @MainActor @Test func deletingHistoryKeepsPagesVisitedBeforeTheRange() {
     let history = History()
     let old = URL(string: "https://old.example/")!
