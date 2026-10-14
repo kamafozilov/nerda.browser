@@ -1979,6 +1979,26 @@ private final class BlockerNavigation: NSObject, WKNavigationDelegate {
     #expect(decoded.reduce(0) { $0 + $1.count { ($0["action"] as? [String: String])?["type"] == "block" } } == 5)
 }
 
+/// Bookmarks are written off the main thread, in the order they changed,
+/// and are there to read again once what is on its way is waited for.
+@MainActor
+@Test func bookmarksAreWrittenInTheBackground() throws {
+    let folder = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appending(path: "bookmarks.json")
+    let bookmarks = Bookmarks()
+    bookmarks.load(from: file)
+    let a = Bookmarks.Item(title: "a", url: somewhere)
+    bookmarks.add(a)
+    bookmarks.add(Bookmarks.Item(title: "b", url: somewhere))
+    bookmarks.rename(a.id, to: "renamed")
+    Bookmarks.writer.sync {}
+
+    let again = Bookmarks()
+    again.load(from: file)
+    #expect(again.items == bookmarks.items && again.items.map(\.title) == ["renamed", "b"])
+}
+
 /// Bookmarks go into folders and out again, and are put where a drop aims,
 /// counted as they were before the move; a folder never into itself.
 @MainActor
