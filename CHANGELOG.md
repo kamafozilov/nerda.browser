@@ -18,6 +18,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - AutoFill, as in Safari: click a box of a form for your saved addresses and cards, and pick one to fill in the whole address or card. A card goes in after Touch ID or your Mac's password, and its security code is never saved.
 - After you send a form with a new address, or a new card on a secure page, Nerda offers to save it, never in an incognito window. Settings › AutoFill turns Contact info and Credit cards on or off, and adds, edits or removes them.
 - A site that signs you in with a certificate, as some company and government sites do, asks which of yours from the keychain to send, in a sheet listing each with its issuer and expiry date, as in Safari. The one you choose goes to that site without asking again while its window stays open.
+- A page that tries to open a pop-up window by itself, rather than from your click, shows a button at the end of the address bar: click it to open the pop-up after all, or to always allow pop-ups on that site. Site Settings beside the address has a Pop-ups row to allow or block them for each site.
 
 ### Changed
 

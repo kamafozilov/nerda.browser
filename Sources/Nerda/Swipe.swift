@@ -61,7 +61,8 @@ final class SwipingWebView: WKWebView {
         // WebKit's Open Link in New Window: its window comes as a tab
         // (Browser's createWebViewWith), so it says so, and the tab stays
         // behind this one, as in Safari and Chrome and as with ⌘-click. With
-        // ⌥ held, WebKit's own item, which goes to the tab. Outside
+        // ⌥ held, one that goes to the tab, marked too: the pop-up check
+        // needn't take WebKit's word that a menu pick was a click. Outside
         // incognito, the same again for an incognito window.
         if let index = menu.items.firstIndex(where: { $0.identifier?.rawValue == "WKMenuItemIdentifierOpenLinkInNewWindow" }),
            let action = menu.items[index].action {
@@ -78,6 +79,8 @@ final class SwipingWebView: WKWebView {
                 front.title = "Open Link in New Tab and Go to It"
                 front.keyEquivalentModifierMask = .option
                 front.isAlternate = true
+                front.target = self
+                front.action = #selector(openInFront(_:))
                 menu.insertItem(front, at: index + 1)
             }
             original.title = "Open Link in New Tab"
@@ -96,8 +99,8 @@ final class SwipingWebView: WKWebView {
         menu.addItem(withTitle: "Save Screenshot…", action: #selector(saveScreenshot), keyEquivalent: "").target = self
     }
 
-    /// Where a link picked from the menu goes, other than to a tab in front.
-    enum LinkAsk { case behind, incognito }
+    /// Where a link picked from the menu goes.
+    enum LinkAsk { case behind, front, incognito }
 
     /// WebKit's own action for Open Link in New Window, which the menu's
     /// items hand on to once they have marked where its window goes.
@@ -107,6 +110,10 @@ final class SwipingWebView: WKWebView {
 
     @objc private func openBehind(_ sender: NSMenuItem) {
         open(sender, as: .behind)
+    }
+
+    @objc private func openInFront(_ sender: NSMenuItem) {
+        open(sender, as: .front)
     }
 
     @objc private func openInIncognito(_ sender: NSMenuItem) {

@@ -541,6 +541,19 @@ extension Browser: WKUIDelegate {
             if ["http", "https"].contains(url.scheme?.lowercased() ?? "") { Windows.openIncognito(url) }
             return nil
         }
+        let opener = tab(for: webView)
+        // A window opened by the page itself, on load or on a timer, would
+        // take you away to it: only one from a click or a key opens, unless
+        // the site may open them all. The rest are kept for the address bar
+        // to tell of and open after all, as Safari's Block and Notify. An
+        // extension's pages open theirs as they always have, and so does
+        // a link opened from its right-click menu.
+        if ask == nil, opener?.madeFor == nil, !siteSettings.options(for: opener?.site).allowsPopups, !Self.clicked(action) {
+            if let opener {
+                opener.blockedPopups = Array((opener.blockedPopups + [action.request.url ?? URL(string: "about:blank")!]).suffix(20))
+            }
+            return nil
+        }
         // Open Link in New Tab: behind this one, as a ⌘-click's; one that
         // waits to be shown is made without the page WebKit asks for.
         if ask == .behind, Self.backgroundTabsWait, let url = action.request.url,
@@ -548,9 +561,33 @@ extension Browser: WKUIDelegate {
             withAnimation(.slide) { _ = openBehind(url) }
             return nil
         }
-        let tab = Tab(configuration: configuration, opener: tab(for: webView))
+        let tab = Tab(configuration: configuration, opener: opener)
         withAnimation(.slide) { add(tab, inBackground: ask == .behind) }
         return tab.webView
+    }
+
+    /// The windows the tab's page was kept from opening that can still be
+    /// opened, each in a tab of its own that hands back to the page when it
+    /// closes. Those its script was to fill can't be: the script has moved on.
+    func showBlockedPopups(of tab: Tab) {
+        let addresses = tab.blockedPopups.filter { ["http", "https"].contains($0.scheme?.lowercased() ?? "") }
+        tab.blockedPopups = []
+        for url in addresses {
+            let popup = Tab()
+            popup.opener = tab.id
+            withAnimation(.slide) { add(popup) }
+            popup.go(to: url)
+        }
+    }
+
+    /// Always Allow on This Site: its windows open from now on, and those just
+    /// kept back open now.
+    func allowPopups(of tab: Tab) {
+        guard let site = tab.site else { return }
+        var options = siteSettings.options(for: site)
+        options.allowsPopups = true
+        changeSiteOptions(options, for: site)
+        showBlockedPopups(of: tab)
     }
 
     func webViewDidClose(_ webView: WKWebView) {
@@ -913,6 +950,7 @@ extension Browser: WKNavigationDelegate {
         }
         if HTTPSUpgrade.isOn, let url = webView.url { httpsUpgrade.committed(url) }
         tab.failure = nil
+        if !tab.blockedPopups.isEmpty { tab.blockedPopups = [] }
         tab.recordVisit()
         hideChoices(on: tab)
         // A new document has nothing on show.

@@ -200,6 +200,10 @@ final class Tab: Identifiable {
     /// Reader, open over the page, which stays as it was under it.
     var reader: ReaderPage?
     @ObservationIgnored var readerCheck: Task<Void, Never>?
+    /// Where the windows the page tried to open by itself, and was kept from,
+    /// would have gone (about:blank for one its script was to fill), for the
+    /// address bar to say so; until the next page.
+    var blockedPopups: [URL] = []
 
     /// The page's own title; until it has one, the site's name, or for an
     /// address without one (file:, about:blank), the address itself.
@@ -924,10 +928,10 @@ final class Tab: Identifiable {
         configuration.setValue(processPool, forKey: "processPool")
         WebNotifications.start(pool: processPool)
         configuration.applicationNameForUserAgent = applicationName
-        // A window a page opens only from a click or a key, as in Safari: on
-        // the Mac, WebKit otherwise lets a page open them whenever it likes,
-        // on load or on a timer, and each one takes you away to it.
-        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        // Every window a page opens is put to the browser, which opens only
+        // those from a click or a key, as Safari does, and tells of the rest
+        // (`Browser.createWebViewWith`). Turned off, WebKit drops them unheard.
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         // WebKit's full screen, under our own (see Fullscreen). Pages a page
         // opens (popups) are given this configuration's, script and all.
         configuration.preferences.isElementFullscreenEnabled = true

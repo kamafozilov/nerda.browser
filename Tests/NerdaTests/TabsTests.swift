@@ -218,7 +218,8 @@ private final class LinkOpener: NSObject {
 }
 
 /// A link's right-click menu says Open Link in New Tab, which leaves the
-/// tab behind, as in Safari; ⌥ shows WebKit's own item, which goes to it.
+/// tab behind, as in Safari; ⌥ shows one that goes to it. Both open where
+/// the site's pop-ups are blocked: the pick itself is the click.
 @MainActor
 @Test func openLinkInNewTabStaysBehindUnlessOptionIsHeld() throws {
     _ = NSApplication.shared
@@ -247,11 +248,55 @@ private final class LinkOpener: NSObject {
 
     menu.performActionForItem(at: 1)
     #expect(opener.opened == 2)
-    #expect(page.takeLinkAsk() == nil)
+    #expect(page.takeLinkAsk() == .front)
 
     menu.performActionForItem(at: 2)
     #expect(opener.opened == 3)
     #expect(page.takeLinkAsk() == .incognito)
+}
+
+/// A window WebKit says no click or key asked for, as it may say of a link
+/// picked from the right-click menu.
+private final class UnclickedAction: WKNavigationAction {
+    let url: URL
+    init(_ url: URL) { self.url = url }
+    override var request: URLRequest { URLRequest(url: url) }
+    override var navigationType: WKNavigationType { .other }
+    @objc(_isUserInitiated) var userInitiated: Bool { false }
+}
+
+/// Open Link in New Tab and Go to It opens its tab in front even where the
+/// site's pop-ups are blocked, whatever WebKit says of the click; a window
+/// the page asks for by itself is still kept back.
+@MainActor
+@Test func goToItFromTheMenuIsNoPopup() throws {
+    _ = NSApplication.shared
+    let browser = Browser(dataStore: .nonPersistent())
+    let tab = Tab()
+    browser.add(tab)
+    let page = try #require(tab.webView as? SwipingWebView)
+    let link = URL(string: "https://example.com/next")!
+    func open() -> WKWebView? {
+        browser.webView(page, createWebViewWith: WKWebViewConfiguration(), for: UnclickedAction(link),
+                        windowFeatures: WKWindowFeatures())
+    }
+    #expect(open() == nil)
+    #expect(tab.blockedPopups == [link])
+
+    let opener = LinkOpener()
+    let menu = NSMenu()
+    let item = NSMenuItem(title: "Open Link in New Window", action: #selector(LinkOpener.open(_:)), keyEquivalent: "")
+    item.identifier = NSUserInterfaceItemIdentifier("WKMenuItemIdentifierOpenLinkInNewWindow")
+    item.target = opener
+    menu.addItem(item)
+    let event = try #require(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                                windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    page.willOpenMenu(menu, with: event)
+    menu.performActionForItem(at: 1)
+    let opened = try #require(open())
+    #expect(browser.tabs.count == 2)
+    #expect(browser.selected?.webView === opened)
+    browser.closeAll()
 }
 
 /// With Load background tabs when shown, a link opened behind keeps its
