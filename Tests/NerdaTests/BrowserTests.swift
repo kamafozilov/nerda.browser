@@ -2309,3 +2309,30 @@ func errorsAreCountedOnThisMacOnly(address: String, counted: Int) async throws {
     #expect(result?[1] as? Bool == true)
     #expect(result?[2] as? Bool == false)
 }
+
+/// Once a page has nudged a video's speed, a 1 it asks for is played a
+/// hair off 1 and read back as 1; a speed from a menu never starts it, and
+/// what WebKit refuses still throws. On a stand-in for a video element.
+@MainActor @Test func aLiveVideosSpeedNudgesStayOffOne() {
+    let context = JSContext()!
+    context.evaluateScript("""
+        globalThis.HTMLMediaElement = function () { this.real = 1; };
+        Object.defineProperty(HTMLMediaElement.prototype, 'playbackRate', {
+            get() { return this.real; },
+            set(value) { if (!isFinite(+value)) throw new TypeError('non-finite'); this.real = +value; },
+            enumerable: true, configurable: true,
+        });
+        """)
+    context.evaluateScript(LiveRate.source)
+    func run(_ script: String) -> [Double] {
+        context.evaluateScript("(() => { const v = new HTMLMediaElement(); \(script); return [v.real, v.playbackRate]; })()")
+            .toArray()?.compactMap { ($0 as? NSNumber)?.doubleValue } ?? []
+    }
+    #expect(run("v.playbackRate = 1") == [1, 1])
+    #expect(run("v.playbackRate = 1.04") == [1.04, 1.04])
+    #expect(run("v.playbackRate = 1.04; v.playbackRate = 1") == [1.0001, 1])
+    #expect(run("v.playbackRate = 1.04; v.playbackRate = 1; v.real = 1.5") == [1.5, 1.5])
+    #expect(run("v.playbackRate = 1.5; v.playbackRate = 1") == [1, 1])
+    #expect(run("v.playbackRate = 2; try { v.playbackRate = NaN } catch {}") == [2, 2])
+    #expect(context.exception == nil)
+}

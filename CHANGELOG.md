@@ -25,6 +25,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - The download button in the bar over a PDF saves the PDF to your downloads folder, or where you choose with Settings › General › Ask where to save each file, and lists it in Downloads. It did nothing.
 - A page that breaks off partway, as when the connection drops, says why, as one that can't be opened at all does, where it stayed half drawn without a word.
 - A middle click opens a link in a tab behind on pages that stop the click on its way up, where it opened nothing. A page that takes the middle click for itself still keeps it, as in Chrome.
+- A live video no longer stutters every few seconds on X, and wherever a player keeps up with the broadcast by nudging its speed: each switch through normal speed held the picture still while the sound was rebuilt. Once a page has nudged a video's speed, Nerda plays its normal speed a hair off exactly 1, so the switches go through without a break.
 
 ### Security
 

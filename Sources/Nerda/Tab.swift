@@ -930,6 +930,7 @@ final class Tab: Identifiable {
         configuration.userContentController.add(middleClicks, contentWorld: .defaultClient, name: "middleClick")
         configuration.userContentController.addUserScript(keepFocus)
         configuration.userContentController.addUserScript(unseenMedia)
+        configuration.userContentController.addUserScript(LiveRate.script)
         configuration.userContentController.addUserScript(pageErrors)
         configuration.userContentController.add(pageErrorCounts, contentWorld: .defaultClient, name: "pageError")
         configuration.userContentController.add(Translator.messages, contentWorld: .defaultClient, name: "translate")
