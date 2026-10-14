@@ -26,7 +26,10 @@ final class Browser: NSObject {
     @ObservationIgnored private(set) var recent: [Tab] = []
     var selectedID: Tab.ID? {
         didSet {
-            tabs.first { $0.id == oldValue }?.lastSeen = .now
+            if let left = tabs.first(where: { $0.id == oldValue }) {
+                left.lastSeen = .now
+                left.pageMoved()
+            }
             if let selected {
                 recent.removeAll { $0 === selected }
                 recent.append(selected)
@@ -140,9 +143,10 @@ final class Browser: NSObject {
             }
         }
         sleepTimer?.tolerance = 15
-        // What changes without telling (scrolling, a page changing its own
-        // address) is saved every few seconds, and only if it did change. Not
-        // while another app is in front: it was saved as Nerda went behind.
+        // What changes without telling (the page on screen scrolled, a page
+        // changing its own address) is saved every few seconds, and only if it
+        // did change. Not while another app is in front: it was saved as Nerda
+        // went behind.
         sessionTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { if NSApp?.isActive == true { self?.saveSession(waiting: false) } }
         }

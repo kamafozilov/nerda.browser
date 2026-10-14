@@ -686,6 +686,8 @@ extension Browser {
 // Nerda run again only to compile the block list (see Blocker), not as a browser.
 if CommandLine.arguments.contains(Blocker.compileArgument) { Blocker.compileAndExit() }
 
+// Read off the main thread while the rest below gets ready.
+let launchSession = Session.reading(Session.file)
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 // Tabs are ours; no system tab bar, and no Show Tab Bar items in the menus.
@@ -699,7 +701,7 @@ History.shared.load(from: History.file, waiting: false)
 // Before the tabs: those of bookmarks are told by them.
 Bookmarks.shared.load(from: Bookmarks.file)
 Favicons.shared.folder = Favicons.folder
-browser.restore(from: Session.file)
+browser.restore(launchSession(), from: Session.file)
 Favicons.shared.preload(browser.tabs.compactMap(\.site))
 // Opening on a new tab, it opens with its picture already there. On a web
 // page, the picture waits for the first new tab: 20 to 100 MB not taken for one.

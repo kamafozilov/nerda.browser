@@ -11,7 +11,10 @@ final class Tab: Identifiable {
     /// Where the page is now, which is not where it started once links are followed.
     // Extensions are told what changes (see Extensions.changed).
     private(set) var url: URL? {
-        didSet { if url != oldValue, Extensions.started { Extensions.shared.changed(self, .URL) } }
+        didSet {
+            pageMoved()
+            if url != oldValue, Extensions.started { Extensions.shared.changed(self, .URL) }
+        }
     }
     private var pageTitle = "" {
         didSet { if pageTitle != oldValue, Extensions.started { Extensions.shared.changed(self, .title) } }
@@ -96,6 +99,8 @@ final class Tab: Identifiable {
     /// The page, while awake.
     @ObservationIgnored private(set) var page: WKWebView? {
         didSet {
+            pageState = nil
+            pageMoved()
             if isAsleep != (page == nil) { isAsleep = page == nil }
             if page == nil, playsAudio { playsAudio = false }
         }
@@ -106,6 +111,11 @@ final class Tab: Identifiable {
     /// What a sleeping page needs to wake as it was: its history, where it
     /// was scrolled to, and its zoom.
     @ObservationIgnored private var slept: (state: Any?, zoom: CGFloat)?
+    /// The page's `interactionState` as the session last read it (`saved`),
+    /// and whether the page has moved on since: read from every page awake
+    /// at each save, it held up the main thread for pages that hadn't.
+    @ObservationIgnored private var pageState: Any?
+    @ObservationIgnored private var pageStateIsOld = true
     /// The top of the page as it went to sleep, for its hover card (`TabPeek`),
     /// as a PNG: the same picture in ~100 KB, where its pixels took ~700 KB
     /// for each tab asleep. Made a picture again only when a card shows it.
@@ -216,7 +226,11 @@ final class Tab: Identifiable {
 
     /// What it takes to open the tab again at the next launch: the settings, or
     /// a page from the web or disk (a blob: or data: address can't be opened again).
-    var saved: Session.Tab? {
+    var saved: Session.Tab? { saved(readingPage: true) }
+
+    /// The page's state is read again only when `readingPage`, or once the
+    /// page has moved on (`pageMoved`); otherwise it is as last read.
+    func saved(readingPage: Bool) -> Session.Tab? {
         if let settings {
             return Session.Tab(url: nil, title: "", state: nil, zoom: 1, pinned: nil, home: nil, settings: settings)
         }
@@ -226,9 +240,13 @@ final class Tab: Identifiable {
         guard let site, ["http", "https", "file", ViewSource.scheme].contains(site.scheme) else { return nil }
         let state: Any?
         if let page {
-            // A page that never got there (still loading, or failed) would
-            // wake to the one before it, or blank: it is loaded afresh instead.
-            state = page.backForwardList.currentItem?.url == site ? page.interactionState : nil
+            if readingPage || pageStateIsOld {
+                // A page that never got there (still loading, or failed) would
+                // wake to the one before it, or blank: it is loaded afresh instead.
+                pageState = page.backForwardList.currentItem?.url == site ? page.interactionState : nil
+                pageStateIsOld = false
+            }
+            state = pageState
         } else {
             state = slept?.state
         }
@@ -675,6 +693,13 @@ final class Tab: Identifiable {
         errors = 0
     }
 
+    /// The page went somewhere (another address, back or forward, a load
+    /// finished), or may have been scrolled (it was on screen): its state is
+    /// read again at the next save.
+    func pageMoved() {
+        pageStateIsOld = true
+    }
+
     /// Puts the page's address in history, once it is really there: loaded,
     /// not just asked for (a mistyped address that fails is not a visit).
     func recordVisit() {
@@ -807,6 +832,7 @@ final class Tab: Identifiable {
     /// the page itself names, fetched from inside the page, so it comes with
     /// the page's cookies past checks (Cloudflare's) that turn a bare request away.
     func pageDidLoad() {
+        pageMoved()
         guard let page, let site = Favicons.origin(of: url), Favicons.shared.icon(site).image == nil else { return }
         Task {
             let icon = try? await page.callAsyncJavaScript(Self.findIcon, contentWorld: .defaultClient) as? String
