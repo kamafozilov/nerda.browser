@@ -383,9 +383,10 @@ final class Browser: NSObject {
     /// Moves a tab to another window of the same browsing, page and all: a
     /// video goes on playing, a form keeps what was typed. A pinned site or a
     /// bookmark's tab stays here, asleep, and only its page goes, as a tab of
-    /// that window's list. A secondary window left with nothing closes; the
+    /// that window's list, at `position` there if given (see `move`), else
+    /// where a new tab goes. A secondary window left with nothing closes; the
     /// profile's own window starts on a new tab.
-    func move(_ id: Tab.ID, to target: Browser) {
+    func move(_ id: Tab.ID, to target: Browser, at position: Int? = nil) {
         guard target !== self, target.dataStore === dataStore, let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let tab = tabs[index]
         if fullscreenTab == id { exitPageFullscreen() }
@@ -411,6 +412,10 @@ final class Browser: NSObject {
             if selectedID == nil, !isSecondary || window == nil { add(Tab()) }
         }
         target.add(tab)
+        // Down the side the list has no bookmarks' tabs; across the top they are among the rest.
+        if let position {
+            target.move(tab.id, pinned: false, to: position, among: TabStyle.current == .vertical ? Self.listed : { _ in true })
+        }
         if tabs.isEmpty { window?.close() }
     }
 

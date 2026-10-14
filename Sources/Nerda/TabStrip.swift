@@ -39,6 +39,8 @@ struct TabStrip: View {
     /// copy under it reads it, so a move redraws that copy, not every tab.
     @State private var pointer = Pointer()
     @State private var layout = Layout()
+    /// Where a tab dragged from another window would land among the tabs, while it is over them.
+    @State private var incoming: Int?
     /// The tab the pointer is on, and the one whose card shows (`TabPeek`).
     @State private var hovered = Hovered()
     @State private var peeked: Peek?
@@ -63,6 +65,8 @@ struct TabStrip: View {
     private final class Layout {
         var pins = CGRect.zero
         var tabs = CGRect.zero
+        /// The whole strip, in the window's content.
+        var frame = CGRect.zero
     }
 
     var body: some View {
@@ -89,6 +93,8 @@ struct TabStrip: View {
         .padding(.leading, Self.lights)
         .padding(.trailing, 8)
         .frame(height: Self.height)
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { [layout] in layout.frame = $0 }
+        .background { IncomingWatch(browser: browser, index: $incoming, locate: locateIncoming) }
         .coordinateSpace(.named(Self.space))
         // Moves the window, as the title bar under it would. Off the tabs,
         // right-clicked, the menu for them all: their own show on them.
@@ -97,7 +103,7 @@ struct TabStrip: View {
         // a tab over the pinned sites turns into one, and one of those over
         // the tabs into a tab.
         .overlay(alignment: .topLeading) {
-            if let tab = draggedTab {
+            if let tab = draggedTab, TabDrag.shared.detached != tab.id {
                 let asPin = tab.isPinned != (landing != nil)
                 let width = asPin ? Self.icon : tabWidth > 0 ? tabWidth : Self.widths.upperBound
                 // From the pinned sites, for what is one or turns into one, or
@@ -145,7 +151,22 @@ struct TabStrip: View {
     private var items: [Tab.ID?] {
         var items: [Tab.ID?] = rest.map(\.id)
         if case .tabs(let index) = landing, draggedTab != nil { items.insert(nil, at: min(index, items.count)) }
+        if let incoming { items.insert(nil, at: min(incoming, items.count)) }
         return items
+    }
+
+    /// A point of the strip's, on the screen.
+    private func screen(_ point: CGPoint) -> NSPoint {
+        TabDrag.screen(CGPoint(x: layout.frame.minX + point.x, y: layout.frame.minY + point.y), in: browser)
+    }
+
+    /// The place among the tabs nearest the pointer (in the window's
+    /// content), for a tab from another window; none off the tabs.
+    private func locateIncoming(_ point: CGPoint) -> Int? {
+        let x = point.x - layout.frame.minX, y = point.y - layout.frame.minY
+        guard (-8...Self.height + 8).contains(y), (layout.tabs.minX - 24...layout.tabs.maxX + 48).contains(x) else { return nil }
+        let width = rest.isEmpty ? 1 : layout.tabs.width / CGFloat(rest.count)
+        return min(max(Int(((x - layout.tabs.minX) / width).rounded()), 0), rest.count)
     }
 
     private var tabWidth: CGFloat { tabWidth(of: items.count) }
@@ -202,15 +223,23 @@ struct TabStrip: View {
     private func tabs(_ items: [Tab.ID?], room: CGFloat) -> some View {
         let byID = Dictionary(uniqueKeysWithValues: browser.tabs.map { ($0.id, $0) })
         let room = max(room - 34, 0)
-        let width = min(max(room / CGFloat(max(items.count, 1)), Self.widths.lowerBound), Self.widths.upperBound)
+        // Off the strip, a tab's place closes up.
+        let detached = TabDrag.shared.detached
+        let shown = items.count - (items.contains(detached) && detached != nil ? 1 : 0)
+        let width = min(max(room / CGFloat(max(shown, 1)), Self.widths.lowerBound), Self.widths.upperBound)
         let selected = items.firstIndex { $0 == browser.selectedID }
         return HStack(spacing: 0) {
             HStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element) { index, id in
                     if let id, let tab = byID[id] {
                         // A line between two tabs, unless one is on screen, or the gap.
-                        row(tab, width: width, separated: index > 0 && items[index - 1] != nil
+                        row(tab, width: detached == id ? 0 : width, separated: index > 0 && items[index - 1] != nil
                             && selected != index && selected != index - 1)
+                    } else if incoming != nil, let tab = TabDrag.shared.tab {
+                        // The tab from another window, in the gap where it would land.
+                        TabLook(browser: browser, tab: tab, selected: false, compact: width < 72)
+                            .frame(width: width)
+                            .allowsHitTesting(false)
                     } else {
                         Color.clear.frame(width: width, height: Self.tabHeight)
                     }
@@ -218,8 +247,10 @@ struct TabStrip: View {
             }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.tabs = $0 }
             .animation(.snappy(duration: 0.2), value: landing)
+            .animation(.snappy(duration: 0.2), value: incoming)
+            .animation(.snappy(duration: 0.2), value: detached)
             // ponytail: past ~60 tabs the last are cut off here; ⌘⇧A and ⌃Tab still reach them.
-            .frame(width: min(CGFloat(items.count) * width, room), alignment: .leading)
+            .frame(width: min(CGFloat(shown) * width, room), alignment: .leading)
             .clipShape(Rectangle().inset(by: -Self.flare))
             .frame(height: Self.height, alignment: .bottom)
             BarButton(icon: "plus", help: "New Tab  ⌘T", action: browser.newTab)
@@ -259,9 +290,16 @@ struct TabStrip: View {
                     landing = nil
                 }
                 pointer.at = value.location
+                // Pulled well off the strip: torn off, for another window or one of its own.
+                let outside = !CGRect(origin: .zero, size: layout.frame.size).insetBy(dx: -32, dy: -28).contains(value.location)
+                TabDrag.shared.moved(id, in: browser, outside: outside, at: screen(value.location))
+                guard !outside else {
+                    if landing != nil { landing = nil }
+                    return
+                }
                 follow(id)
             }
-            .onEnded { _ in drop(id) }
+            .onEnded { drop(id, at: screen($0.location)) }
     }
 
     private func start(_ id: Tab.ID, at point: CGPoint) -> Drag? {
@@ -301,9 +339,9 @@ struct TabStrip: View {
     /// Let go over its own group, it slides into its place, and only there
     /// takes it back; over the other group, it goes there: pinned, or unpinned.
     /// Off the window, to the window it is let go on, or one of its own.
-    private func drop(_ id: Tab.ID) {
+    private func drop(_ id: Tab.ID, at mouse: NSPoint) {
         let landing = landing
-        if Windows.drop(id, from: browser, at: NSEvent.mouseLocation) {
+        if TabDrag.shared.ended(id, in: browser, at: mouse) {
             dragged = nil
             self.landing = nil
             return

@@ -351,6 +351,11 @@ private final class UnclickedAction: WKNavigationAction {
     #expect(browser.tabs[0].isPinned && browser.tabs[0].site == URL(string: "https://pin.test/") && browser.tabs[0] !== pin)
     #expect(moved.tabs.contains { $0 === pin } && !pin.isPinned && pin.home == nil)
 
+    // Let go in another window's gap: in its place there.
+    let third = browser.open(URL(string: "about:blank")!)
+    browser.move(third.id, to: moved, at: 1)
+    #expect(moved.tabs.filter(Browser.listed).firstIndex { $0 === third } == 1)
+
     moved.setPinned(true, tab.id)
     moved.bookmark(tab.id)
     #expect(!tab.isPinned && tab.bookmark == nil)

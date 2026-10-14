@@ -52,6 +52,8 @@ struct Sidebar: View {
     /// How tall the bookmarks are, for them to take no more room than that.
     @State private var bookmarksHeight: CGFloat = 0
     @State private var layout = Layout()
+    /// Where a tab dragged from another window would land in the list, while it is over it.
+    @State private var incoming: Int?
     /// The tab the pointer is on, and the one whose card shows (`TabPeek`).
     @State private var hovered = Hovered()
     @State private var peeked: Peek?
@@ -78,6 +80,8 @@ struct Sidebar: View {
         var bookmarks = CGRect.zero
         var line = CGRect.zero
         var marks = CGRect.zero
+        /// The whole sidebar, in the window's content.
+        var frame = CGRect.zero
     }
 
     /// Where something dragged over the bookmarks goes: into a folder (at its
@@ -95,6 +99,8 @@ struct Sidebar: View {
 
     var body: some View {
         let rest = rest
+        let detached = TabDrag.shared.detached
+        let incomingID = incoming.flatMap { rest.indices.contains($0) ? rest[$0].id : nil }
         VStack(spacing: 0) {
             // The traffic lights sit on this row, and it moves the window, as
             // the title bar under it would. The sidebar's button is on the
@@ -151,7 +157,11 @@ struct Sidebar: View {
                             let id = tab.id
                             ListedTab(browser: browser, tab: tab, selected: id == browser.selectedID)
                             // Its place stays empty while it is dragged: where it will land.
+                            // Off the list, its place closes up.
                             .opacity(dragged?.id == id ? 0 : 1)
+                            .frame(height: detached == id ? 0 : nil, alignment: .top)
+                            .padding(.top, incomingID == id ? Self.rowHeight + Self.rowGap : 0)
+                            .overlay(alignment: .top) { if incomingID == id { incomingRow } }
                             // A sleeping tab's site is connected to on the way to a click
                             // on it. By its id, as the buttons hold it.
                             .onHover { over in
@@ -168,6 +178,9 @@ struct Sidebar: View {
                             ))
                         }
                     }
+                    .padding(.bottom, incoming != nil && incoming == rest.count ? Self.rowHeight + Self.rowGap : 0)
+                    .overlay(alignment: .bottom) { if incoming != nil && incoming == rest.count { incomingRow } }
+                    .animation(.snappy(duration: 0.2), value: incoming)
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.rows = $0 }
                     .padding(.horizontal, 8)
                     .padding(.vertical, Self.edge)
@@ -227,6 +240,8 @@ struct Sidebar: View {
             .padding(.vertical, 8)
         }
         .frame(width: width)
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { [layout] in layout.frame = $0 }
+        .background { IncomingWatch(browser: browser, index: $incoming, locate: locateIncoming) }
         .coordinateSpace(.named(Self.space))
         // Off the tabs: their own menus are the ones that show on them.
         .contextMenu { TabsMenu(browser: browser) }
@@ -243,7 +258,7 @@ struct Sidebar: View {
                         .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
                 }
                 .allowsHitTesting(false)
-            } else if let dragged, let tab = browser.tabs.first(where: { $0.id == dragged.id }) {
+            } else if let dragged, detached != dragged.id, let tab = browser.tabs.first(where: { $0.id == dragged.id }) {
                 // A tab over the tiles turns into one; a tile over the bookmarks, into a row.
                 let becomingTile = gap != nil
                 let becomingRow = tab.isPinned && landing != nil
@@ -285,6 +300,30 @@ struct Sidebar: View {
     private var pins: [Tab] { Array(browser.tabs.prefix { $0.isPinned }) }
     private var rest: [Tab] { browser.tabs.filter(Browser.listed) }
 
+    /// A point of the sidebar's, on the screen.
+    private func screen(_ point: CGPoint) -> NSPoint {
+        TabDrag.screen(CGPoint(x: layout.frame.minX + point.x, y: layout.frame.minY + point.y), in: browser)
+    }
+
+    /// The place in the list nearest the pointer (in the window's content),
+    /// for a tab from another window; none off the list.
+    private func locateIncoming(_ point: CGPoint) -> Int? {
+        let local = CGPoint(x: point.x - layout.frame.minX, y: point.y - layout.frame.minY)
+        guard overList(local), local.y < layout.frame.height else { return nil }
+        let row = ((local.y - layout.rows.minY) / (Self.rowHeight + Self.rowGap)).rounded()
+        return min(max(Int(row), 0), rest.count)
+    }
+
+    /// The tab from another window, in the gap where it would land.
+    @ViewBuilder private var incomingRow: some View {
+        if let tab = TabDrag.shared.tab {
+            SidebarRow(icon: "globe", site: tab.site, title: tab.title, selected: true) {}
+                .frame(height: Self.rowHeight)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+        }
+    }
+
     /// Where a tab from the list would go among the tiles, dragged to `point` over them.
     private func gap(for id: Tab.ID, at point: CGPoint) -> Int? {
         guard rest.contains(where: { $0.id == id }), overTiles(point) else { return nil }
@@ -304,7 +343,8 @@ struct Sidebar: View {
                 if let id {
                     if let tab = byID[id] {
                         PinnedTab(browser: browser, tab: tab, selected: id == browser.selectedID)
-                        .opacity(dragged?.id == id ? 0 : 1)
+                        // Off the list, faded: only its page goes, the tile stays.
+                        .opacity(dragged?.id == id ? (TabDrag.shared.detached == id ? 0.4 : 0) : 1)
                         .simultaneousGesture(drag(id))
                         // Back to where it was pinned, from wherever it has been since.
                         .simultaneousGesture(TapGesture(count: 2).onEnded { tab.goHome() })
@@ -328,6 +368,14 @@ struct Sidebar: View {
             .onChanged { value in
                 if dragged == nil { dragged = start(id, at: value.startLocation) }
                 pointer.at = value.location
+                // Pulled well off the sidebar: torn off, for another window or one of its own.
+                let outside = !CGRect(origin: .zero, size: layout.frame.size).insetBy(dx: -32, dy: -32).contains(value.location)
+                TabDrag.shared.moved(id, in: browser, outside: outside, at: screen(value.location))
+                guard !outside else {
+                    if gap != nil { gap = nil }
+                    if landing != nil { landing = nil }
+                    return
+                }
                 let over = gap(for: id, at: value.location)
                 if over != gap { gap = over }
                 let into = landing(for: id, at: value.location)
@@ -369,11 +417,11 @@ struct Sidebar: View {
 
     /// Onto the tiles, a tab is pinned where it is let go; onto the bookmarks,
     /// either is kept there; a tile let go below them is unpinned there.
-    /// Off the window, it goes to the window it is let go on, or one of its
-    /// own (`Windows.drop`). Anywhere else, it stays where the drag put it.
+    /// Torn off, it goes to the window it is let go on, or one of its own
+    /// (`TabDrag`). Anywhere else, it stays where the drag put it.
     private func drop(_ id: Tab.ID, at point: CGPoint) {
         let gap = gap, landing = landing
-        if Windows.drop(id, from: browser, at: NSEvent.mouseLocation) {
+        if TabDrag.shared.ended(id, in: browser, at: screen(point)) {
             dragged = nil
             self.gap = nil
             self.landing = nil
@@ -458,7 +506,9 @@ struct Sidebar: View {
 
     /// A tab that could be kept as a bookmark is being dragged.
     private var bookmarking: Bool {
-        guard let dragged, let tab = browser.tabs.first(where: { $0.id == dragged.id }) else { return false }
+        // Torn off, it is on its way to another window, not to the bookmarks.
+        guard let dragged, TabDrag.shared.detached != dragged.id,
+              let tab = browser.tabs.first(where: { $0.id == dragged.id }) else { return false }
         return tab.hasPage && tab.bookmark == nil
     }
 

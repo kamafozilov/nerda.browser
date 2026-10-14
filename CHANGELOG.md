@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Dragging a tab off its window shows it leaving, as in Safari and Chrome: its place in the list closes up and a card of it follows the pointer onto the other display. Over the tabs of another window, a gap opens where it will land, with the tab in it, where before nothing showed until you let go.
+
 ## [0.0.24] - 2026-10-14
 
 ### Added

@@ -161,21 +161,6 @@ enum Windows {
         window.makeKeyAndOrderFront(nil)
     }
 
-    /// A tab dragged off its window and let go at `point`, on the screen: into
-    /// the window under it, of the same browsing, or else a window of its own
-    /// filling the display under it. False while still over its own window.
-    static func drop(_ id: Tab.ID, from browser: Browser, at point: NSPoint) -> Bool {
-        guard let own = browser.window, !own.frame.contains(point) else { return false }
-        let under = NSApp.orderedWindows.first { $0.isVisible && $0.frame.contains(point) } as? BrowserWindow
-        if let under, under.browser.dataStore === browser.dataStore, !under.browser.locked {
-            withAnimation(.slide) { browser.move(id, to: under.browser) }
-            under.makeKeyAndOrderFront(nil)
-        } else {
-            moveToNewWindow(id, from: browser, on: NSScreen.screens.first { $0.frame.contains(point) })
-        }
-        return true
-    }
-
     /// The other windows a tab of `browser`'s can be moved to: those of the
     /// same browsing, in front first.
     static func others(of browser: Browser) -> [Browser] {
