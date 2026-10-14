@@ -856,7 +856,7 @@ final class Tab: Identifiable {
         configuration.userContentController.add(Fullscreen.messages, contentWorld: .defaultClient, name: "fullscreen")
         Passwords.install(in: configuration.userContentController)
         PageActivity.install(in: configuration.userContentController)
-        WebStore.install(in: configuration.userContentController)
+        if Extensions.available { WebStore.install(in: configuration.userContentController) }
         // Chrome extensions see the pages of the regular window, not an
         // incognito one's, as in Chrome. The controller has to be there when
         // the page is made; it can't be added after.

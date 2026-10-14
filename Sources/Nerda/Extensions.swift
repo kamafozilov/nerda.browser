@@ -68,7 +68,11 @@ final class Extensions: NSObject {
     static let shared = Extensions()
 
     nonisolated static let enabledKey = "extensionsEnabled"
-    static let enabledAtLaunch = UserDefaults.standard.bool(forKey: enabledKey)
+    /// Off in every build until extensions run fast and reliably enough: no
+    /// engine, store button or settings page, whatever the saved switch says.
+    /// What is installed stays on disk for when this turns back on.
+    static let available = false
+    static let enabledAtLaunch = available && UserDefaults.standard.bool(forKey: enabledKey)
 
     /// No extension engine, workers or injected scripts until explicitly enabled.
     @ObservationIgnored private(set) lazy var controller: WKWebExtensionController = {
