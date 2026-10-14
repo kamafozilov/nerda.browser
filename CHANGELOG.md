@@ -11,6 +11,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - Extensions are turned off for now, while they are made faster and more reliable: the extensions button, Settings › Extensions and the Add to Nerda button in the Chrome Web Store are gone. Extensions you installed and their settings are kept for when they come back.
 
+### Fixed
+
+- A video in full screen fills the whole screen when the Mac shows scroll bars (a mouse connected, or Always in System Settings), where the page's scroll bar kept a strip down its right.
+
 ## [0.0.22] - 2026-10-07
 
 ### Added

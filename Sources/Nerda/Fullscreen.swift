@@ -63,6 +63,8 @@ enum Fullscreen {
                     z-index: 2147483647 !important;
                 }
                 iframe[${marker}] { border: none !important; padding: 0 !important; }
+                /* The page's scroll bar, when the Mac shows scroll bars, would keep a strip of the screen. */
+                :root:has([${marker}]) { overflow: hidden !important; }
                 /* Undoes what being a popover adds, where the site says nothing itself. */
                 :where([${marker}]) { border: none; padding: 0; overflow: visible; color: inherit; background-color: transparent; }
                 [${marker}]::backdrop { background: black !important; }
