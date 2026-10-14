@@ -373,7 +373,7 @@ final class Tab: Identifiable {
             page.observe(\.title) { [weak self] page, _ in
                 MainActor.assumeIsolated {
                     self?.pageTitle = page.title ?? ""
-                    if self?.isPrivate == false, let url = page.url, let title = page.title { History.shared.name(url, title) }
+                    if self?.isPrivate == false, let url = page.url, let title = page.title { self?.history.name(url, title) }
                 }
             },
             page.observe(\.isLoading) { [weak self] page, _ in
@@ -760,8 +760,11 @@ final class Tab: Identifiable {
         guard !isPrivate, let page, let url = page.url, url != recorded,
               page.backForwardList.currentItem?.url == url else { return }
         recorded = url
-        History.shared.visit(url, title: page.title ?? "")
+        history.visit(url, title: page.title ?? "")
     }
+
+    /// Its window's profile's; Personal's for a tab in no window (tests).
+    private var history: History { (delegate as? Browser)?.profile.history ?? .shared }
 
     /// Go Back from a page that couldn't be opened: to the page still under
     /// it, when a link from there failed, or else back in its history.
@@ -951,10 +954,11 @@ final class Tab: Identifiable {
         let configuration = prepared.copy() as! WKWebViewConfiguration
         configuration.websiteDataStore = dataStore
         configuration.userContentController = contents(of: dataStore)
-        // Chrome extensions see the pages of the regular window, not an
-        // incognito one's, as in Chrome. The controller has to be there when
-        // the page is made; it can't be added after.
-        if dataStore.isPersistent, Extensions.enabledAtLaunch { configuration.webExtensionController = Extensions.shared.controller }
+        // Chrome extensions see the pages of Personal's window, not an
+        // incognito one's, as in Chrome, nor another profile's (its store
+        // has an identifier). The controller has to be there when the page
+        // is made; it can't be added after.
+        if dataStore.isPersistent, dataStore.identifier == nil, Extensions.enabledAtLaunch { configuration.webExtensionController = Extensions.shared.controller }
         return configuration
     }
 

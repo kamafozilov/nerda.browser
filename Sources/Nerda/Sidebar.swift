@@ -217,7 +217,7 @@ struct Sidebar: View {
             }
 
             HStack {
-                SidebarMenuButton(shown: $menuShown, incognito: browser.isPrivate)
+                SidebarMenuButton(shown: $menuShown, incognito: browser.isPrivate, profile: browser.markedProfile)
                 Spacer()
                 if showsAIChats { AIChatsButton(browser: browser, shown: $aiChatsShown) }
                 DownloadsButton(browser: browser, shown: $downloadsShown)

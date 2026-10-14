@@ -165,13 +165,18 @@ final class Favicons {
 
     /// Takes off disk the icons of sites no longer in history, bookmarks or
     /// an open tab: once history is deleted, the folder would otherwise
-    /// still list the sites visited.
+    /// still list the sites visited. Every profile's with a window counts;
+    /// one whose window hasn't opened this run fetches its icons again.
     func forgetUnvisited() {
         guard folder != nil else { return }
         var kept = Set(History.shared.visits.keys.compactMap(Self.origin(of:)))
         kept.formUnion(Bookmarks.shared.all.compactMap { Self.origin(of: $0.item.url) })
         for case let window as BrowserWindow in NSApplication.shared.windows {
-            kept.formUnion(window.browser.tabs.compactMap { Self.origin(of: $0.site) })
+            let browser = window.browser
+            kept.formUnion(browser.tabs.compactMap { Self.origin(of: $0.site) })
+            guard !browser.isPrivate, !browser.profile.isMain else { continue }
+            kept.formUnion(browser.profile.history.visits.keys.compactMap(Self.origin(of:)))
+            kept.formUnion(browser.profile.bookmarks.all.compactMap { Self.origin(of: $0.item.url) })
         }
         forget(keeping: kept)
     }

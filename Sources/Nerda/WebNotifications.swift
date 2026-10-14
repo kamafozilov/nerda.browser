@@ -55,6 +55,18 @@ enum WebNotifications {
         UNUserNotificationCenter.current().delegate = delegate
     }
 
+    /// Another profile's store, as it is made, hands its service workers'
+    /// notifications over too.
+    static func watch(_ store: WKWebsiteDataStore) {
+        guard isAvailable, Bundle.main.bundleIdentifier != nil else { return }
+        store.setValue(delegate, forKey: "_delegate")
+    }
+
+    /// The site settings of the profile whose store it is.
+    private static func settings(of store: WKWebsiteDataStore) -> SiteSettings {
+        store.identifier.flatMap(Profiles.shared.profile)?.siteSettings ?? .shared
+    }
+
     /// WebKit's WKNotificationProviderV0: its version, then seven callbacks.
     private static let provider: Ref = {
         typealias Show = @convention(c) (Ref?, Ref, Ref?) -> Void
@@ -101,11 +113,13 @@ enum WebNotifications {
         return "\(scheme)://\(host)" + (port.map { ":\($0)" } ?? "")
     }
 
-    /// Whether a notification from `url` may show: its site is allowed, and
-    /// it is not an incognito window's.
-    private static func allowed(_ url: URL, on page: WKWebView?) -> Bool {
-        guard SiteSettings.shared.options(for: url).notifications == .allow else { return false }
-        return page.flatMap(browser(of:))?.isPrivate != true
+    /// Whether a notification from `url` may show: its site is allowed, in
+    /// the settings of the page's profile, or else those given, and it is not
+    /// an incognito window's.
+    private static func allowed(_ url: URL, on page: WKWebView?, settings: SiteSettings = .shared) -> Bool {
+        let browser = page.flatMap(browser(of:))
+        guard (browser?.siteSettings ?? settings).options(for: url).notifications == .allow else { return false }
+        return browser?.isPrivate != true
     }
 
     private static func show(_ notification: Ref, from pageRef: Ref?) {
@@ -201,31 +215,29 @@ enum WebNotifications {
         browser.window?.makeKeyAndOrderFront(nil)
     }
 
-    /// The same, for a service worker's: a tab of its site, or a new one.
-    private static func bringForward(_ site: URL) {
+    /// The same, for a service worker's: a tab of its site, or a new one, in
+    /// its profile's window.
+    private static func bringForward(_ site: URL, of profile: Profile) {
         NSApp.activate()
-        guard let browser = (NSApp.keyWindow as? BrowserWindow)?.browser
-                ?? NSApp.windows.lazy.compactMap({ ($0 as? BrowserWindow)?.browser }).first(where: { !$0.isPrivate }),
-              !browser.isPrivate else { return }
+        let browser = Windows.show(profile)
         if let tab = browser.tabs.first(where: { SiteSettings.origin($0.site) == SiteSettings.origin(site) }) {
             browser.select(tab.id)
         } else {
             browser.open(site)
         }
-        browser.window?.makeKeyAndOrderFront(nil)
     }
 
     private final class Delegate: NSObject, UNUserNotificationCenterDelegate {
         @objc(notificationPermissionsForWebsiteDataStore:)
         func permissions(_ store: WKWebsiteDataStore) -> [String: NSNumber] {
-            SiteSettings.shared.notificationPermissions.mapValues { NSNumber(value: $0) }
+            WebNotifications.settings(of: store).notificationPermissions.mapValues { NSNumber(value: $0) }
         }
 
         /// A service worker's (`registration.showNotification`).
         @objc(websiteDataStore:showNotification:)
         func show(_ store: WKWebsiteDataStore, notification: NSObject) {
             guard let origin = notification.value(forKey: "origin") as? String, let site = URL(string: origin),
-                  WebNotifications.allowed(site, on: nil),
+                  WebNotifications.allowed(site, on: nil, settings: WebNotifications.settings(of: store)),
                   let identifier = notification.value(forKey: "identifier") as? String else { return }
             let content = UNMutableNotificationContent()
             content.title = notification.value(forKey: "title") as? String ?? ""
@@ -233,7 +245,8 @@ enum WebNotifications {
             content.subtitle = History.site(of: site) ?? origin
             content.threadIdentifier = origin
             content.sound = .default
-            content.userInfo = ["workerNotification": notification.value(forKey: "userInfo") as? [String: Any] ?? [:], "site": origin]
+            content.userInfo = ["workerNotification": notification.value(forKey: "userInfo") as? [String: Any] ?? [:], "site": origin,
+                                "profile": store.identifier?.uuidString ?? ""]
             WebNotifications.post(UNNotificationRequest(identifier: "worker.\(identifier)", content: content, trigger: nil))
         }
 
@@ -248,13 +261,15 @@ enum WebNotifications {
             let web = (info["webNotification"] as? String).flatMap(UInt64.init)
             nonisolated(unsafe) let worker = info["workerNotification"] as? [String: Any]
             let site = (info["site"] as? String).flatMap(URL.init(string:))
+            let profile = (info["profile"] as? String).flatMap(UUID.init(uuidString:))
             await MainActor.run {
                 if let web {
                     WebNotifications.bringForward(WebNotifications.shown[web]?.page.value)
                     if let manager = WebNotifications.manager { WebNotifications.didClick?(manager, web) }
                 } else if let worker, let site {
-                    WebNotifications.bringForward(site)
-                    WebNotifications.clickWorker(worker)
+                    let profile = profile.flatMap(Profiles.shared.profile) ?? .main
+                    WebNotifications.bringForward(site, of: profile)
+                    WebNotifications.clickWorker(worker, in: profile.dataStore)
                 } else {
                     // An extension's, which has no page to go back to.
                     NSApp.activate()
@@ -263,9 +278,8 @@ enum WebNotifications {
         }
     }
 
-    private static func clickWorker(_ info: [String: Any]) {
+    private static func clickWorker(_ info: [String: Any], in store: WKWebsiteDataStore) {
         let click = NSSelectorFromString("_processPersistentNotificationClick:completionHandler:")
-        let store = WKWebsiteDataStore.default()
         guard store.responds(to: click) else { return }
         typealias Click = @convention(c) (AnyObject, Selector, NSDictionary, @escaping @convention(block) (Bool) -> Void) -> Void
         unsafeBitCast(store.method(for: click), to: Click.self)(store, click, info as NSDictionary) { _ in }

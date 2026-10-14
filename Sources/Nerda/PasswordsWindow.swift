@@ -5,15 +5,21 @@ import SwiftUI
 /// Passwords (the sidebar's menu, Window, ⌥⌘L): every saved sign-in down the
 /// left, to search, and the one picked on the right, to see, copy, change,
 /// open or remove; more are added by hand with +. It opens after Touch ID or
-/// the Mac's password, and asks again the next time it opens.
+/// the Mac's password, and asks again the next time it opens. One profile's
+/// at a time: the window in front's.
 enum PasswordsWindow {
     fileprivate static var window: NSWindow?
+    private static var profile: Profile?
     private static var closing: (any NSObjectProtocol)?
     /// Asking the person at the Mac who they are, before it opens.
     private static var asking = false
 
-    static func show() {
-        if let window { return window.makeKeyAndOrderFront(nil) }
+    static func show(_ profile: Profile) {
+        if let window {
+            if profile === Self.profile { return window.makeKeyAndOrderFront(nil) }
+            // Another profile's: it goes, and this one's asks, as a window opening does.
+            window.close()
+        }
         guard !asking else { return }
         asking = true
         Task {
@@ -24,23 +30,28 @@ enum PasswordsWindow {
                                                          localizedReason: "show your saved passwords")) == true
                 else { return }
             }
-            open()
+            open(profile)
         }
     }
 
-    private static func open() {
+    /// Closed with its profile, as that is deleted.
+    static func close(_ profile: Profile) {
+        if profile === Self.profile { window?.close() }
+    }
+
+    private static func open(_ profile: Profile) {
         if window == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 540),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                                   backing: .buffered, defer: false)
-            window.title = "Passwords"
+            window.title = Profiles.shared.many ? "\(profile.name) Passwords" : "Passwords"
             // The list runs up under the window's buttons, as in Mail or Passwords.
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
             window.isReleasedWhenClosed = false
             // As big as it was left, not as big as the list: a search that
             // finds little would shrink it.
-            let content = NSHostingView(rootView: PasswordsView())
+            let content = NSHostingView(rootView: PasswordsView(profile: profile))
             content.sizingOptions = [.minSize]
             window.contentView = content
             if !window.setFrameUsingName("Passwords") { window.center() }
@@ -51,11 +62,13 @@ enum PasswordsWindow {
             closing = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
                 MainActor.assumeIsolated {
                     Self.window = nil
+                    Self.profile = nil
                     if let closing = Self.closing { NotificationCenter.default.removeObserver(closing) }
                     Self.closing = nil
                 }
             }
             Self.window = window
+            Self.profile = profile
         }
         window?.makeKeyAndOrderFront(nil)
     }
@@ -95,6 +108,8 @@ enum PasswordsWindow {
 
 
 private struct PasswordsView: View {
+    let profile: Profile
+
     /// What the add and edit sheet holds; `old` is the one being changed.
     struct Draft: Identifiable {
         let id = UUID()
@@ -113,7 +128,7 @@ private struct PasswordsView: View {
     @State private var removing: Account?
     @FocusState private var searching: Bool
 
-    private var vault: Vault { .shared }
+    private var vault: Vault { profile.vault }
 
     /// Those that match the search, by site and then name, in the order of the alphabet.
     private var found: [Vault.Name] {
@@ -202,8 +217,8 @@ private struct PasswordsView: View {
             }
 
             if !names.isEmpty {
-                Text(query.isEmpty ? (names.count == 1 ? "1 password" : "\(names.count) passwords")
-                                   : "\(found.count) of \(names.count)")
+                Text((query.isEmpty ? (names.count == 1 ? "1 password" : "\(names.count) passwords")
+                                    : "\(found.count) of \(names.count)") + (Profiles.shared.many ? " in \(profile.name)" : ""))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -239,7 +254,7 @@ private struct PasswordsView: View {
                 Button("Add a Password") { draft = Draft() }
             }
         } else if let account = selection, let name = found.first(where: { $0.account == account }) {
-            AccountDetail(name: name, password: seen[account],
+            AccountDetail(profile: profile, name: name, password: seen[account],
                           reveal: { reveal(account) },
                           copyPassword: { withPassword(of: account) { PasswordsWindow.copy($0) } },
                           edit: { edit(account) },
@@ -347,6 +362,7 @@ private struct AccountRow: View {
 /// The one picked: what it is for, its name and password, each with a way
 /// to copy it, and the site, to go to.
 private struct AccountDetail: View {
+    let profile: Profile
     let name: Vault.Name
     /// Shown, or nil while hidden.
     let password: String?
@@ -432,12 +448,10 @@ private struct AccountDetail: View {
         .padding(.bottom, 10)
     }
 
-    /// In a new tab of the regular window, brought forward.
+    /// In a new tab of the profile's window, brought forward.
     private func open() {
-        guard let url = URL(string: "\(name.clear == true ? "http" : "https")://\(account.host)"),
-              let window = Windows.regular else { return }
-        window.browser.open(url)
-        window.makeKeyAndOrderFront(nil)
+        guard let url = URL(string: "\(name.clear == true ? "http" : "https")://\(account.host)") else { return }
+        Windows.show(profile).open(url)
     }
 }
 

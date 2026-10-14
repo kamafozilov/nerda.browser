@@ -3,10 +3,12 @@ import LocalAuthentication
 import SwiftUI
 import WebKit
 
-/// Nerda's windows: the regular one, made at launch (main.swift), and any
-/// incognito ones (⇧⌘N). Incognito windows share one store in memory, as
-/// Chrome's do: signed in to a site in one, you are in all of them, until the
-/// last one closes and takes the store, with every cookie in it, along.
+/// Nerda's windows: the regular one, Personal's, made at launch (main.swift),
+/// one for each other profile, made as it is first opened (File › New
+/// Window), and any incognito ones (⇧⌘N). Incognito windows share one store
+/// in memory, as Chrome's do: signed in to a site in one, you are in all of
+/// them, until the last one closes and takes the store, with every cookie in
+/// it, along.
 ///
 /// They lock together, as Safari's private windows do: at once when the Mac
 /// locks its screen or sleeps, and once Nerda has been in the background for
@@ -14,6 +16,9 @@ import WebKit
 /// password opens them again.
 enum Windows {
     static var regular: BrowserWindow!
+    /// Each other profile's window, with what looks after it: kept once made,
+    /// closed or not, as the regular one is.
+    private static var profiles: [AppDelegate] = []
     /// Each open incognito window, with what looks after it.
     private static var incognito: [AppDelegate] = []
     private static var lockTimer: Task<Void, Never>?
@@ -127,10 +132,73 @@ enum Windows {
 
     /// The regular window, brought back with its tabs if it was closed: for
     /// what an incognito window leaves to it (settings, history).
-    static func showRegular() -> Browser {
-        if !regular.isVisible { regular.browser.restore(from: Session.file) }
-        regular.makeKeyAndOrderFront(nil)
-        return regular.browser
+    static func showRegular() -> Browser { show(.main) }
+
+    /// A profile's window in front: made the first time, and brought back
+    /// with its tabs if it was closed.
+    @discardableResult
+    static func show(_ profile: Profile) -> Browser {
+        let window = window(of: profile)
+        if !window.isVisible { window.browser.restore(from: profile.sessionFile) }
+        window.makeKeyAndOrderFront(nil)
+        mark(profile, open: true)
+        return window.browser
+    }
+
+    private static func window(of profile: Profile) -> BrowserWindow {
+        if profile.isMain { return regular }
+        if let made = profiles.lazy.compactMap({ $0.window as? BrowserWindow }).first(where: { $0.browser.profile === profile }) {
+            return made
+        }
+        let browser = Browser(profile: profile)
+        let window = BrowserWindow(browser: browser)
+        let delegate = AppDelegate(window: window, browser: browser)
+        window.delegate = delegate
+        profiles.append(delegate)
+        return window
+    }
+
+    /// At launch, each other profile's window that was open, with its tabs,
+    /// behind the regular one. With Personal alone, none.
+    static func reopenProfiles() {
+        for profile in Profiles.shared.all where profile.open {
+            let window = window(of: profile)
+            window.browser.restore(from: profile.sessionFile)
+            window.order(.below, relativeTo: regular.windowNumber)
+        }
+    }
+
+    /// Whether its window opens again at the next launch, written as it
+    /// changes. Personal's always does.
+    static func mark(_ profile: Profile, open: Bool) {
+        guard !profile.isMain, profile.open != open, Profiles.shared.all.contains(where: { $0 === profile }) else { return }
+        profile.open = open
+        Profiles.shared.save()
+    }
+
+    /// Its window closed and let go of, before the profile is deleted:
+    /// WebKit removes a store only once no page uses it.
+    static func forget(_ profile: Profile) {
+        guard let index = profiles.firstIndex(where: { $0.browser.profile === profile }) else { return }
+        let delegate = profiles.remove(at: index)
+        delegate.window.close()
+        delegate.window.delegate = nil
+        delegate.window.contentView = nil
+    }
+
+    /// Every window's browser but incognito ones': what is saved as Nerda quits.
+    static var browsers: [Browser] { [regular?.browser].compactMap(\.self) + profiles.map(\.browser) }
+
+    /// The window of a profile used last, in front of the others, where links
+    /// from other apps open, as in Safari; none with none showing.
+    static var lastUsed: BrowserWindow? {
+        NSApp.orderedWindows.lazy.compactMap { $0 as? BrowserWindow }.first { $0.isVisible && !$0.browser.isPrivate }
+    }
+
+    /// The names the Window menu lists them by: with profiles, each its
+    /// profile's, as one is added, renamed or deleted.
+    static func retitle() {
+        for case let window as BrowserWindow in NSApp.windows { window.title = BrowserWindow.title(of: window.browser) }
     }
 }
 

@@ -52,6 +52,8 @@ final class AppMenu: NSObject {
         let fileMenu = submenu("File", [
             item("New Tab", #selector(newTab), "t", target: self),
             item("Reopen Closed Tab", #selector(reopenClosedTab), "t", [.command, .shift], target: self),
+            // A window for each profile, as Safari's; there only once there are profiles (`fillFile`).
+            Self.profileWindows,
             item("New Incognito Window", #selector(newIncognitoWindow), "n", [.command, .shift], target: self),
             // ⌘⇧A, as Chrome's Search Tabs: a key sites leave to the browser,
             // where ⌘K is often a site's own.
@@ -224,11 +226,19 @@ final class AppMenu: NSObject {
     /// brought back, for what opens a tab or a field in it.
     private var shown: Browser { (NSApp.mainWindow as? BrowserWindow)?.browser ?? Windows.showRegular() }
 
+    /// The window in front's, for what its profile keeps and an incognito
+    /// window doesn't (bookmarks): the regular one's, for incognito.
+    private var kept: Browser { browser.isPrivate ? regular : browser }
+
     @objc private func newIncognitoWindow() { Windows.openIncognito() }
+    @objc private func openProfileWindow(_ sender: NSMenuItem) {
+        guard let profile = (sender.representedObject as? UUID).flatMap(Profiles.shared.profile) else { return }
+        Windows.show(profile)
+    }
     @objc private func openSettings() { shown.openSettings() }
     @objc private func openHistory() { shown.openHistory() }
     @objc private func openTaskManager() { TaskManager.show() }
-    @objc private func openPasswords() { PasswordsWindow.show() }
+    @objc private func openPasswords() { PasswordsWindow.show(browser.profile) }
     @objc private func searchTabs() { shown.showCommandBar() }
     @objc private func openLocation() { shown.editAddress() }
     @objc private func openFile() {
@@ -269,10 +279,10 @@ final class AppMenu: NSObject {
     @objc private func nextTab() { browser.selectTab(after: 1) }
     @objc private func previousTab() { browser.selectTab(after: -1) }
     @objc private func importPasswords() { browser.importPasswords() }
-    // Into the regular window, as incognito keeps no history.
-    @objc private func importFromBrowser() { Windows.showRegular().importFromBrowser() }
-    @objc private func importBookmarks() { regular.importBookmarks() }
-    @objc private func exportBookmarks() { regular.exportBookmarks() }
+    // Into the profile's window, as incognito keeps no history: Personal's for an incognito one.
+    @objc private func importFromBrowser() { Windows.show(browser.profile).importFromBrowser() }
+    @objc private func importBookmarks() { kept.importBookmarks() }
+    @objc private func exportBookmarks() { kept.exportBookmarks() }
     @objc private func toggleBookmark() { browser.toggleBookmark() }
     @objc private func toggleResponsive() { browser.toggleResponsive() }
     @objc private func toggleReader() { browser.toggleReader() }
@@ -287,10 +297,10 @@ final class AppMenu: NSObject {
         browser.selected?.inspect(what)
     }
 
-    /// A bookmark from the menu, in the regular window: incognito keeps none.
+    /// A bookmark from the menu, in its profile's window: incognito keeps none.
     @objc private func openBookmark(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? Bookmarks.Item.ID else { return }
-        let browser = Windows.showRegular()
+        let browser = Windows.show(self.browser.profile)
         if browser.commandBarOpen { browser.hideCommandBar() }
         browser.open(bookmark: id)
     }
@@ -360,7 +370,7 @@ extension AppMenu: NSMenuItemValidation {
         // A locked incognito window's tabs are out of reach; what goes to the
         // regular window, or unlocks first (a new incognito window), is not.
         if browser.locked {
-            return [#selector(openSettings), #selector(openHistory), #selector(newIncognitoWindow),
+            return [#selector(openSettings), #selector(openHistory), #selector(newIncognitoWindow), #selector(openProfileWindow(_:)),
                     #selector(checkForUpdates), #selector(importFromBrowser), #selector(importPasswords), #selector(importBookmarks), #selector(exportBookmarks), #selector(openBookmark(_:)),
                     #selector(choosePicture), #selector(useOwnPictures)].contains(item.action)
         }
@@ -416,7 +426,7 @@ extension AppMenu: NSMenuItemValidation {
         case #selector(useOwnPictures):
             return Backdrop.shared.wallpaper != .daily
         case #selector(clearHistory):
-            return !History.shared.visits.isEmpty
+            return !browser.profile.history.visits.isEmpty
         default:
             return true
         }
@@ -440,7 +450,7 @@ extension AppMenu: NSMenuDelegate {
             menu.addItem(submenu("Recently Closed", closed))
         }
         menu.addItem(.separator())
-        for visit in History.shared.recent(15) {
+        for visit in browser.profile.history.recent(15) {
             let title = visit.title.isEmpty ? visit.url.absoluteString : visit.title
             let item = item(title.count > 60 ? title.prefix(59) + "…" : title, #selector(openVisit(_:)), target: self)
             item.representedObject = visit.url
@@ -453,8 +463,18 @@ extension AppMenu: NSMenuDelegate {
 
     /// Share, with the Mac's own ways to share the page on screen (AirDrop,
     /// Messages, Mail, Notes and the rest), as Safari's File menu has it;
-    /// greyed with no web page on screen.
+    /// greyed with no web page on screen. New Window, with a profile each,
+    /// once there is more than Personal.
     private func fillFile(_ menu: NSMenu) {
+        if let windows = menu.items.first(where: { $0.identifier == Self.profileWindowsID }) {
+            windows.isHidden = !Profiles.shared.many
+            windows.submenu?.items = windows.isHidden ? [] : Profiles.shared.all.map { profile in
+                let item = item(profile.name, #selector(openProfileWindow(_:)), target: self)
+                item.representedObject = profile.id
+                item.image = Self.image(of: profile)
+                return item
+            }
+        }
         guard let index = menu.items.firstIndex(where: { $0.identifier == Self.shareID }) else { return }
         sharing = (browser.locked ? nil : browser.selected?.shareable).map { NSSharingServicePicker(items: [$0]) }
         let item = sharing?.standardShareMenuItem ?? Self.noShare
@@ -464,6 +484,21 @@ extension AppMenu: NSMenuDelegate {
     }
 
     private static let shareID = NSUserInterfaceItemIdentifier("share")
+    private static let profileWindowsID = NSUserInterfaceItemIdentifier("profileWindows")
+
+    private static var profileWindows: NSMenuItem {
+        let item = NSMenuItem(title: "New Window", action: nil, keyEquivalent: "")
+        item.identifier = profileWindowsID
+        item.submenu = NSMenu(title: "New Window")
+        item.isHidden = true
+        return item
+    }
+
+    /// A profile's symbol, in its colour.
+    private static func image(of profile: Profile) -> NSImage? {
+        NSImage(systemSymbolName: profile.symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(paletteColors: [NSColor(profile.color.color)]))
+    }
 
     /// Share, greyed: no action, so the menu turns it off.
     private static var noShare: NSMenuItem {
@@ -475,7 +510,7 @@ extension AppMenu: NSMenuDelegate {
     /// Under Bookmark This Tab, the bookmarks, each folder a submenu of what is in it.
     private func fillBookmarks(_ menu: NSMenu) {
         while menu.items.count > 1 { menu.removeItem(at: 1) }
-        let bookmarks = Bookmarks.shared.items
+        let bookmarks = browser.profile.bookmarks.items
         if !bookmarks.isEmpty { menu.addItem(.separator()) }
         add(bookmarks, to: menu)
     }
@@ -518,10 +553,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// An incognito window's closing lets go of it, and with the last one,
-    /// of all it held (see `Windows`).
+    /// of all it held (see `Windows`). A profile's stays closed at the next launch.
     func windowWillClose(_ notification: Notification) {
         browser.closeAll()
-        if browser.isPrivate { Windows.closed(self) }
+        if browser.isPrivate { Windows.closed(self) } else { Windows.mark(browser.profile, open: false) }
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -540,17 +575,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// The window comes back with the tabs it closed with.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows {
-            browser.restore(from: Session.file)
+            browser.restore(from: browser.profile.sessionFile)
             window.makeKeyAndOrderFront(nil)
         }
         return true
     }
 
-    /// Links from other apps and documents from Finder open in the regular window.
+    /// Links from other apps and documents from Finder open in the window of
+    /// a profile used last (`Windows.lastUsed`), never an incognito one; with
+    /// none showing, or Personal alone, in the regular window.
     func application(_ application: NSApplication, open urls: [URL]) {
         let links = urls.filter(ExternalNavigation.accepts)
         guard !links.isEmpty else { return }
-        if browser.tabs.isEmpty { browser.restore(from: Session.file) }
+        let last = Windows.lastUsed
+        let window = last ?? self.window
+        let browser = last?.browser ?? self.browser
+        if browser.tabs.isEmpty { browser.restore(from: browser.profile.sessionFile) }
         if browser.commandBarOpen { browser.hideCommandBar() }
         browser.endAddressEdit()
         for url in links { browser.go(to: url) }
@@ -560,11 +600,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // With no tabs there is nothing to lose.
-        let hasWork = NSApp.windows.compactMap { ($0 as? BrowserWindow)?.browser }.contains {
+        // With no tabs in any window, a profile's or incognito, there is nothing to lose.
+        let browsers = NSApp.windows.compactMap { ($0 as? BrowserWindow)?.browser }
+        let hasWork = browsers.contains {
             $0.tabs.contains(where: \.hasUnsavedWork) || $0.downloads.contains(where: \.needsSession)
         }
-        guard (QuitConfirmation.isWanted && !browser.tabs.isEmpty) || hasWork, !QuitConfirmation.systemIsQuitting,
+        let hasTabs = browsers.contains { !$0.tabs.isEmpty }
+        guard (QuitConfirmation.isWanted && hasTabs) || hasWork, !QuitConfirmation.systemIsQuitting,
               !Updater.shared.relaunching
         else {
             return .terminateNow
@@ -602,9 +644,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         floating = nil
     }
 
+    /// Every profile's window: their tabs and history.
     func save(waiting: Bool = true) {
-        browser.saveSession()
-        History.shared.save(waiting: waiting)
+        for browser in Windows.browsers {
+            browser.saveSession()
+            browser.profile.history.save(waiting: waiting)
+        }
         // Written as they change: only what is on its way is waited for.
         if waiting { Bookmarks.writer.sync {} }
     }

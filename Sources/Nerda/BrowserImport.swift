@@ -364,7 +364,7 @@ private struct ImportSheet: View {
                  bookmarks ? BrowserImport.bookmarks(of: profile) : [])
             }.value
             guard !Task.isCancelled else { return }
-            let pages = if let visits = read.0, !visits.isEmpty { await History.shared.add(visits) } else { 0 }
+            let pages = if let visits = read.0, !visits.isEmpty { await browser.profile.history.add(visits) } else { 0 }
             let marks = read.1.map(Bookmarks.pages) ?? 0
             if let found = read.1, marks > 0 {
                 withAnimation(.slide) { browser.bookmarks.add(Bookmarks.Item(title: "Imported from \(profile.browser)", children: found)) }

@@ -9,6 +9,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Added
 
+- Profiles, as in Safari: Settings › Profiles makes one for work, school or anything else, with a name, a symbol and a colour. Each has its own window, history, bookmarks, open tabs, site settings, saved passwords, cookies and website data, so you can be signed in to two accounts of a site side by side. Open a profile's window from File › New Window or the top of the menu in the sidebar's corner, whose button shows the profile's symbol. Links from other apps open in the window you used last, and the windows you left open come back when Nerda opens.
 - A site that asks you to log in before it opens, as a router or a company's intranet does, asks in a sheet over its page, filled in with the password you saved for it. A wrong password asks again with your user name kept, and one that gets you in is offered to save, as one typed into a page is.
 - Translate a page in a language that isn't one of yours with the Translate button at the end of the address bar, or View › Translation, as in Safari. It is translated on your Mac, nothing is sent anywhere, and the tab goes on translating the pages you open in it until you choose Show Original.
 - Find on Page (⌘F) shows how many matches there are ("3 of 12"), lights every one of them on the page, the one on show in yellow, and brings it to the middle of the window. The magnifying glass in the find bar has Match Case and Whole Words, as in Safari, and remembers them.

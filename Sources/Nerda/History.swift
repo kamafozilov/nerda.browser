@@ -523,6 +523,16 @@ final class History {
         }
     }
 
+    /// Never written again once what is on its way has landed: its profile
+    /// is being deleted, folder and all.
+    func close() {
+        settle()
+        pendingSave?.cancel()
+        pendingSave = nil
+        file = nil
+        Self.writer.sync {}
+    }
+
     /// A shorter time to keep history for drops what is now too old, at once.
     func keepChanged() {
         dirty = true

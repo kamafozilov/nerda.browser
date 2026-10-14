@@ -4,7 +4,7 @@ import WebKit
 /// The pages of Nerda's settings, listed down the settings tab's left. Only
 /// what works is listed: a page comes once it has something in it.
 enum SettingsPage: String, CaseIterable, Identifiable, Codable {
-    case general, appearance, tabs, passwords, autofill, siteSettings, privacy, extensions, shortcuts, releaseNotes
+    case general, appearance, tabs, passwords, autofill, siteSettings, privacy, profiles, extensions, shortcuts, releaseNotes
 
     var id: Self { self }
 
@@ -17,6 +17,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .autofill: "AutoFill"
         case .siteSettings: "Site Settings"
         case .privacy: "Security & Privacy"
+        case .profiles: "Profiles"
         case .extensions: "Extensions"
         case .shortcuts: "Keyboard Shortcuts"
         case .releaseNotes: "Release Notes"
@@ -32,6 +33,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .autofill: "person.text.rectangle"
         case .siteSettings: "slider.horizontal.3"
         case .privacy: "lock"
+        case .profiles: "person.crop.circle"
         case .extensions: "puzzlepiece.extension"
         case .shortcuts: "keyboard"
         case .releaseNotes: "sparkles"
@@ -41,7 +43,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
     /// The heading it is listed under.
     var section: String {
         switch self {
-        case .general, .appearance, .tabs, .passwords, .autofill, .siteSettings, .privacy, .extensions, .shortcuts: "Personal"
+        case .general, .appearance, .tabs, .passwords, .autofill, .siteSettings, .privacy, .profiles, .extensions, .shortcuts: "Personal"
         case .releaseNotes: "Nerda"
         }
     }
@@ -60,6 +62,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .siteSettings: ["permissions", "camera", "microphone", "location", "notifications", "pop-ups", "popups", "sites", "allow", "block", "ads"]
         case .privacy: ["security", "https", "secure connections", "upgrade", "history", "keep history", "delete", "clear", "cookies", "cache", "site data", "ads", "trackers", "adblock", "blocking",
                         "filters", "easylist", "ublock", "adguard", "incognito", "private", "lock"]
+        case .profiles: ["work", "personal", "school", "separate", "new profile", "window", "accounts", "cookies", "rename", "delete"]
         case .extensions: ["chrome web store", "add-ons", "plugins", "unpacked", "developer"] + Extensions.shared.installed.map(\.name)
         case .shortcuts: ["keyboard", "keys", "hotkeys"] + ShortcutsSettings.groups.flatMap { $0.shortcuts.map(\.title) }
         case .releaseNotes: ["what's new", "changelog", "changes", "version", "updates"]
@@ -93,6 +96,9 @@ struct SettingsView: View {
     /// An address or card being added or changed (Settings › AutoFill).
     @State private var editingContact: Contact?
     @State private var editingCard: Card?
+    /// A profile being made or changed, and one about to be deleted (Settings › Profiles).
+    @State private var editingProfile: ProfileDraft?
+    @State private var deletingProfile: Profile?
 
     var body: some View {
         let open = tab.settings.flatMap { $0 != .extensions || Extensions.available ? $0 : nil } ?? .general
@@ -147,9 +153,11 @@ struct SettingsView: View {
                     case .autofill:
                         AutoFillSettings(edit: { editingContact = $0 }, editCard: { editingCard = $0 })
                     case .siteSettings:
-                        SitePermissionsSettings()
+                        SitePermissionsSettings(browser: browser)
                     case .privacy:
                         PrivacySettings(browser: browser) { deletingData = true }
+                    case .profiles:
+                        ProfilesSettings(browser: browser) { editingProfile = $0 }
                     case .extensions:
                         ExtensionsSettings(browser: browser)
                     case .shortcuts:
@@ -162,7 +170,8 @@ struct SettingsView: View {
                 .padding(.horizontal, 32)
                 .padding(.vertical, 56)
                 .frame(maxWidth: .infinity)
-                .dialogBlur(editingLanguages || editingSearch || deletingData || editingContact != nil || editingCard != nil)
+                .dialogBlur(editingLanguages || editingSearch || deletingData || editingContact != nil || editingCard != nil
+                            || editingProfile != nil || deletingProfile != nil)
             }
             .scrollIndicators(.never)
             .scrollBounceBehavior(.basedOnSize)
@@ -193,6 +202,12 @@ struct SettingsView: View {
                 }
                 if let card = editingCard {
                     CardDialog(card: card, escapes: dropdown == nil) { editingCard = nil }
+                }
+                if let draft = editingProfile {
+                    ProfileDialog(draft: draft, escapes: dropdown == nil, delete: { deletingProfile = $0 }) { editingProfile = nil }
+                }
+                if let profile = deletingProfile {
+                    DeleteProfileDialog(profile: profile, escapes: dropdown == nil) { deletingProfile = nil }
                 }
             }
         }
@@ -305,8 +320,8 @@ private struct GeneralSettings: View {
             SettingsRow(title: "Import and export", detail: "From Chrome, Safari, Firefox or Arc, or yours to a file",
                         icon: "book") {
                 HStack(spacing: 8) {
-                    Button("Import…") { Windows.regular.browser.importBookmarks() }
-                    Button("Export…") { Windows.regular.browser.exportBookmarks() }
+                    Button("Import…", action: browser.importBookmarks)
+                    Button("Export…", action: browser.exportBookmarks)
                 }
                 .buttonStyle(SettingsButtonStyle())
                 .fixedSize()
@@ -415,7 +430,10 @@ private struct PrivacySettings: View {
             }
             SettingsLink(title: "View browsing history", icon: "clock.arrow.circlepath", action: browser.openHistory)
         }
-        .onChange(of: keep) { History.shared.keepChanged() }
+        .onChange(of: keep) {
+            // Each profile's with a window; another's as it is next written.
+            for window in NSApp.windows { (window as? BrowserWindow)?.browser.history.keepChanged() }
+        }
         SettingsGroup(title: "Adblock") {
             SettingsRow(title: "Block ads and trackers", detail: blockDetail, icon: "hand.raised") {
                 SettingsToggle(title: "Block ads and trackers", isOn: $blocker.isEnabled)
@@ -507,7 +525,7 @@ private struct PasswordsSettings: View {
     var body: some View {
         SettingsGroup {
             SettingsLink(title: "Saved passwords", detail: "See, copy and change them. Opens with Touch ID or your Mac's password",
-                         icon: "key", action: PasswordsWindow.show)
+                         icon: "key") { PasswordsWindow.show(browser.profile) }
             SettingsRow(title: "Import passwords", detail: "From the file Passwords, Safari or Chrome exports", icon: "tray.and.arrow.down") {
                 Button("Import…", action: browser.importPasswords)
                     .buttonStyle(SettingsButtonStyle())
@@ -609,11 +627,224 @@ private struct AutoFillSettings: View {
     }
 }
 
+/// Profiles, as Safari's: browsing kept apart, each with its own history,
+/// bookmarks, tabs, cookies, site settings and passwords, in a window of its
+/// own. Personal, the browsing there was before, comes first and stays.
+private struct ProfilesSettings: View {
+    let browser: Browser
+    let edit: (ProfileDraft) -> Void
+
+    private var profiles: Profiles { .shared }
+
+    var body: some View {
+        SettingsGroup {
+            ForEach(profiles.all) { profile in
+                let here = profile === browser.profile
+                SettingsRow(title: profile.name, detail: here && profiles.many ? "This window" : nil,
+                            icon: profile.symbol, tint: profile.color.color) {
+                    HStack(spacing: 8) {
+                        if !here {
+                            Button("Open") { Windows.show(profile) }
+                                .accessibilityLabel("Open \(profile.name) Window")
+                        }
+                        Button("Edit…") { edit(ProfileDraft(profile)) }
+                            .accessibilityLabel("Edit \(profile.name)")
+                    }
+                    .buttonStyle(SettingsButtonStyle())
+                    .fixedSize()
+                }
+            }
+            SettingsRow(title: "New profile",
+                        detail: profiles.many ? nil : "Each has its own history, bookmarks, tabs, cookies and passwords",
+                        icon: "plus") {
+                Button("Add…") { edit(ProfileDraft(taken: profiles.all)) }
+                    .buttonStyle(SettingsButtonStyle())
+                    .fixedSize()
+            }
+        }
+    }
+}
+
+/// What a profile is made or changed to, until it is saved.
+struct ProfileDraft: Identifiable {
+    let id = UUID()
+    /// The one being changed; nil for a new one.
+    var profile: Profile?
+    var name = ""
+    var symbol = "briefcase"
+    var color = Palette.Accent.orange
+
+    init(_ profile: Profile) {
+        self.profile = profile
+        (name, symbol, color) = (profile.name, profile.symbol, profile.color)
+    }
+
+    /// A new one, with a symbol and a colour no other has yet, while there are some.
+    init(taken: [Profile]) {
+        symbol = Profile.symbols.map(\.symbol).first { symbol in !taken.contains { $0.symbol == symbol } } ?? symbol
+        color = Palette.Accent.allCases.first { color in !taken.contains { $0.color == color } } ?? color
+    }
+}
+
+/// A profile's name, symbol and colour, as Safari asks for them; any but
+/// Personal is deleted from here too.
+private struct ProfileDialog: View {
+    let escapes: Bool
+    let delete: (Profile) -> Void
+    let done: () -> Void
+
+    @State private var draft: ProfileDraft
+    @FocusState private var naming: Bool
+
+    init(draft: ProfileDraft, escapes: Bool, delete: @escaping (Profile) -> Void, done: @escaping () -> Void) {
+        _draft = State(initialValue: draft)
+        self.escapes = escapes
+        self.delete = delete
+        self.done = done
+    }
+
+    private var name: String { draft.name.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        SettingsDialog(width: 400, escapes: escapes, cancel: done) {
+            Text(draft.profile == nil ? "New profile" : "Edit profile")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            label("Name")
+                .padding(.top, 16)
+            TextField("Name", text: $draft.name, prompt: Text("Work"))
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+                .focused($naming)
+                .onSubmit(save)
+            label("Symbol")
+                .padding(.top, 16)
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(52), spacing: 8), count: 6), alignment: .leading, spacing: 8) {
+                ForEach(Profile.symbols, id: \.symbol) { symbol in
+                    choice(symbol.name, picked: draft.symbol == symbol.symbol) { draft.symbol = symbol.symbol } label: {
+                        Image(systemName: symbol.symbol)
+                            .font(.system(size: 16))
+                            .foregroundStyle(draft.symbol == symbol.symbol ? draft.color.color : Palette.muted)
+                            .frame(width: 52, height: 36)
+                    }
+                }
+            }
+            label("Colour")
+                .padding(.top, 16)
+            HStack(spacing: 8) {
+                ForEach(Palette.Accent.allCases) { color in
+                    choice(color.name, picked: draft.color == color) { draft.color = color } label: {
+                        Circle()
+                            .fill(color.color)
+                            .frame(width: 18, height: 18)
+                            .frame(width: 37, height: 32)
+                    }
+                }
+            }
+            HStack(spacing: 8) {
+                if let profile = draft.profile, !profile.isMain {
+                    Button("Delete…", role: .destructive) {
+                        done()
+                        delete(profile)
+                    }
+                    .buttonStyle(SettingsButtonStyle())
+                }
+                Spacer()
+                Button("Cancel", action: done)
+                    .buttonStyle(SettingsButtonStyle())
+                Button(draft.profile == nil ? "Create" : "Save", action: save)
+                    .buttonStyle(SettingsButtonStyle(prominent: true))
+                    .disabled(name.isEmpty)
+            }
+            .padding(.top, 22)
+        }
+        .onAppear { naming = true }
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(Palette.ink)
+            .padding(.bottom, 8)
+    }
+
+    /// One of the symbols or colours, ringed when it is the one picked.
+    private func choice(_ title: String, picked: Bool, pick: @escaping () -> Void, @ViewBuilder label: () -> some View) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        return Button(action: pick) {
+            label()
+                .background(picked ? Palette.wash : Color.primary.opacity(0.045), in: shape)
+                .overlay(shape.strokeBorder(picked ? Palette.ink.opacity(0.5) : .clear, lineWidth: 1.5))
+                .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(picked ? .isSelected : [])
+    }
+
+    private func save() {
+        guard !name.isEmpty else { return }
+        if let profile = draft.profile {
+            (profile.name, profile.symbol, profile.color) = (name, draft.symbol, draft.color)
+            Profiles.shared.save()
+        } else {
+            Profiles.shared.add(name: name, symbol: draft.symbol, color: draft.color)
+        }
+        Windows.retitle()
+        done()
+    }
+}
+
+/// Deleting a profile, once asked: all it kept goes from this Mac, and its window closes.
+private struct DeleteProfileDialog: View {
+    let profile: Profile
+    let escapes: Bool
+    let done: () -> Void
+
+    var body: some View {
+        SettingsDialog(width: 380, escapes: escapes, cancel: done) {
+            Text("Delete “\(profile.name)”?")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            Text("Its history, bookmarks, open tabs, site settings, saved passwords, cookies and website data are deleted from this Mac, and its window closes.")
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+            HStack(spacing: 8) {
+                Spacer()
+                Button("Cancel", action: done)
+                    .buttonStyle(SettingsButtonStyle())
+                Button("Delete", role: .destructive, action: delete)
+                    .buttonStyle(SettingsButtonStyle())
+            }
+            .padding(.top, 22)
+        }
+    }
+
+    /// Once this click is over: the window it is in may be the profile's,
+    /// which closes.
+    private func delete() {
+        let profile = profile
+        done()
+        DispatchQueue.main.async {
+            PasswordsWindow.close(profile)
+            Windows.forget(profile)
+            Task {
+                await Profiles.shared.remove(profile)
+                Windows.retitle()
+            }
+        }
+    }
+}
+
 /// What sites may do: what every site gets unless it has a choice of its
 /// own, and each site that has, to change or reset. The same choices as
 /// Site Settings beside the address.
 private struct SitePermissionsSettings: View {
-    private let settings = SiteSettings.shared
+    let browser: Browser
+    private var settings: SiteSettings { browser.siteSettings }
     @State private var fallbacks = Dictionary(uniqueKeysWithValues: SiteSettings.Kind.allCases.map { ($0, $0.fallback) })
     @State private var offOnMac: Set<SiteSettings.Kind> = []
 
@@ -701,7 +932,7 @@ private struct SitePermissionsSettings: View {
             }
             Toggle("Block Ads and Trackers", isOn: Binding(get: { options.blocksAds }, set: { change(\.blocksAds, to: $0, for: url) }))
             Divider()
-            Button("Reset Site Settings") { Windows.regular.browser.changeSiteOptions(.init(), for: url) }
+            Button("Reset Site Settings") { browser.changeSiteOptions(.init(), for: url) }
         } label: {
             Image(systemName: "ellipsis")
                 .frame(width: 24, height: 24)
@@ -715,11 +946,11 @@ private struct SitePermissionsSettings: View {
         .accessibilityLabel("Settings for \(name(url))")
     }
 
-    /// Through the regular window, which takes back what is no longer allowed at once.
+    /// Through the window, which takes back what is no longer allowed at once.
     private func change<T>(_ key: WritableKeyPath<SiteSettings.Options, T>, to value: T, for url: URL) {
         var options = settings.options(for: url)
         options[keyPath: key] = value
-        Windows.regular.browser.changeSiteOptions(options, for: url)
+        browser.changeSiteOptions(options, for: url)
     }
 }
 
@@ -946,7 +1177,7 @@ struct DeleteDataDialog: View {
 
     var body: some View {
         let since = range.since
-        let pages = History.shared.visits.values.count { $0.last >= since }
+        let pages = browser.history.visits.values.count { $0.last >= since }
         SettingsDialog(width: 380, escapes: escapes, cancel: done) {
             Text("Delete browsing data")
                 .font(.system(size: 17, weight: .semibold))
@@ -1012,16 +1243,18 @@ struct DeleteDataDialog: View {
 
     private func delete(since: Date) async {
         deleting = true
+        // The profile's windows only, an incognito one's downloads included:
+        // another profile's are none of this one's browsing.
+        let windows = NSApp.windows.compactMap { ($0 as? BrowserWindow)?.browser }.filter { $0.profile === browser.profile }
         if history {
-            History.shared.remove(since: since)
-            for window in NSApp.windows {
-                guard let browser = (window as? BrowserWindow)?.browser else { continue }
-                browser.recentlyClosed.removeAll { $0.date >= since }
-                browser.sessionChanged()
+            browser.history.remove(since: since)
+            for window in windows {
+                window.recentlyClosed.removeAll { $0.date >= since }
+                window.sessionChanged()
             }
         }
         if downloads {
-            for window in NSApp.windows { (window as? BrowserWindow)?.browser.clearDownloads(since: since) }
+            for window in windows { window.clearDownloads(since: since) }
         }
         let types = (cache ? Self.cacheTypes : []).union(cookies ? Self.cookieTypes : []).union(storage ? Self.storageTypes : [])
         if !types.isEmpty { await browser.dataStore.removeData(ofTypes: types, modifiedSince: since) }
@@ -2364,6 +2597,8 @@ private struct SettingsRow<Control: View>: View {
     let title: String
     var detail: String?
     var icon: String?
+    /// The icon's colour in place of the grey: a profile's.
+    var tint: Color?
     var alignment = VerticalAlignment.center
     @ViewBuilder let control: Control
 
@@ -2372,7 +2607,7 @@ private struct SettingsRow<Control: View>: View {
             if let icon {
                 Image(systemName: icon)
                     .font(.system(size: 15))
-                    .foregroundStyle(Palette.muted)
+                    .foregroundStyle(tint ?? Palette.muted)
                     .frame(width: 20)
             }
             VStack(alignment: .leading, spacing: 2) {
