@@ -164,8 +164,24 @@ nonisolated final class HostPipe: @unchecked Sendable {
     private let output = Pipe()
     private var buffer = Data()
     private let lock = NSLock()
-    var onMessage: ((Any) -> Void)?
-    var onExit: (() -> Void)?
+    private var handler: ((Any) -> Void)?
+    private var exitHandler: (() -> Void)?
+    /// Set on the main thread, read on the pipe's: both under `lock`.
+    var onMessage: ((Any) -> Void)? {
+        get { lock.withLock { handler } }
+        set { lock.withLock { handler = newValue } }
+    }
+    /// Set after the host has already ended, it runs at once: no ending
+    /// would come through it otherwise.
+    var onExit: (() -> Void)? {
+        get { lock.withLock { exitHandler } }
+        set {
+            lock.lock()
+            guard !ended else { lock.unlock(); newValue?(); return }
+            exitHandler = newValue
+            lock.unlock()
+        }
+    }
     private var waiters: [CheckedContinuation<Reply, Error>] = []
     /// Messages that came before anyone asked: a one-shot reply can beat
     /// `readOne` registering its waiter.
@@ -256,7 +272,7 @@ nonisolated final class HostPipe: @unchecked Sendable {
             handed.append((waiters.removeFirst(), message))
         }
         let rest = messages.dropFirst(handed.count)
-        let handler = onMessage
+        let handler = handler
         // ponytail: unread is unbounded, but only a one-shot pipe (no
         // handler) keeps anything, and it is stopped after one reply.
         if handler == nil { unread.append(contentsOf: rest) }
@@ -271,8 +287,8 @@ nonisolated final class HostPipe: @unchecked Sendable {
         ended = true
         let pending = waiters
         waiters = []
-        let exit = onExit
-        onExit = nil
+        let exit = exitHandler
+        exitHandler = nil
         lock.unlock()
         pending.forEach { $0.resume(throwing: ExtensionNative.Refused(why: "Native host has exited.")) }
         exit?()
