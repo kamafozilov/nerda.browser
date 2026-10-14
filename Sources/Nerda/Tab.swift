@@ -901,6 +901,7 @@ final class Tab: Identifiable {
         // the page is made; it can't be added after.
         if dataStore.isPersistent, Extensions.enabledAtLaunch { configuration.webExtensionController = Extensions.shared.controller }
         Selection.install(in: configuration.userContentController)
+        Find.install(in: configuration.userContentController)
         // The first page made starts the blocker: WebKit is being started for
         // it anyway. Cached rules arrive asynchronously; navigation never waits.
         Blocker.shared.start()

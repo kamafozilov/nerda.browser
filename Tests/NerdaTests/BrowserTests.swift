@@ -765,6 +765,79 @@ func iconsAreKeptPerOrigin(url: String, origin: String?) {
     #expect(try await selected() == "")
 }
 
+/// What the find bar shows once the look `look` starts comes back.
+@MainActor
+private func found(in browser: Browser, by look: () -> Void) async throws -> Find.Matches? {
+    let before = browser.findMatches
+    look()
+    for _ in 0..<100 where browser.findMatches == before { try await Task.sleep(for: .milliseconds(20)) }
+    return browser.findMatches
+}
+
+/// Find counts the matches shown, across the page's tags but not from one
+/// paragraph into the next, goes round past either end, and keeps to case
+/// and whole words when asked.
+@MainActor
+@Test func findCountsWhatIsShown() async throws {
+    let defaults = UserDefaults.standard
+    defer {
+        defaults.removeObject(forKey: Browser.findMatchCaseKey)
+        defaults.removeObject(forKey: Browser.findWholeWordsKey)
+    }
+    let browser = Browser()
+    let tab = Tab()
+    browser.add(tab)
+    let page = tab.webView
+    page.loadHTMLString(#"<p>Needle</p><p>a needle <b>ne</b>edle</p><div style="display: none">needle</div>"#
+        + #"<p style="visibility: hidden">needle</p><p>needles</p>"#, baseURL: somewhere)
+    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    browser.findQuery = "needle"
+
+    #expect(try await found(in: browser) { browser.find() } == .init(index: 1, count: 4, more: false))
+    #expect(try await found(in: browser) { browser.find() }?.index == 2)
+    _ = try await found(in: browser) { browser.find(backwards: true) }
+    #expect(try await found(in: browser) { browser.find(backwards: true) }?.index == 4)
+    #expect(try await page.callAsyncJavaScript("return getSelection().toString()", contentWorld: .page) as? String == "needle")
+    // A match the page adds is counted at the next look, which goes on from the one on show.
+    _ = try await page.callAsyncJavaScript("document.body.insertAdjacentHTML('beforeend', '<p>needle</p>')", contentWorld: .page)
+    #expect(try await found(in: browser) { browser.find() } == .init(index: 5, count: 5, more: false))
+
+    func count(matchCase: Bool, wholeWords: Bool) async throws -> Int? {
+        defaults.set(matchCase, forKey: Browser.findMatchCaseKey)
+        defaults.set(wholeWords, forKey: Browser.findWholeWordsKey)
+        browser.clearFound()
+        return try await found(in: browser) { browser.find() }?.count
+    }
+    #expect(try await count(matchCase: true, wholeWords: false) == 4)
+    #expect(try await count(matchCase: false, wholeWords: true) == 4)
+    #expect(try await count(matchCase: true, wholeWords: true) == 3)
+    browser.findQuery = "haystack"
+    #expect(try await count(matchCase: false, wholeWords: false) == 0)
+}
+
+/// Every match is lit while the bar is up, the one on show apart, and none
+/// after; a frame of the page's own site is looked in too.
+@MainActor
+@Test func putAwayFindTakesItsLightsOff() async throws {
+    let browser = Browser()
+    let tab = Tab()
+    browser.add(tab)
+    let page = tab.webView
+    page.loadHTMLString(#"<p>needle, needle and needle</p><iframe srcdoc="<p>needle</p>"></iframe>"#, baseURL: somewhere)
+    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    func lit() async throws -> [Int]? {
+        try await page.callAsyncJavaScript("return ['nerda-find', 'nerda-find-current'].map(name => CSS.highlights.get(name)?.size ?? 0)",
+                                           contentWorld: .page) as? [Int]
+    }
+    browser.showFindBar()
+    browser.findQuery = "needle"
+    #expect(try await found(in: browser) { browser.find() }?.count == 4)
+    #expect(try await lit() == [3, 1])
+    browser.hideFindBar()
+    for _ in 0..<100 where try await lit() != [0, 0] { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(try await lit() == [0, 0])
+}
+
 /// Pages see nothing of Nerda that Safari doesn't show them: no
 /// `window.webkit`, the mark of an app's web view, which Google answers
 /// with CAPTCHAs.

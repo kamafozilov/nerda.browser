@@ -14,16 +14,8 @@ import WebKit
 // part inside: WebKit gives it no range to draw.
 enum Selection {
     static func install(in controller: WKUserContentController) {
-        // WebKit SPI, as Safari's extensions use: a style sheet of the user's,
-        // under the page's own, so a site's `::selection` still wins. Should it
-        // go, WebKit draws selections itself, as before.
-        let add = NSSelectorFromString("_addUserStyleSheet:")
-        guard let type = NSClassFromString("_WKUserStyleSheet") as? NSObject.Type, controller.responds(to: add) else { return }
-        let initializer = NSSelectorFromString("initWithSource:forMainFrameOnly:")
-        typealias Initializer = @convention(c) (AnyObject, Selector, NSString, Bool) -> AnyObject
-        let sheet = unsafeBitCast(type.instanceMethod(for: initializer), to: Initializer.self)(
-            type.perform(NSSelectorFromString("alloc")).takeUnretainedValue(), initializer, css as NSString, false)
-        controller.perform(add, with: sheet)
+        // Should the style sheet's SPI go, WebKit draws selections itself, as before.
+        guard controller.addUserStyleSheet(css) else { return }
         controller.addUserScript(script)
     }
 
@@ -67,4 +59,20 @@ enum Selection {
             addEventListener('blur', () => { active = false; show(); });
         })();
         """, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient)
+}
+
+extension WKUserContentController {
+    /// WebKit SPI, as Safari's extensions use: a style sheet of the user's, in
+    /// every frame, under the page's own, so a site's `::selection` still
+    /// wins. False where it has gone.
+    @discardableResult func addUserStyleSheet(_ css: String) -> Bool {
+        let add = NSSelectorFromString("_addUserStyleSheet:")
+        guard let type = NSClassFromString("_WKUserStyleSheet") as? NSObject.Type, responds(to: add) else { return false }
+        let initializer = NSSelectorFromString("initWithSource:forMainFrameOnly:")
+        typealias Initializer = @convention(c) (AnyObject, Selector, NSString, Bool) -> AnyObject
+        let sheet = unsafeBitCast(type.instanceMethod(for: initializer), to: Initializer.self)(
+            type.perform(NSSelectorFromString("alloc")).takeUnretainedValue(), initializer, css as NSString, false)
+        perform(add, with: sheet)
+        return true
+    }
 }

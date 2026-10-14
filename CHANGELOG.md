@@ -10,6 +10,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Added
 
 - Translate a page in a language that isn't one of yours with the Translate button at the end of the address bar, or View › Translation, as in Safari. It is translated on your Mac, nothing is sent anywhere, and the tab goes on translating the pages you open in it until you choose Show Original.
+- Find on Page (⌘F) shows how many matches there are ("3 of 12"), lights every one of them on the page, the one on show in yellow, and brings it to the middle of the window. The magnifying glass in the find bar has Match Case and Whole Words, as in Safari, and remembers them.
 
 ### Changed
 
