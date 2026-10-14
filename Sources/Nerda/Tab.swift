@@ -944,9 +944,68 @@ final class Tab: Identifiable {
 
     static let processPool = WKWebViewConfiguration().value(forKey: "processPool")
 
+    /// A tab's configuration: a copy of the one made ready, with its data
+    /// store's contents. Made afresh for each tab opened or woken, it sent
+    /// WebKit every script, handler and block list again each time.
     private static func configuration(_ dataStore: WKWebsiteDataStore) -> WKWebViewConfiguration {
-        let configuration = WKWebViewConfiguration()
+        let configuration = prepared.copy() as! WKWebViewConfiguration
         configuration.websiteDataStore = dataStore
+        configuration.userContentController = contents(of: dataStore)
+        // Chrome extensions see the pages of the regular window, not an
+        // incognito one's, as in Chrome. The controller has to be there when
+        // the page is made; it can't be added after.
+        if dataStore.isPersistent, Extensions.enabledAtLaunch { configuration.webExtensionController = Extensions.shared.controller }
+        return configuration
+    }
+
+    /// A data store's scripts, handlers, style sheets and block lists, one set
+    /// shared by all its tabs, as Safari shares one per profile. Popups get
+    /// their opener's from WebKit, and the handlers find their tab by the
+    /// page that wrote, so nothing in them is any one tab's.
+    private struct Contents {
+        /// Weak: an incognito store, and its contents with it, go once its last window has closed.
+        weak var store: WKWebsiteDataStore?
+        let controller: WKUserContentController
+    }
+
+    private static var contents: [Contents] = []
+
+    static func contents(of dataStore: WKWebsiteDataStore) -> WKUserContentController {
+        contents.removeAll { $0.store == nil }
+        if let kept = contents.first(where: { $0.store === dataStore }) { return kept.controller }
+        let controller = WKUserContentController()
+        controller.addUserScript(Fullscreen.script)
+        controller.addUserScript(Fullscreen.bridge)
+        controller.add(Fullscreen.messages, contentWorld: .defaultClient, name: "fullscreen")
+        Passwords.install(in: controller)
+        PageActivity.install(in: controller)
+        if Extensions.available { WebStore.install(in: controller) }
+        Selection.install(in: controller)
+        Find.install(in: controller)
+        // Every store's, and each list as it comes or goes, or blocking is turned off or on.
+        Blocker.shared.install(in: controller)
+        controller.addUserScript(googleSignIn)
+        controller.addUserScript(geminiButton)
+        controller.addUserScript(linkHover)
+        controller.add(preconnects, contentWorld: .defaultClient, name: "preconnect")
+        controller.addUserScript(middleClick)
+        controller.add(middleClicks, contentWorld: .defaultClient, name: "middleClick")
+        controller.addUserScript(keepFocus)
+        controller.addUserScript(unseenMedia)
+        controller.addUserScript(LiveRate.script)
+        controller.addUserScript(pageErrors)
+        controller.add(pageErrorCounts, contentWorld: .defaultClient, name: "pageError")
+        controller.add(Translator.messages, contentWorld: .defaultClient, name: "translate")
+        controller.addUserScript(JSONViewer.script)
+        contents.append(Contents(store: dataStore, controller: controller))
+        return controller
+    }
+
+    /// What every tab's configuration is a copy of. Its preferences are
+    /// shared by the copies, as Safari's tabs share theirs: what is set in
+    /// them per page (the frame rate) is the same for every page anyway.
+    private static let prepared: WKWebViewConfiguration = {
+        let configuration = WKWebViewConfiguration()
         // One pool for every tab. Left to itself each configuration makes its
         // own, and each pool reads every font on the Mac before its first page
         // can start, holding up the window ~30 ms for each tab opened or woken.
@@ -954,6 +1013,9 @@ final class Tab: Identifiable {
         // still has (measured on macOS 27).
         configuration.setValue(processPool, forKey: "processPool")
         WebNotifications.start(pool: processPool)
+        // The first page made starts the blocker: WebKit is being started for
+        // it anyway. Cached rules arrive asynchronously; navigation never waits.
+        Blocker.shared.start()
         configuration.applicationNameForUserAgent = applicationName
         // Every window a page opens is put to the browser, which opens only
         // those from a click or a key, as Safari does, and tells of the rest
@@ -962,35 +1024,6 @@ final class Tab: Identifiable {
         // WebKit's full screen, under our own (see Fullscreen). Pages a page
         // opens (popups) are given this configuration's, script and all.
         configuration.preferences.isElementFullscreenEnabled = true
-        configuration.userContentController.addUserScript(Fullscreen.script)
-        configuration.userContentController.addUserScript(Fullscreen.bridge)
-        configuration.userContentController.add(Fullscreen.messages, contentWorld: .defaultClient, name: "fullscreen")
-        Passwords.install(in: configuration.userContentController)
-        PageActivity.install(in: configuration.userContentController)
-        if Extensions.available { WebStore.install(in: configuration.userContentController) }
-        // Chrome extensions see the pages of the regular window, not an
-        // incognito one's, as in Chrome. The controller has to be there when
-        // the page is made; it can't be added after.
-        if dataStore.isPersistent, Extensions.enabledAtLaunch { configuration.webExtensionController = Extensions.shared.controller }
-        Selection.install(in: configuration.userContentController)
-        Find.install(in: configuration.userContentController)
-        // The first page made starts the blocker: WebKit is being started for
-        // it anyway. Cached rules arrive asynchronously; navigation never waits.
-        Blocker.shared.start()
-        Blocker.shared.install(in: configuration.userContentController)
-        configuration.userContentController.addUserScript(googleSignIn)
-        configuration.userContentController.addUserScript(geminiButton)
-        configuration.userContentController.addUserScript(linkHover)
-        configuration.userContentController.add(preconnects, contentWorld: .defaultClient, name: "preconnect")
-        configuration.userContentController.addUserScript(middleClick)
-        configuration.userContentController.add(middleClicks, contentWorld: .defaultClient, name: "middleClick")
-        configuration.userContentController.addUserScript(keepFocus)
-        configuration.userContentController.addUserScript(unseenMedia)
-        configuration.userContentController.addUserScript(LiveRate.script)
-        configuration.userContentController.addUserScript(pageErrors)
-        configuration.userContentController.add(pageErrorCounts, contentWorld: .defaultClient, name: "pageError")
-        configuration.userContentController.add(Translator.messages, contentWorld: .defaultClient, name: "translate")
-        configuration.userContentController.addUserScript(JSONViewer.script)
         configuration.setURLSchemeHandler(ViewSource.handler, forURLScheme: ViewSource.scheme)
         // WebKit samples the page's top edge only when asked, allowing this
         // much difference across it (as Safari does), for `recolor`.
@@ -1012,7 +1045,7 @@ final class Tab: Identifiable {
         // next shown. Never one on screen, or playing sound.
         set(configuration, "_setCPULimit:", 0.5)
         return configuration
-    }
+    }()
 
     /// Calls a setter of WebKit's own (SPI, as Safari uses), if WebKit still has it.
     private static func set(_ object: NSObject, _ setter: String, _ value: Double) {

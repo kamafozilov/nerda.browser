@@ -296,6 +296,54 @@ struct ReadinessTests {
         #expect(try await !fetch(first, "/ads"))
     }
 
+    /// Tabs of one store share one set of scripts and block lists, a woken
+    /// tab's included, and turning blocking off and on reaches pages already open.
+    @Test func tabsShareTheirStoresContentsAndBlockingReachesThem() async throws {
+        let folder = try readinessFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let server = try ReadinessServer()
+        defer { server.listener.cancel() }
+        let incognito = WKWebsiteDataStore.nonPersistent()
+        let first = Nerda.Tab(), second = Nerda.Tab(), regular = Nerda.Tab()
+        first.dataStore = incognito
+        second.dataStore = incognito
+        let shared = first.webView.configuration.userContentController
+        #expect(second.webView.configuration.userContentController === shared)
+        #expect(regular.webView.configuration.userContentController !== shared)
+        #expect(Nerda.Tab().webView.configuration.userContentController === regular.webView.configuration.userContentController)
+        second.sleep()
+        #expect(second.webView.configuration.userContentController === shared)
+
+        let store = try #require(WKContentRuleListStore(url: folder))
+        let rule = try #require(try await store.compileContentRuleList(forIdentifier: "nerda-shared", encodedContentRuleList: #"[{"trigger":{"url-filter":"/ads","resource-type":["raw"]},"action":{"type":"block"}}]"#))
+        let blocker = Blocker.shared, rules = blocker.rules, setting = UserDefaults.standard.object(forKey: "blockAdsAndTrackers")
+        defer {
+            blocker.use(rules)
+            blocker.isEnabled = setting as? Bool ?? true
+            UserDefaults.standard.set(setting, forKey: "blockAdsAndTrackers")
+        }
+        blocker.isEnabled = true
+        let url = try await server.url()
+        for tab in [first, second] { tab.webView.load(URLRequest(url: url)) }
+        try await waitFor { [first, second].allSatisfy { $0.webView.url == url && !$0.webView.isLoading } }
+        // Whether each tab's page may fetch what the rule blocks.
+        func fetched() async throws -> [Bool] {
+            var answers: [Bool] = []
+            for tab in [first, second] {
+                answers.append(try await tab.webView.callAsyncJavaScript(
+                    "try { return (await fetch('/ads', {cache:'no-store'})).ok; } catch { return false; }", contentWorld: .page) as? Bool == true)
+            }
+            return answers
+        }
+        #expect(try await fetched() == [true, true])
+        blocker.use([rule])
+        #expect(try await fetched() == [false, false])
+        blocker.isEnabled = false
+        #expect(try await fetched() == [true, true])
+        blocker.isEnabled = true
+        #expect(try await fetched() == [false, false])
+    }
+
     @Test func bookmarkExportRoundTripsFoldersAndEscapedText() {
         let items = [Bookmarks.Item(title: "Work & <friends>", children: [
             .init(title: "A \"quoted\" page", url: URL(string: "https://example.com/?a=1&b=2")),
