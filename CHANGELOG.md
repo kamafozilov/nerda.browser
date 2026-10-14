@@ -15,6 +15,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - Site Settings says Connection is not fully secure for a secure page that loaded part of itself over plain http, where it showed the lock as for a fully secure one.
 - A video in full screen fills the whole screen when the Mac shows scroll bars (a mouse connected, or Always in System Settings), where the page's scroll bar kept a strip down its right.
+- Download Linked File in a link's right-click menu saves the file and lists it in Downloads, where it did nothing.
 
 ## [0.0.22] - 2026-10-07
 

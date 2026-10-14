@@ -680,6 +680,14 @@ extension Browser: WKNavigationDelegate {
         }
     }
 
+    /// Download Linked File in a link's right-click menu. WebKit starts the
+    /// download itself and hands it only to a navigation delegate that
+    /// answers this name (SPI, as Safari's); unanswered, the file went nowhere.
+    @objc(_webView:contextMenuDidCreateDownload:)
+    func contextMenuDidCreate(_ webView: WKWebView, download: WKDownload) {
+        track(download)
+    }
+
     /// A download an extension asked for (chrome.downloads), through the
     /// page on screen, or any page awake; false with none.
     func download(_ url: URL) async -> Bool {
