@@ -106,6 +106,9 @@ final class Browser: NSObject {
     @ObservationIgnored private var memoryPressure: (any DispatchSourceMemoryPressure)?
     /// The address last loaded again for a redirect WebKit lost, so it is only tried once.
     @ObservationIgnored private var retried: URL?
+    /// The frames whose navigation under way a click or a key in the page
+    /// started, by WebKit's handle for each (see `mayDownload`).
+    @ObservationIgnored private var clickedFrames: Set<NSObject> = []
     /// Where the tabs are saved as they change (see Session); nil keeps them
     /// to this run, as in tests, and while the window is closed.
     @ObservationIgnored var sessionFile: URL?
@@ -549,6 +552,8 @@ extension Browser: WKNavigationDelegate {
         preferences.allowsContentJavaScript = tab(for: webView)?.javaScriptOff != true
         if action.targetFrame?.isMainFrame ?? true {
             siteSettings.applyBlocking(to: preferences, for: action.request.url)
+        } else if let frame = Self.handle(of: action.targetFrame) {
+            if Self.clicked(action) { clickedFrames.insert(frame) } else { clickedFrames.remove(frame) }
         }
         let policy = await policy(for: action, in: webView)
         // A departure asked about but not taken asks again next time.
@@ -558,7 +563,9 @@ extension Browser: WKNavigationDelegate {
 
     private func policy(for action: WKNavigationAction, in webView: WKWebView) async -> WKNavigationActionPolicy {
         guard let url = action.request.url else { return .cancel }
-        if action.shouldPerformDownload { return .download }
+        if action.shouldPerformDownload {
+            return mayDownload(from: action.sourceFrame, in: webView, clicked: Self.clicked(action)) ? .download : .cancel
+        }
         // Back, Forward and Reload leave an edited page from the browser; an
         // address typed is asked in `Tab.go`. Links and the page's own
         // navigations (a sign-in's redirect) are the page's to ask about,
@@ -665,7 +672,51 @@ extension Browser: WKNavigationDelegate {
         // move to www.youtube.com as application/binary, which would be saved.
         if let status = http?.statusCode, (300..<400).contains(status) { return .allow }
         let disposition = http?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
-        return response.canShowMIMEType && !disposition.lowercased().hasPrefix("attachment") ? .allow : .download
+        let download = !response.canShowMIMEType || disposition.lowercased().hasPrefix("attachment")
+        if !response.isForMainFrame, let frame = Self.frame(of: response) {
+            let clicked = Self.handle(of: frame).map { clickedFrames.remove($0) != nil } ?? true
+            if download, !mayDownload(from: frame, in: webView, clicked: clicked) { return .cancel }
+        }
+        return download ? .download : .allow
+    }
+
+    /// The page itself, and a frame of the page's own site, may start a
+    /// download; a frame from another site only after a click or a key in
+    /// it, as in Chrome: an ad's frame can't push a file on you by itself.
+    private func mayDownload(from frame: WKFrameInfo, in webView: WKWebView, clicked: Bool) -> Bool {
+        let origin = frame.securityOrigin
+        return frame.isMainFrame || Self.mayDownload(from: (origin.protocol, origin.host, origin.port), on: webView.url, clicked: clicked)
+    }
+
+    nonisolated static func mayDownload(from origin: (scheme: String, host: String, port: Int), on page: URL?, clicked: Bool) -> Bool {
+        guard !clicked else { return true }
+        guard let page, let scheme = page.scheme?.lowercased(), let host = page.host()?.lowercased() else { return false }
+        // WebKit gives an origin on its scheme's own port as port 0.
+        func port(_ port: Int?, _ scheme: String) -> Int { port == ["http": 80, "https": 443][scheme] ? 0 : port ?? 0 }
+        return origin.scheme.lowercased() == scheme && origin.host.lowercased() == host
+            && port(origin.port, scheme) == port(page.port, scheme)
+    }
+
+    /// Whether a click or a key in the page started it, by WebKit's own
+    /// record of the gesture (SPI). Should that go, a link followed counts,
+    /// which a page's script can pass off as one.
+    private static func clicked(_ action: WKNavigationAction) -> Bool {
+        let key = "_isUserInitiated"
+        guard action.responds(to: NSSelectorFromString(key)) else { return action.navigationType == .linkActivated }
+        return action.value(forKey: key) as? Bool ?? false
+    }
+
+    /// The frame a response is for, and WebKit's handle for a frame, the same
+    /// from its navigation's start to its response (SPI). Should either go,
+    /// a frame's downloads start as they did before.
+    private static func frame(of response: WKNavigationResponse) -> WKFrameInfo? {
+        guard response.responds(to: NSSelectorFromString("_frame")) else { return nil }
+        return response.value(forKey: "_frame") as? WKFrameInfo
+    }
+
+    private static func handle(of frame: WKFrameInfo?) -> NSObject? {
+        guard let frame, frame.responds(to: NSSelectorFromString("_handle")) else { return nil }
+        return frame.value(forKey: "_handle") as? NSObject
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {

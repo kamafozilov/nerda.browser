@@ -454,6 +454,22 @@ func onlyThisMacIsTrustedAsItIs(host: String, trusted: Bool) {
     #expect(Browser.isThisMac(host) == trusted)
 }
 
+/// A frame from another site than the page's downloads only after a click
+/// in it; one of the page's own site, by itself too.
+@Test(arguments: [
+    ("https", "example.com", 0, "https://example.com/page", false, true),
+    ("https", "example.com", 443, "https://example.com:443/", false, true),
+    ("http", "localhost", 3000, "http://localhost:3000/", false, true),
+    ("https", "ads.example.net", 0, "https://example.com/page", false, false),
+    ("https", "ads.example.net", 0, "https://example.com/page", true, true),
+    ("http", "example.com", 0, "https://example.com/", false, false),
+    ("http", "localhost", 3001, "http://localhost:3000/", false, false),
+    ("https", "example.com", 0, "about:blank", false, false),
+])
+func framesFromAnotherSiteDownloadOnlyWhenClicked(scheme: String, host: String, port: Int, page: String, clicked: Bool, allowed: Bool) {
+    #expect(Browser.mayDownload(from: (scheme, host, port), on: URL(string: page), clicked: clicked) == allowed)
+}
+
 /// A tab out of sight can't bring itself forward with an alert: it waits
 /// for you to go to it.
 @MainActor
