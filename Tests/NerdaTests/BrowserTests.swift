@@ -1231,6 +1231,23 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     #expect(hidden.failure == nil)
 }
 
+/// A page that had something typed into it, on screen or not, isn't
+/// loaded again when its process dies: it says what happened, and waits
+/// for ⌘R. With what was typed gone, closing it no longer asks.
+@MainActor
+@Test(arguments: [true, false])
+func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) {
+    let browser = Browser()
+    browser.open(somewhere)
+    browser.open(somewhere)
+    let tab = browser.tabs[onScreen ? 0 : 1]
+    tab.hasUnsavedWork = true
+    browser.webViewWebContentProcessDidTerminate(tab.webView)
+    #expect(tab.failure?.url.host == "example.com")
+    #expect(!tab.isAsleep)
+    #expect(!tab.hasUnsavedWork)
+}
+
 // MARK: - History
 
 @MainActor
