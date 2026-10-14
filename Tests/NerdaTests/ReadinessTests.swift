@@ -134,6 +134,19 @@ struct ReadinessTests {
         #expect(restored.recentlyClosed.count == 25)
     }
 
+    /// A page opens at its site's zoom, a new tab's included.
+    @Test func pagesOpenAtTheirSitesZoom() async throws {
+        let server = try ReadinessServer()
+        defer { server.listener.cancel() }
+        let browser = Browser(dataStore: .nonPersistent())
+        defer { browser.closeAll() }
+        let url = try await server.url()
+        browser.setZoom(1.25, for: url)
+        let tab = browser.open(url)
+        try await waitFor { !tab.webView.isLoading && tab.url != nil }
+        #expect(tab.webView.pageZoom == 1.25)
+    }
+
     @Test func editedFramesStayAwakeAndCannotCloseSilently() async throws {
         let server = try ReadinessServer()
         defer { server.listener.cancel() }

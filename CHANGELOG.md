@@ -13,10 +13,13 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Find on Page (⌘F) shows how many matches there are ("3 of 12"), lights every one of them on the page, the one on show in yellow, and brings it to the middle of the window. The magnifying glass in the find bar has Match Case and Whole Words, as in Safari, and remembers them.
 - Reader, as in Safari: on an article, the Reader button beside the address shows it alone, in plain type that follows light and dark, without the menus, ads and comments round it. Click it again, or use View › Show Reader (⌃⌘R), to go back to the page as you left it.
 - File › Import From Browser… brings in your history and bookmarks from Chrome, Arc, Brave, Edge, Vivaldi, Opera or Firefox on this Mac: pick the browser and profile, and History, Bookmarks or both. Pages you visited join those in your history, as far back as Settings › Security & Privacy keeps it, and bookmarks go in a folder of their own at the end.
+- Settings › Tabs › Load background tabs when shown: a link you open behind the page, with ⌘-click, the middle button or Open Link in New Tab, shows its tab at once but loads only when you go to it, so opening many takes no time or memory meanwhile. It is off unless you turn it on, as Safari and Chrome load them at once.
 
 ### Changed
 
 - Extensions are turned off for now, while they are made faster and more reliable: the extensions button, Settings › Extensions and the Add to Nerda button in the Chrome Web Store are gone. Extensions you installed and their settings are kept for when they come back.
+- Open Link in New Tab, in a link's right-click menu, opens the tab behind the one you're on, as ⌘-click does and as in Safari and Chrome. It said Open Link in New Window and took you to the tab; hold ⌥ with the menu open for Open Link in New Tab and Go to It, which still does.
+- Zoom In (⌘+) and Zoom Out (⌘−) zoom the site, as in Safari, where they zoomed one tab: its other tabs follow, and its pages open at that zoom from then on, until Actual Size (⌘0) forgets it. Site Settings beside the address has the site's Zoom too. An incognito window keeps it only until it closes.
 
 ### Fixed
 
@@ -31,6 +34,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Security
 
+- An http:// address, typed or a link, opens over HTTPS when the site has it, as in Chrome, and over HTTP when it doesn't: that site then opens over HTTP until you quit. Settings › Security & Privacy › Upgrade connections to HTTPS turns it off.
 - A frame from another site inside a page, such as an ad, can start a download only after you click in it, as in Chrome. A page's own downloads start as before.
 - History no longer keeps a name and password written into an address, as in `https://name:password@example.com`; those an earlier version kept are taken out of it the next time Nerda opens.
 

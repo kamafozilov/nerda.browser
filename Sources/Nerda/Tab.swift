@@ -223,6 +223,14 @@ final class Tab: Identifiable {
         isAsleep = false
     }
 
+    /// A tab opened behind the page that waits to load until it is shown
+    /// (`Browser.openBehind`): asleep, as one from an earlier run, but with
+    /// nothing to wake to save its address, and its visit still to count.
+    init(waitingFor url: URL, title: String = "") {
+        self.url = url
+        pageTitle = title
+    }
+
     /// A tab from an earlier run, asleep: it shows its title and icon, and
     /// only loads, back where it was, once it is shown.
     init(restoring saved: Session.Tab) {
@@ -547,7 +555,7 @@ final class Tab: Identifiable {
             guard message.frameInfo.isMainFrame, let page = message.webView, let browser = page.uiDelegate as? Browser,
                   let address = message.body as? String, let url = URL(string: address),
                   ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
-            withAnimation(.slide) { browser.open(url, inBackground: true) }
+            withAnimation(.slide) { _ = browser.openBehind(url) }
         }
     }
 
@@ -775,9 +783,9 @@ final class Tab: Identifiable {
     }
 
     /// One step in or out (+1, −1), or back to the zoom pages open at (0).
-    // ponytail: per tab; Safari keeps zoom per site across launches.
+    /// A page's zoom is its site's, as in Safari: kept for its other tabs and
+    /// next visits, and forgotten by 0. Reader's, while it shows, is its own.
     func zoom(_ step: Int) {
-        // Reader's text, while it shows.
         let page = reader ?? webView
         let now = page.pageZoom
         let next: CGFloat? = switch step {
@@ -785,7 +793,18 @@ final class Tab: Identifiable {
         case 1...: PageZoom.levels.first { $0 > now + 0.01 }
         default: PageZoom.levels.last { $0 < now - 0.01 }
         }
-        if let next { page.pageZoom = next }
+        guard let next else { return }
+        if reader == nil, let url, SiteSettings.site(url) != nil, let browser = delegate as? Browser {
+            browser.setZoom(next, for: url)
+        } else {
+            page.pageZoom = next
+        }
+    }
+
+    /// Its site's zoom changed (`Browser.setZoom`): the page takes it, asleep or awake.
+    func siteZoomChanged(to zoom: CGFloat) {
+        page?.pageZoom = zoom
+        if slept != nil { slept?.zoom = zoom }
     }
 
     /// The zoom pages open at changed: a page left at the old one takes the

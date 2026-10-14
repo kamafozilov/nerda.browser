@@ -455,6 +455,32 @@ func onlyThisMacIsTrustedAsItIs(host: String, trusted: Bool) {
     #expect(Browser.isThisMac(host) == trusted)
 }
 
+/// http:// is tried over https only where a certificate could answer.
+@MainActor
+@Test(arguments: [
+    ("http://example.com/a", true), ("http://www.example.com:80/", true), ("http://example.com./", true),
+    ("https://example.com/", false), ("http://example.com:8080/", false), ("http://localhost/", false),
+    ("http://app.localhost/", false), ("http://127.0.0.1/", false), ("http://192.168.1.1/", false),
+    ("http://10.0.0.2/", false), ("http://[::1]/", false), ("http://[fe80::1]/", false), ("http://printer.local/", false),
+    ("http://intranet/", false), ("ftp://example.com/", false), ("file:///tmp/a.html", false),
+])
+func httpIsTriedOverHTTPSWhereItCanBe(address: String, tried: Bool) {
+    #expect(HTTPSUpgrade().applies(to: URL(string: address)!) == tried)
+}
+
+/// A site that came back over http is left to it for the session, by host.
+@MainActor
+@Test func aSiteBackOverHTTPIsLeftToIt() {
+    var upgrade = HTTPSUpgrade()
+    upgrade.committed(URL(string: "https://secure.example/")!)
+    upgrade.committed(URL(string: "http://192.168.1.1/")!)
+    #expect(upgrade.plain.isEmpty)
+    upgrade.committed(URL(string: "http://plain.example/page")!)
+    #expect(!upgrade.applies(to: URL(string: "http://plain.example/other")!))
+    #expect(upgrade.applies(to: URL(string: "http://www.plain.example/")!))
+    #expect(!HTTPSUpgrade().plain.contains("plain.example"))
+}
+
 /// A site's sign-in takes the password offered for it, but not one it has
 /// just turned down; with none, it is the page's to answer.
 @Test func aSignInTakesASavedPasswordOnce() {
@@ -2051,6 +2077,43 @@ private final class BlockerNavigation: NSObject, WKNavigationDelegate {
     #expect(zoomed.webView.pageZoom == 1.15)
     #expect(asleep.webView.pageZoom == 1.25)
     for tab in [plain, zoomed, asleep] { tab.silence() }
+}
+
+/// A zoom is kept by the site's name, www. or not, http or https, across
+/// launches; the zoom pages open at forgets it.
+@MainActor
+@Test func siteZoomIsKeptByTheSitesName() throws {
+    let suite = "nerda-site-zoom-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let settings = SiteSettings(defaults: defaults)
+    settings.setZoom(1.25, for: URL(string: "https://www.example.com/a")!)
+    #expect(settings.zoom(for: URL(string: "http://example.com/b")) == 1.25)
+    #expect(settings.zoom(for: URL(string: "https://sub.example.com")) == nil)
+    #expect(settings.zoom(for: URL(string: "https://example.com:8443")) == nil)
+    #expect(settings.zoom(for: URL(string: "file:///tmp/a.html")) == nil)
+    #expect(SiteSettings(defaults: defaults).zoom(for: somewhere) == 1.25)
+    settings.setZoom(PageZoom.current, for: somewhere)
+    #expect(settings.zoom(for: somewhere) == nil)
+    #expect(SiteSettings(defaults: defaults).zooms.isEmpty)
+}
+
+/// A site's zoom goes to each of its tabs, asleep ones too; incognito keeps
+/// it to its own window, never in the regular settings.
+@MainActor
+@Test func siteZoomReachesItsTabsAndStaysOutOfIncognitosSettings() {
+    let browser = Browser(dataStore: .nonPersistent())
+    let site = Nerda.Tab(restoring: Session.Tab(url: somewhere, title: "", state: nil, zoom: 1, pinned: nil, home: nil))
+    let same = Nerda.Tab(restoring: Session.Tab(url: URL(string: "https://www.example.com/page")!, title: "", state: nil, zoom: 1, pinned: nil, home: nil))
+    let other = Nerda.Tab(restoring: Session.Tab(url: URL(string: "https://example.org")!, title: "", state: nil, zoom: 1, pinned: nil, home: nil))
+    browser.add([site, same, other])
+    browser.setZoom(1.5, for: somewhere)
+    #expect(browser.siteSettings !== SiteSettings.shared)
+    #expect(browser.siteSettings.zoom(for: somewhere) == 1.5)
+    #expect(SiteSettings.shared.zoom(for: somewhere) == nil)
+    #expect(same.webView.pageZoom == 1.5)
+    #expect(other.webView.pageZoom == 1)
+    for tab in [site, same, other] { tab.silence() }
 }
 
 @MainActor @Test func deletingHistoryKeepsPagesVisitedBeforeTheRange() {

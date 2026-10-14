@@ -294,6 +294,36 @@ enum Theme: String, CaseIterable {
     }
 }
 
+/// A page at an http:// address, typed or a link, is tried over https first
+/// (Settings › Security & Privacy), as Chrome's "Always use secure
+/// connections": WebKit goes back to http itself when https fails or sends it
+/// back there, and a site that did is left to http for the session. Not for
+/// what has no certificate to give: this Mac, an address by number, a name
+/// on the network (printer.local, a single word), another port.
+struct HTTPSUpgrade {
+    static let key = "upgradesToHTTPS"
+
+    static var isOn: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+
+    /// The sites that came back over http this session, by host.
+    private(set) var plain: Set<String> = []
+
+    func applies(to url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "http", [nil, 80].contains(url.port),
+              let host = url.host()?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[].")),
+              host.contains("."), !host.contains(":"), !plain.contains(host) else { return false }
+        // A number last is an address (192.168.1.1), never a domain's ending.
+        let last = host.split(separator: ".").last ?? ""
+        return !last.allSatisfy(\.isNumber) && !["local", "localhost"].contains(last)
+    }
+
+    /// A page that came in over http where https would have been tried first.
+    mutating func committed(_ url: URL) {
+        guard applies(to: url), let host = url.host()?.lowercased() else { return }
+        plain.insert(host.trimmingCharacters(in: CharacterSet(charactersIn: "[].")))
+    }
+}
+
 /// The zoom pages open at, which ⌘0 goes back to. ⌘+ and ⌘− step one tab
 /// through the same levels, as Safari's.
 enum PageZoom {

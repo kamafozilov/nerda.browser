@@ -80,12 +80,32 @@ final class SiteSettings {
     }
     /// Each site with a choice of its own, by origin.
     private(set) var sites: [String: Options]
+    /// Each site zoomed to other than the zoom pages open at, by name (`site`).
+    private(set) var zooms: [String: Double]
     @ObservationIgnored private let defaults: UserDefaults?
 
     init(defaults: UserDefaults?) {
         self.defaults = defaults
         sites = defaults?.data(forKey: "siteSettings")
             .flatMap { try? JSONDecoder().decode([String: Options].self, from: $0) } ?? [:]
+        zooms = defaults?.dictionary(forKey: "siteZoom") as? [String: Double] ?? [:]
+    }
+
+    /// A site as its zoom is kept, as Safari keeps it: by name, so
+    /// www.example.com and example.com, over http or https, share one.
+    nonisolated static func site(_ url: URL?) -> String? {
+        guard let url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        return History.site(of: url)
+    }
+
+    /// The zoom the site was left at (⌘+, ⌘−), or nil for the zoom pages open at.
+    func zoom(for url: URL?) -> CGFloat? { Self.site(url).flatMap { zooms[$0] }.map { CGFloat($0) } }
+
+    /// The zoom pages open at forgets the site's own.
+    func setZoom(_ zoom: CGFloat, for url: URL) {
+        guard let site = Self.site(url) else { return }
+        zooms[site] = abs(zoom - PageZoom.current) < 0.01 ? nil : Double(zoom)
+        defaults?.set(zooms, forKey: "siteZoom")
     }
 
     nonisolated static func origin(_ url: URL?) -> String? {
@@ -313,6 +333,19 @@ extension Browser {
         }
     }
 
+    /// A site's zoom, kept for it (`SiteSettings.setZoom`) and taken by each
+    /// of its tabs, in every window that keeps its sites' settings with this
+    /// one's: the regular one, or this incognito one.
+    func setZoom(_ zoom: CGFloat, for url: URL) {
+        siteSettings.setZoom(zoom, for: url)
+        let site = SiteSettings.site(url)
+        let others = (NSApp?.windows ?? []).compactMap { ($0 as? BrowserWindow)?.browser }
+            .filter { $0 !== self && $0.siteSettings === siteSettings }
+        for browser in [self] + others {
+            for tab in browser.tabs where SiteSettings.site(tab.url) == site { tab.siteZoomChanged(to: zoom) }
+        }
+    }
+
     func changeSiteOptions(_ options: SiteSettings.Options, for url: URL) {
         let previous = siteSettings.options(for: url)
         siteSettings.set(options, for: url)
@@ -412,13 +445,19 @@ private struct SitePanel: View {
                     .labelsHidden()
                     .disabled(!SiteSettings.supportsSiteBlocking)
                 }
+                // Safari's Page Zoom, for the site's every page (⌘+, ⌘−, ⌘0).
+                SettingRow(symbol: "plus.magnifyingglass", title: "Zoom") {
+                    ChoiceMenu(title: "Zoom", choices: PageZoom.levels, name: PageZoom.name, standard: PageZoom.current,
+                               selection: Binding(get: { browser.siteSettings.zoom(for: url) ?? PageZoom.current },
+                                                  set: { browser.setZoom($0, for: url) }))
+                }
                 ForEach(kinds) { kind in
                     let permission = options[keyPath: kind.key]
                     SettingRow(symbol: kind.symbol(permission), title: kind.title,
                                note: offOnMac.contains(kind) ? "Off for Nerda in System Settings" : nil,
                                noteAction: { NSWorkspace.shared.open(kind.macSettings) }) {
-                        PermissionMenu(title: kind.title, choices: kind.choices,
-                                       selection: Binding(get: { permission }, set: { change(kind.key, to: $0) }))
+                        ChoiceMenu(title: kind.title, choices: kind.choices, name: \.title, standard: .ask,
+                                   selection: Binding(get: { permission }, set: { change(kind.key, to: $0) }))
                     }
                 }
             }
@@ -433,10 +472,11 @@ private struct SitePanel: View {
                     }
                 }
                 PopoverRow(symbol: "trash", title: "Clear Site Data…", action: clearData)
-                if browser.siteSettings.options(for: url) != .init() {
+                if browser.siteSettings.options(for: url) != .init() || browser.siteSettings.zoom(for: url) != nil {
                     PopoverRow(symbol: "arrow.counterclockwise", title: "Reset Site Settings") {
                         if !options.blocksAds { blockingChanged = true }
                         browser.changeSiteOptions(.init(), for: url)
+                        browser.setZoom(PageZoom.current, for: url)
                     }
                 }
             }
@@ -510,30 +550,33 @@ private struct SettingRow<Control: View>: View {
     }
 }
 
-/// Ask, Allow or Block, as a small menu at the row's end.
-struct PermissionMenu: View {
+/// Ask, Allow or Block, or a zoom, as a small menu at the row's end. What
+/// every site gets shows quieter than a site's own choice.
+struct ChoiceMenu<Value: Hashable>: View {
     let title: String
-    let choices: [SiteSettings.Permission]
-    @Binding var selection: SiteSettings.Permission
+    let choices: [Value]
+    let name: (Value) -> String
+    let standard: Value
+    @Binding var selection: Value
 
     @State private var hovering = false
 
     var body: some View {
         Menu {
             Picker(title, selection: $selection) {
-                ForEach(choices) { Text($0.title).tag($0) }
+                ForEach(choices, id: \.self) { Text(name($0)).tag($0) }
             }
             .pickerStyle(.inline)
             .labelsHidden()
         } label: {
             HStack(spacing: 4) {
-                Text(selection.title)
+                Text(name(selection))
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(Palette.muted)
             }
             .font(.system(size: 12))
-            .foregroundStyle(selection == .ask ? Palette.muted : Palette.ink)
+            .foregroundStyle(selection == standard ? Palette.muted : Palette.ink)
             .padding(.horizontal, 8)
             .frame(height: 24)
             .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(hovering ? Palette.wash : Palette.hover))
@@ -543,7 +586,7 @@ struct PermissionMenu: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        .accessibilityLabel("\(title): \(selection.title)")
+        .accessibilityLabel("\(title): \(name(selection))")
         .onHover { hovering = $0 }
     }
 }

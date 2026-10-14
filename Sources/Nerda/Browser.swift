@@ -120,6 +120,8 @@ final class Browser: NSObject {
     @ObservationIgnored private var memoryPressure: (any DispatchSourceMemoryPressure)?
     /// The address last loaded again for a redirect WebKit lost, so it is only tried once.
     @ObservationIgnored private var retried: URL?
+    /// The sites left to http this session; an incognito window's its own.
+    @ObservationIgnored var httpsUpgrade = HTTPSUpgrade()
     /// The frames whose navigation under way a click or a key in the page
     /// started, by WebKit's handle for each (see `mayDownload`).
     @ObservationIgnored private var clickedFrames: Set<NSObject> = []
@@ -212,6 +214,23 @@ final class Browser: NSObject {
         let tab = Tab()
         add(tab, inBackground: inBackground)
         tab.go(to: url)
+        return tab
+    }
+
+    /// Settings › Tabs › Load background tabs when shown. Off, as in Safari
+    /// and Chrome, which load them at once.
+    static let waitsKey = "backgroundTabsWait"
+    static var backgroundTabsWait: Bool { UserDefaults.standard.bool(forKey: waitsKey) }
+
+    /// A link opened behind the page by hand: ⌘-click, the middle button,
+    /// Open Link in New Tab. `waiting`, it keeps its address and loads
+    /// nothing until it is shown, as a tab from the last run does.
+    @discardableResult
+    func openBehind(_ url: URL, waiting: Bool = Browser.backgroundTabsWait) -> Tab {
+        guard waiting else { return open(url, inBackground: true) }
+        // A title known from a visit before; otherwise the site's name.
+        let tab = Tab(waitingFor: url, title: history.visits[url]?.title ?? "")
+        add(tab, inBackground: true)
         return tab
     }
 
@@ -494,14 +513,22 @@ extension Browser: WKUIDelegate {
         for action: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        if (webView as? SwipingWebView)?.takeIncognitoAsk() == true, let url = action.request.url {
+        let ask = (webView as? SwipingWebView)?.takeLinkAsk()
+        if ask == .incognito, let url = action.request.url {
             // Only the web: loaded from here, a page's link to a file on this
             // Mac (file:) would open where a page itself may not take you.
             if ["http", "https"].contains(url.scheme?.lowercased() ?? "") { Windows.openIncognito(url) }
             return nil
         }
+        // Open Link in New Tab: behind this one, as a ⌘-click's; one that
+        // waits to be shown is made without the page WebKit asks for.
+        if ask == .behind, Self.backgroundTabsWait, let url = action.request.url,
+           ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            withAnimation(.slide) { _ = openBehind(url) }
+            return nil
+        }
         let tab = Tab(configuration: configuration, opener: tab(for: webView))
-        withAnimation(.slide) { add(tab) }
+        withAnimation(.slide) { add(tab, inBackground: ask == .behind) }
         return tab.webView
     }
 
@@ -597,6 +624,9 @@ extension Browser: WKNavigationDelegate {
         preferences.allowsContentJavaScript = tab(for: webView)?.javaScriptOff != true
         if action.targetFrame?.isMainFrame ?? true {
             siteSettings.applyBlocking(to: preferences, for: action.request.url)
+            if HTTPSUpgrade.isOn, let url = action.request.url, httpsUpgrade.applies(to: url) {
+                preferences.preferredHTTPSNavigationPolicy = .automaticFallbackToHTTP
+            }
         } else if let frame = Self.handle(of: action.targetFrame) {
             if Self.clicked(action) { clickedFrames.insert(frame) } else { clickedFrames.remove(frame) }
         }
@@ -688,7 +718,7 @@ extension Browser: WKNavigationDelegate {
 
         // ⌘-click: a tab of its own, behind this one.
         if action.navigationType == .linkActivated, action.modifierFlags.contains(.command) {
-            withAnimation(.slide) { open(url, inBackground: true) }
+            withAnimation(.slide) { _ = openBehind(url) }
             return .cancel
         }
         // A middle click (the buttons as a mask: 4 is the middle one) is opened
@@ -829,6 +859,12 @@ extension Browser: WKNavigationDelegate {
         retried = nil
         guard let tab = tab(for: webView) else { return }
         tab.pageDidCommit()
+        // Each site's page opens at its site's zoom, or else the one pages
+        // open at; one with no site (a file) keeps its tab's.
+        if SiteSettings.site(webView.url) != nil {
+            webView.pageZoom = siteSettings.zoom(for: webView.url) ?? PageZoom.current
+        }
+        if HTTPSUpgrade.isOn, let url = webView.url { httpsUpgrade.committed(url) }
         tab.failure = nil
         tab.recordVisit()
         hideChoices(on: tab)

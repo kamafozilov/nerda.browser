@@ -54,7 +54,7 @@ struct HistoryPage: View {
                             .padding(.bottom, 8)
                     case .page(let visit, let first, let last):
                         HistoryRow(visit: visit) { inBackground in
-                            withAnimation(.slide) { browser.open(visit.url, inBackground: inBackground) }
+                            withAnimation(.slide) { _ = inBackground ? browser.openBehind(visit.url) : browser.open(visit.url) }
                         }
                         .padding(.horizontal, 4)
                         .padding(.top, first ? 4 : 0)

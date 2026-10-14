@@ -57,15 +57,33 @@ final class SwipingWebView: WKWebView {
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
-        incognitoAsked = nil
-        // Under a link's Open Link in New Window, outside incognito: the same
-        // item, whose window (Browser's createWebViewWith) goes to incognito.
-        if configuration.websiteDataStore.isPersistent,
-           let index = menu.items.firstIndex(where: { $0.identifier?.rawValue == "WKMenuItemIdentifierOpenLinkInNewWindow" }) {
-            let item = NSMenuItem(title: "Open Link in Incognito Window", action: #selector(openInIncognito(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = menu.items[index]
-            menu.insertItem(item, at: index + 1)
+        linkAsked = nil
+        // WebKit's Open Link in New Window: its window comes as a tab
+        // (Browser's createWebViewWith), so it says so, and the tab stays
+        // behind this one, as in Safari and Chrome and as with ⌘-click. With
+        // ⌥ held, WebKit's own item, which goes to the tab. Outside
+        // incognito, the same again for an incognito window.
+        if let index = menu.items.firstIndex(where: { $0.identifier?.rawValue == "WKMenuItemIdentifierOpenLinkInNewWindow" }),
+           let action = menu.items[index].action {
+            let original = menu.items[index]
+            openLink = (original.target, action)
+            if configuration.websiteDataStore.isPersistent {
+                let item = NSMenuItem(title: "Open Link in Incognito Window", action: #selector(openInIncognito(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = original
+                menu.insertItem(item, at: index + 1)
+            }
+            // An alternate comes straight after its item, with the same key.
+            if let front = original.copy() as? NSMenuItem {
+                front.title = "Open Link in New Tab and Go to It"
+                front.keyEquivalentModifierMask = .option
+                front.isAlternate = true
+                menu.insertItem(front, at: index + 1)
+            }
+            original.title = "Open Link in New Tab"
+            original.keyEquivalentModifierMask = []
+            original.target = self
+            original.action = #selector(openBehind(_:))
         }
         let added = Extensions.shared.menuItems(for: self)
         if !added.isEmpty {
@@ -78,22 +96,37 @@ final class SwipingWebView: WKWebView {
         menu.addItem(withTitle: "Save Screenshot…", action: #selector(saveScreenshot), keyEquivalent: "").target = self
     }
 
-    /// When Open Link in Incognito Window was picked, until the window the
-    /// link asks for comes (see `takeIncognitoAsk`).
-    private var incognitoAsked: Date?
+    /// Where a link picked from the menu goes, other than to a tab in front.
+    enum LinkAsk { case behind, incognito }
 
-    @objc private func openInIncognito(_ sender: NSMenuItem) {
-        guard let original = sender.representedObject as? NSMenuItem, let action = original.action else { return }
-        incognitoAsked = .now
-        NSApp.sendAction(action, to: original.target, from: original)
+    /// WebKit's own action for Open Link in New Window, which the menu's
+    /// items hand on to once they have marked where its window goes.
+    private var openLink: (target: AnyObject?, action: Selector)?
+    /// What was picked, until the window the link asks for comes (see `takeLinkAsk`).
+    private var linkAsked: (ask: LinkAsk, at: Date)?
+
+    @objc private func openBehind(_ sender: NSMenuItem) {
+        open(sender, as: .behind)
     }
 
-    /// Whether the window this page asks for now is the link picked for
-    /// incognito. Only just after it was picked: a window the page opens
-    /// later of its own accord is an ordinary one.
-    func takeIncognitoAsk() -> Bool {
-        defer { incognitoAsked = nil }
-        return incognitoAsked.map { Date.now.timeIntervalSince($0) < 2 } ?? false
+    @objc private func openInIncognito(_ sender: NSMenuItem) {
+        guard let original = sender.representedObject as? NSMenuItem else { return }
+        open(original, as: .incognito)
+    }
+
+    private func open(_ item: NSMenuItem, as ask: LinkAsk) {
+        guard let openLink else { return }
+        linkAsked = (ask, .now)
+        NSApp.sendAction(openLink.action, to: openLink.target, from: item)
+    }
+
+    /// Where the window this page asks for now goes, if it is the link picked
+    /// from the menu. Only just after it was picked: a window the page opens
+    /// later of its own accord is an ordinary one, in front.
+    func takeLinkAsk() -> LinkAsk? {
+        defer { linkAsked = nil }
+        guard let linkAsked, Date.now.timeIntervalSince(linkAsked.at) < 2 else { return nil }
+        return linkAsked.ask
     }
 
     @objc private func copyScreenshot() { Screenshot.copy(self) }
