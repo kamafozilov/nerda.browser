@@ -63,8 +63,10 @@ enum Reader {
     /// article goes there.
     final class Links: NSObject, WKNavigationDelegate, WKUIDelegate {
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
-            guard action.navigationType != .other else { return .allow }
-            guard action.navigationType == .linkActivated, let url = action.request.url,
+            // The article itself. After it, the right-click menu's Open Link
+            // comes without a click, as `.other`.
+            if action.navigationType == .other, (webView as? ReaderPage)?.loaded == false { return .allow }
+            guard [.linkActivated, .other].contains(action.navigationType), let url = action.request.url,
                   let tab = (webView as? ReaderPage)?.tab else { return .cancel }
             if Browser.onlyChangesFragment(from: webView.url, to: url) { return .allow }
             if action.modifierFlags.contains(.command) || action.buttonNumber == 4, let browser = tab.delegate as? Browser {
@@ -75,11 +77,20 @@ enum Reader {
             return .cancel
         }
 
-        /// Open Link in New Window, from the right-click menu: a tab of its own.
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            (webView as? ReaderPage)?.loaded = true
+        }
+
+        /// The right-click menu's links, as a page's (`SwipingWebView`): Open
+        /// Link in New Tab behind, with ⌥ in front, or in an incognito window.
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                      for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-            if let url = action.request.url, let browser = (webView as? ReaderPage)?.tab?.delegate as? Browser {
-                withAnimation(.slide) { _ = browser.open(url) }
+            guard let page = webView as? ReaderPage, let url = action.request.url,
+                  let browser = page.tab?.delegate as? Browser else { return nil }
+            switch page.takeLinkAsk() {
+            case .incognito: if ["http", "https"].contains(url.scheme?.lowercased() ?? "") { Windows.openIncognito(url) }
+            case .behind: withAnimation(.slide) { _ = browser.openBehind(url) }
+            case .front, nil: withAnimation(.slide) { _ = browser.open(url) }
             }
             return nil
         }
@@ -88,27 +99,45 @@ enum Reader {
     /// The article as a page: its site, title, byline and date, then the
     /// article, in a column as wide as a book's page.
     static func html(for article: Article) -> String {
+        """
+        <!doctype html>
+        <html lang="\(escaped(article.lang))" dir="\(escaped(article.dir))">
+        <head>
+        <meta charset="utf-8">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data:; media-src *; style-src 'unsafe-inline'">
+        <title>\(escaped(article.title))</title>
+        <style>\(css)</style>
+        </head>
+        <body>\(body(for: article))</body>
+        </html>
+        """
+    }
+
+    private static func body(for article: Article) -> String {
         let byline = article.byline == article.site ? "" : article.byline
         let meta = [byline, article.published].filter { !$0.isEmpty }.joined(separator: " · ")
         return """
-            <!doctype html>
-            <html lang="\(escaped(article.lang))" dir="\(escaped(article.dir))">
-            <head>
-            <meta charset="utf-8">
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src * data:; media-src *; style-src 'unsafe-inline'">
-            <title>\(escaped(article.title))</title>
-            <style>\(css)</style>
-            </head>
-            <body>
             <header>
             \(article.site.isEmpty ? "" : "<p class=\"site\">\(escaped(article.site))</p>")
             <h1>\(escaped(article.title))</h1>
             \(meta.isEmpty ? "" : "<p class=\"meta\">\(escaped(meta))</p>")
             </header>
             <article>\(article.content)</article>
-            </body>
-            </html>
             """
+    }
+
+    /// The article put in again where it shows, kept scrolled where it was:
+    /// the same page, so the same CSP, and no script of the article's runs.
+    static func show(_ article: Article, in page: ReaderPage) async {
+        page.article = article
+        let put = """
+            document.documentElement.lang = lang;
+            document.documentElement.dir = dir;
+            document.title = title;
+            document.body.innerHTML = body;
+            """
+        _ = try? await page.callAsyncJavaScript(put, arguments: ["lang": article.lang, "dir": article.dir, "title": article.title,
+                                                                  "body": body(for: article)], contentWorld: world)
     }
 
     static func escaped(_ text: String) -> String {
@@ -462,9 +491,14 @@ enum Reader {
         """#
 }
 
-/// The view Reader shows in, knowing its tab, for its links.
-final class ReaderPage: WKWebView {
+/// The view Reader shows in, knowing its tab, for its links. A page's kind,
+/// for the same right-click menu.
+final class ReaderPage: SwipingWebView {
     weak var tab: Tab?
+    /// What it shows, to be put in again only once the page reads otherwise.
+    var article: Reader.Article?
+    /// The article is in: any load after it is a link followed.
+    var loaded = false
 }
 
 /// A tab's Reader, over its page, taking the keyboard as it comes so Space
@@ -489,6 +523,9 @@ struct ReaderView: NSViewRepresentable {
 }
 
 extension Tab {
+    /// What shows of the tab: Reader, while it is over the page, or the page.
+    var shown: WKWebView? { reader ?? page }
+
     /// Whether the page reads as an article, so the address bar offers
     /// Reader: once it has loaded, or `delay` after it changed its address
     /// itself (a site's own navigation, with no load). Main frame only.
@@ -528,13 +565,36 @@ extension Tab {
     func toggleReader() async {
         if reader != nil { return closeReader() }
         guard let page, let url = page.url else { return }
-        let found = try? await page.callAsyncJavaScript(Reader.extract, contentWorld: Reader.world)
+        let found = await article(of: page)
         guard self.page === page, page.url == url, reader == nil else { return }
         // The check said article, the page now says otherwise: no longer offered.
-        guard let article = Reader.Article(found) else { return readable = false }
+        guard let found else { return readable = false }
         let view = Reader.page(for: self)
-        view.loadHTMLString(Reader.html(for: article), baseURL: url)
+        view.article = found
+        view.loadHTMLString(Reader.html(for: found), baseURL: url)
         reader = view
+    }
+
+    /// Reader taken again from the page, once the page reads otherwise:
+    /// translated, as Safari's Reader shows a translated page, or back in its
+    /// own words.
+    func refreshReader() async {
+        guard let reader, let page, let url = page.url else { return }
+        let found = await article(of: page)
+        guard self.reader === reader, self.page === page, page.url == url, let found, found != reader.article else { return }
+        await Reader.show(found, in: reader)
+    }
+
+    /// The article as the page reads now: translated, it is in the
+    /// language it was translated into, for the voice that reads it out.
+    private func article(of page: WKWebView) async -> Reader.Article? {
+        let found = try? await page.callAsyncJavaScript(Reader.extract, contentWorld: Reader.world)
+        guard var article = Reader.Article(found) else { return nil }
+        if let translation {
+            article.lang = translation.target
+            article.dir = Locale.Language(identifier: translation.target).characterDirection == .rightToLeft ? "rtl" : "ltr"
+        }
+        return article
     }
 }
 

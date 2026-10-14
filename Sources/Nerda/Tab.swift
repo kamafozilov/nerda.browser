@@ -30,7 +30,8 @@ final class Tab: Identifiable {
     private(set) var canGoBack = false
     private(set) var canGoForward = false
     private(set) var progress = 0.0
-    /// The page's zoom, for the sidebar to show while it isn't the one pages open at.
+    /// The zoom of what shows, the page or Reader, for the sidebar to show
+    /// while it isn't the one pages open at.
     private(set) var pageZoom: CGFloat = 1
     /// The colour the page gives its top (its theme colour), or else its
     /// background: the address bar wears it, so it reads as part of the page.
@@ -197,14 +198,19 @@ final class Tab: Identifiable {
     var translationTargets: [String] = []
     /// The language chosen to translate into, for the tab's pages from then on.
     var translatedTo: String?
-    /// The page's text is on its way to be translated.
-    var translating = false
+    /// The page's text is on its way to be translated. Once it has all come
+    /// back, Reader, if it shows, reads it too.
+    var translating = false {
+        didSet { if oldValue, !translating, reader != nil { Task { await refreshReader() } } }
+    }
     var hasUnsavedWork = false
     @ObservationIgnored var departureApproved = false
     /// The page reads as an article: the address bar offers Reader (see Reader).
     var readable = false
     /// Reader, open over the page, which stays as it was under it.
-    var reader: ReaderPage?
+    var reader: ReaderPage? {
+        didSet { pageZoom = (reader ?? page)?.pageZoom ?? pageZoom }
+    }
     @ObservationIgnored var readerCheck: Task<Void, Never>?
     /// Where the windows the page tried to open by itself, and was kept from,
     /// would have gone (about:blank for one its script was to fill), for the
@@ -384,7 +390,7 @@ final class Tab: Identifiable {
                 MainActor.assumeIsolated { self?.progress = page.estimatedProgress }
             },
             page.observe(\.pageZoom, options: .initial) { [weak self] page, _ in
-                MainActor.assumeIsolated { self?.pageZoom = page.pageZoom }
+                MainActor.assumeIsolated { if self?.reader == nil { self?.pageZoom = page.pageZoom } }
             },
             page.observe(\.themeColor) { [weak self] _, _ in
                 MainActor.assumeIsolated { self?.pageRecolored() }
@@ -827,6 +833,8 @@ final class Tab: Identifiable {
             browser.setZoom(next, for: url)
         } else {
             page.pageZoom = next
+            // Reader has no observer to tell the sidebar.
+            pageZoom = next
         }
     }
 

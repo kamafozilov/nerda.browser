@@ -5,7 +5,7 @@ import WebKit
 /// swiping sideways past the page's edge pulls an arrow in from that side,
 /// and letting go once it has filled goes there. WebKit's own swipe drags the
 /// whole page aside instead, over a snapshot of the page it goes to.
-final class SwipingWebView: WKWebView {
+class SwipingWebView: WKWebView {
     /// The swipe under way, from fingers down to fingers up.
     private var swipe: Swipe?
     /// How far the fingers have gone since they came down, until it's clear

@@ -299,7 +299,7 @@ final class Browser: NSObject {
     /// The keyboard back on the page on screen, once something of ours
     /// that had it (a field) is done with it.
     func focusPage() {
-        if let page = selected.flatMap({ $0.reader ?? $0.page }) { page.window?.makeFirstResponder(page) }
+        if let page = selected?.shown { page.window?.makeFirstResponder(page) }
     }
 
     /// Puts a tab at `position` among the pinned tabs, or among the rest
@@ -449,7 +449,7 @@ final class Browser: NSObject {
     private func find(step: Int) {
         findTyping?.cancel()
         // Reader's article, while it shows.
-        guard let page = selected.flatMap({ $0.reader ?? $0.page }), !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return clearFound() }
+        guard let page = selected?.shown, !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return clearFound() }
         if foundOn !== page { clearFound() }
         foundOn = page
         let query = findQuery

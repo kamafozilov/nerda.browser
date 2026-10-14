@@ -575,6 +575,8 @@ extension Tab {
         translatedTo = nil
         translating = false
         restoreOriginal()
+        // Reader back in the page's own words too.
+        if reader != nil { Task { await refreshReader() } }
     }
 
     fileprivate func restoreOriginal() {
