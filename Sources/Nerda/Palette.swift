@@ -35,6 +35,26 @@ enum Palette {
             ? NSColor(red: 0.96, green: 0.72, blue: 0.23, alpha: 1) : NSColor(red: 0.62, green: 0.40, blue: 0, alpha: 1)
     })
 
+    /// A profile's colour (Settings › Profiles), on its symbol: the Mac's own
+    /// accent colours, as Safari's profiles take theirs, light and dark alike.
+    enum Accent: String, CaseIterable, Identifiable {
+        case blue, purple, pink, red, orange, yellow, green, graphite
+        var id: Self { self }
+        var name: String { rawValue.capitalized }
+        var color: Color {
+            switch self {
+            case .blue: .blue
+            case .purple: .purple
+            case .pink: .pink
+            case .red: .red
+            case .orange: .orange
+            case .yellow: .yellow
+            case .green: .green
+            case .graphite: .gray
+            }
+        }
+    }
+
     private static func pair(_ light: CGFloat, _ dark: CGFloat, alpha: CGFloat = 1) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua

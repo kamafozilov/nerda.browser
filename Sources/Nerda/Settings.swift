@@ -147,7 +147,7 @@ struct SettingsView: View {
                     case .autofill:
                         AutoFillSettings(edit: { editingContact = $0 }, editCard: { editingCard = $0 })
                     case .siteSettings:
-                        SitePermissionsSettings()
+                        SitePermissionsSettings(browser: browser)
                     case .privacy:
                         PrivacySettings(browser: browser) { deletingData = true }
                     case .extensions:
@@ -305,8 +305,8 @@ private struct GeneralSettings: View {
             SettingsRow(title: "Import and export", detail: "From Chrome, Safari, Firefox or Arc, or yours to a file",
                         icon: "book") {
                 HStack(spacing: 8) {
-                    Button("Import…") { Windows.regular.browser.importBookmarks() }
-                    Button("Export…") { Windows.regular.browser.exportBookmarks() }
+                    Button("Import…", action: browser.importBookmarks)
+                    Button("Export…", action: browser.exportBookmarks)
                 }
                 .buttonStyle(SettingsButtonStyle())
                 .fixedSize()
@@ -415,7 +415,10 @@ private struct PrivacySettings: View {
             }
             SettingsLink(title: "View browsing history", icon: "clock.arrow.circlepath", action: browser.openHistory)
         }
-        .onChange(of: keep) { History.shared.keepChanged() }
+        .onChange(of: keep) {
+            // Each profile's with a window; another's as it is next written.
+            for window in NSApp.windows { (window as? BrowserWindow)?.browser.history.keepChanged() }
+        }
         SettingsGroup(title: "Adblock") {
             SettingsRow(title: "Block ads and trackers", detail: blockDetail, icon: "hand.raised") {
                 SettingsToggle(title: "Block ads and trackers", isOn: $blocker.isEnabled)
@@ -613,7 +616,8 @@ private struct AutoFillSettings: View {
 /// own, and each site that has, to change or reset. The same choices as
 /// Site Settings beside the address.
 private struct SitePermissionsSettings: View {
-    private let settings = SiteSettings.shared
+    let browser: Browser
+    private var settings: SiteSettings { browser.siteSettings }
     @State private var fallbacks = Dictionary(uniqueKeysWithValues: SiteSettings.Kind.allCases.map { ($0, $0.fallback) })
     @State private var offOnMac: Set<SiteSettings.Kind> = []
 
@@ -701,7 +705,7 @@ private struct SitePermissionsSettings: View {
             }
             Toggle("Block Ads and Trackers", isOn: Binding(get: { options.blocksAds }, set: { change(\.blocksAds, to: $0, for: url) }))
             Divider()
-            Button("Reset Site Settings") { Windows.regular.browser.changeSiteOptions(.init(), for: url) }
+            Button("Reset Site Settings") { browser.changeSiteOptions(.init(), for: url) }
         } label: {
             Image(systemName: "ellipsis")
                 .frame(width: 24, height: 24)
@@ -715,11 +719,11 @@ private struct SitePermissionsSettings: View {
         .accessibilityLabel("Settings for \(name(url))")
     }
 
-    /// Through the regular window, which takes back what is no longer allowed at once.
+    /// Through the window, which takes back what is no longer allowed at once.
     private func change<T>(_ key: WritableKeyPath<SiteSettings.Options, T>, to value: T, for url: URL) {
         var options = settings.options(for: url)
         options[keyPath: key] = value
-        Windows.regular.browser.changeSiteOptions(options, for: url)
+        browser.changeSiteOptions(options, for: url)
     }
 }
 
@@ -946,7 +950,7 @@ struct DeleteDataDialog: View {
 
     var body: some View {
         let since = range.since
-        let pages = History.shared.visits.values.count { $0.last >= since }
+        let pages = browser.history.visits.values.count { $0.last >= since }
         SettingsDialog(width: 380, escapes: escapes, cancel: done) {
             Text("Delete browsing data")
                 .font(.system(size: 17, weight: .semibold))
@@ -1012,16 +1016,18 @@ struct DeleteDataDialog: View {
 
     private func delete(since: Date) async {
         deleting = true
+        // The profile's windows only, an incognito one's downloads included:
+        // another profile's are none of this one's browsing.
+        let windows = NSApp.windows.compactMap { ($0 as? BrowserWindow)?.browser }.filter { $0.profile === browser.profile }
         if history {
-            History.shared.remove(since: since)
-            for window in NSApp.windows {
-                guard let browser = (window as? BrowserWindow)?.browser else { continue }
-                browser.recentlyClosed.removeAll { $0.date >= since }
-                browser.sessionChanged()
+            browser.history.remove(since: since)
+            for window in windows {
+                window.recentlyClosed.removeAll { $0.date >= since }
+                window.sessionChanged()
             }
         }
         if downloads {
-            for window in NSApp.windows { (window as? BrowserWindow)?.browser.clearDownloads(since: since) }
+            for window in windows { window.clearDownloads(since: since) }
         }
         let types = (cache ? Self.cacheTypes : []).union(cookies ? Self.cookieTypes : []).union(storage ? Self.storageTypes : [])
         if !types.isEmpty { await browser.dataStore.removeData(ofTypes: types, modifiedSince: since) }

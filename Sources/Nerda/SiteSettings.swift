@@ -85,12 +85,41 @@ final class SiteSettings {
     /// Each site zoomed to other than the zoom pages open at, by name (`site`).
     private(set) var zooms: [String: Double]
     @ObservationIgnored private let defaults: UserDefaults?
+    /// A profile's own, in its folder (Profile), in place of `defaults`.
+    @ObservationIgnored private var file: URL?
 
-    init(defaults: UserDefaults?) {
+    private struct Saved: Codable {
+        var sites: [String: Options]
+        var zooms: [String: Double]
+    }
+
+    init(defaults: UserDefaults?, file: URL? = nil) {
         self.defaults = defaults
+        self.file = file
+        if let file, let data = try? Data(contentsOf: file) {
+            if let saved = try? JSONDecoder().decode(Saved.self, from: data) {
+                sites = saved.sites
+                zooms = saved.zooms
+                return
+            }
+            // Set aside rather than overwritten: it may be from a newer version.
+            try? data.write(to: file.deletingLastPathComponent().appending(path: "site-settings-unreadable.json"))
+        }
         sites = defaults?.data(forKey: "siteSettings")
             .flatMap { try? JSONDecoder().decode([String: Options].self, from: $0) } ?? [:]
         zooms = defaults?.dictionary(forKey: "siteZoom") as? [String: Double] ?? [:]
+    }
+
+    /// Never written again: its profile is being deleted, folder and all.
+    func close() {
+        file = nil
+    }
+
+    /// Written whole on each change: they change seldom.
+    private func writeFile() {
+        guard let file, let data = try? JSONEncoder().encode(Saved(sites: sites, zooms: zooms)) else { return }
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: file, options: .atomic)
     }
 
     /// A site as its zoom is kept, as Safari keeps it: by name, so
@@ -108,6 +137,7 @@ final class SiteSettings {
         guard let site = Self.site(url) else { return }
         zooms[site] = abs(zoom - PageZoom.current) < 0.01 ? nil : Double(zoom)
         defaults?.set(zooms, forKey: "siteZoom")
+        writeFile()
     }
 
     nonisolated static func origin(_ url: URL?) -> String? {
@@ -151,6 +181,7 @@ final class SiteSettings {
         guard let key = Self.origin(url) else { return }
         sites[key] = options == Options() ? nil : options
         defaults?.set(try? JSONEncoder().encode(sites), forKey: "siteSettings")
+        writeFile()
     }
 
     func mediaDecision(for origin: WKSecurityOrigin, on page: WKWebView, type: WKMediaCaptureType) -> WKPermissionDecision {

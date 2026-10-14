@@ -416,7 +416,7 @@ extension AppMenu: NSMenuItemValidation {
         case #selector(useOwnPictures):
             return Backdrop.shared.wallpaper != .daily
         case #selector(clearHistory):
-            return !History.shared.visits.isEmpty
+            return !browser.profile.history.visits.isEmpty
         default:
             return true
         }
@@ -440,7 +440,7 @@ extension AppMenu: NSMenuDelegate {
             menu.addItem(submenu("Recently Closed", closed))
         }
         menu.addItem(.separator())
-        for visit in History.shared.recent(15) {
+        for visit in browser.profile.history.recent(15) {
             let title = visit.title.isEmpty ? visit.url.absoluteString : visit.title
             let item = item(title.count > 60 ? title.prefix(59) + "…" : title, #selector(openVisit(_:)), target: self)
             item.representedObject = visit.url
@@ -475,7 +475,7 @@ extension AppMenu: NSMenuDelegate {
     /// Under Bookmark This Tab, the bookmarks, each folder a submenu of what is in it.
     private func fillBookmarks(_ menu: NSMenu) {
         while menu.items.count > 1 { menu.removeItem(at: 1) }
-        let bookmarks = Bookmarks.shared.items
+        let bookmarks = browser.profile.bookmarks.items
         if !bookmarks.isEmpty { menu.addItem(.separator()) }
         add(bookmarks, to: menu)
     }

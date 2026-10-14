@@ -53,7 +53,7 @@ struct HistoryPage: View {
                             .padding(.top, 26)
                             .padding(.bottom, 8)
                     case .page(let visit, let first, let last):
-                        HistoryRow(visit: visit) { inBackground in
+                        HistoryRow(history: browser.history, visit: visit) { inBackground in
                             withAnimation(.slide) { _ = inBackground ? browser.openBehind(visit.url) : browser.open(visit.url) }
                         }
                         .padding(.horizontal, 4)
@@ -82,7 +82,7 @@ struct HistoryPage: View {
         }
         .padding(.top, 2)
         .dropdownHost($dropdown)
-        .background { PagesComeAndGo(changed: refresh) }
+        .background { PagesComeAndGo(history: browser.history, changed: refresh) }
         .onAppear(perform: refresh)
         // Not left to come up again over the next history page.
         .onDisappear { browser.clearingHistory = false }
@@ -99,9 +99,9 @@ struct HistoryPage: View {
         // Found in History's index, as the address bar's are: latest first,
         // with titles and addresses already folded to look through.
         searched = query
-        let found = History.shared.pages(containing: [query.trimmingCharacters(in: .whitespaces)])
+        let found = browser.history.pages(containing: [query.trimmingCharacters(in: .whitespaces)])
         lines = Self.lines(of: Self.days(of: found))
-        hasPages = !History.shared.visits.isEmpty
+        hasPages = !browser.history.visits.isEmpty
     }
 
     /// A line of the page: a day's heading, or one of its pages, first or
@@ -152,16 +152,18 @@ struct HistoryPage: View {
 /// own, so that only it, not the page's list, is looked at again whenever
 /// history changes.
 private struct PagesComeAndGo: View {
+    let history: History
     let changed: () -> Void
 
     var body: some View {
-        Color.clear.onChange(of: History.shared.visits.count, changed)
+        Color.clear.onChange(of: history.visits.count, changed)
     }
 }
 
 /// One page: when, its icon, title and site. A click opens it; the pointer
 /// over it brings out the button that takes it out of history.
 private struct HistoryRow: View {
+    let history: History
     let visit: History.Visit
     /// In a tab of its own, in front or (⌘-click) behind.
     let open: (_ inBackground: Bool) -> Void
@@ -202,7 +204,7 @@ private struct HistoryRow: View {
         .help(visit.url.absoluteString)
         .overlay(alignment: .trailing) {
             if hovering {
-                Button { withAnimation(.snappy(duration: 0.2)) { History.shared.remove(visit.url) } } label: {
+                Button { withAnimation(.snappy(duration: 0.2)) { history.remove(visit.url) } } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Palette.muted)

@@ -106,10 +106,10 @@ final class Browser: NSObject {
     /// Counts what changes the list, so an answer from the keychain that
     /// comes after the caret has moved on is let go.
     @ObservationIgnored var choicesAsked = 0
-    /// Where passwords are kept; tests give theirs a store of its own.
-    @ObservationIgnored var vault = Vault.shared
+    /// Where passwords are kept, the profile's; tests give theirs a store of their own.
+    @ObservationIgnored var vault: Vault
     /// The same for bookmarks.
-    @ObservationIgnored var bookmarks = Bookmarks.shared
+    @ObservationIgnored var bookmarks: Bookmarks
     /// Translates the tab on screen, while it is translated (`translationTask`).
     @ObservationIgnored let translator = Translator()
 
@@ -160,17 +160,24 @@ final class Browser: NSObject {
         }
     }
 
-    /// Where its pages keep cookies, cache and site data: the one on disk, or
-    /// for an incognito window, one in memory, gone with the window.
+    /// Whose browsing it is (Settings › Profiles). An incognito window's is
+    /// Personal's, for the passwords it fills and keeps.
+    let profile: Profile
+    /// Where its pages keep cookies, cache and site data: the profile's on
+    /// disk, or for an incognito window, one in memory, gone with the window.
     let dataStore: WKWebsiteDataStore
     /// An incognito window's: no history kept, no session saved, nothing on disk.
     var isPrivate: Bool { !dataStore.isPersistent }
-    /// What its fields suggest from: your history, or in incognito, nothing of it.
-    var history: History { isPrivate ? History.empty : .shared }
+    /// What its fields suggest from: the profile's history, or in incognito, nothing of it.
+    var history: History { isPrivate ? History.empty : profile.history }
 
-    init(dataStore: WKWebsiteDataStore = .default()) {
+    init(profile: Profile = .main, dataStore: WKWebsiteDataStore? = nil) {
+        self.profile = profile
+        let dataStore = dataStore ?? profile.dataStore
         self.dataStore = dataStore
-        siteSettings = dataStore.isPersistent ? .shared : SiteSettings(defaults: nil)
+        siteSettings = dataStore.isPersistent ? profile.siteSettings : SiteSettings(defaults: nil)
+        vault = profile.vault
+        bookmarks = profile.bookmarks
         super.init()
         // Checked each minute, loosely, so the system can fold it in with other wake-ups.
         sleepTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in

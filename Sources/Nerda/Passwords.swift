@@ -130,6 +130,8 @@ actor Vault {
     private var logins: [Login]?
     /// Asked this run, and told no: not asked again until the next.
     private var refused = false
+    /// Its profile is being deleted: neither the file nor the keychain is written again.
+    private var closed = false
 
     init(service: String, names: URL) {
         self.service = service
@@ -183,6 +185,7 @@ actor Vault {
     private func writeNames(_ new: [Name]) {
         names = new
         namesLost = false
+        guard !closed else { return }
         do {
             try FileManager.default.createDirectory(at: namesFile.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(new).write(to: namesFile, options: .atomic)
@@ -192,6 +195,7 @@ actor Vault {
     }
 
     private func store(_ new: [Login]) -> Bool {
+        guard !closed else { return false }
         // When each was last used is the names', written on every use without
         // the keychain; it goes into the keychain with a save.
         let used = Dictionary(loadNames().map { ($0.account, $0.used) }, uniquingKeysWith: { first, _ in first })
@@ -282,6 +286,10 @@ actor Vault {
             all.append(Login(host: account.host, user: account.user, password: password, saved: .now, clear: clear ? true : nil))
         }
         return store(all)
+    }
+
+    func close() {
+        closed = true
     }
 
     /// Every saved sign-in, without its password: the Passwords window's

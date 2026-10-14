@@ -57,6 +57,13 @@ final class Bookmarks {
         Self.writer.async { Self.write(items, to: file) }
     }
 
+    /// Never written again once what is on its way has landed: its profile
+    /// is being deleted, folder and all.
+    func close() {
+        file = nil
+        Self.writer.sync {}
+    }
+
     /// Writes one at a time, in the order asked; quitting waits for it.
     nonisolated static let writer = DispatchQueue(label: "dev.nerda.bookmarks", qos: .utility)
 

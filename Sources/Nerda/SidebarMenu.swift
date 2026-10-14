@@ -109,7 +109,7 @@ struct SidebarMenu: View {
     }
 
     private var history: some View {
-        let visits = History.shared.recent(12)
+        let visits = browser.history.recent(12)
         return VStack(spacing: 0) {
             if visits.isEmpty {
                 Text("No history yet")
