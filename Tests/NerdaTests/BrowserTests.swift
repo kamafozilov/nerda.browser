@@ -526,9 +526,12 @@ func framesFromAnotherSiteDownloadOnlyWhenClicked(scheme: String, host: String, 
     try await press(4, until: two)
 }
 
-/// A middle click on a link opens it in a tab of its own, behind this one.
+/// A middle click on a link opens it in a tab of its own, behind this one:
+/// on a page that stops the click on its way up too, but not on one that
+/// takes the click for itself, as in Chrome.
 @MainActor
-@Test func aMiddleClickOpensTheLinkBehind() async throws {
+@Test(arguments: [("", true), ("event.stopPropagation()", true), ("event.preventDefault()", false)])
+func aMiddleClickOpensTheLinkBehind(page handler: String, opens: Bool) async throws {
     let browser = Browser()
     let tab = Tab()
     browser.add(tab)
@@ -537,7 +540,7 @@ func framesFromAnotherSiteDownloadOnlyWhenClicked(scheme: String, host: String, 
     let page = tab.webView
     page.frame = window.contentView!.bounds
     window.contentView!.addSubview(page)
-    page.loadHTMLString(#"<a href="https://example.com/elsewhere" style="position:fixed;inset:0">x</a><script>window.ready = true</script>"#, baseURL: somewhere)
+    page.loadHTMLString(#"<a href="https://example.com/elsewhere" style="position:fixed;inset:0">x</a><script>document.querySelector('a').addEventListener('auxclick', event => { \#(handler) }); window.ready = true</script>"#, baseURL: somewhere)
     for _ in 0..<100 where try await page.callAsyncJavaScript("return window.ready === true", contentWorld: .page) as? Bool != true {
         try await Task.sleep(for: .milliseconds(20))
     }
@@ -550,10 +553,10 @@ func framesFromAnotherSiteDownloadOnlyWhenClicked(scheme: String, host: String, 
         let event = NSEvent(cgEvent: made)!
         if type == .otherMouseDown { page.otherMouseDown(with: event) } else { page.otherMouseUp(with: event) }
     }
-    for _ in 0..<100 where browser.tabs.count < 2 { try await Task.sleep(for: .milliseconds(20)) }
+    for _ in 0..<100 where opens && browser.tabs.count < 2 { try await Task.sleep(for: .milliseconds(20)) }
     // And the page itself stays where it was.
     try await Task.sleep(for: .milliseconds(300))
-    #expect(browser.tabs.map(\.site?.absoluteString) == ["https://example.com/elsewhere", "https://example.com/"])
+    #expect(browser.tabs.map(\.site?.absoluteString) == (opens ? ["https://example.com/elsewhere"] : []) + ["https://example.com/"])
     #expect(browser.selectedID == tab.id)
 }
 
