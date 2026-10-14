@@ -34,6 +34,11 @@ enum PasswordsWindow {
         }
     }
 
+    /// Closed with its profile, as that is deleted.
+    static func close(_ profile: Profile) {
+        if profile === Self.profile { window?.close() }
+    }
+
     private static func open(_ profile: Profile) {
         if window == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 540),

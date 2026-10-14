@@ -15,9 +15,13 @@ final class Profile: Identifiable {
     nonisolated static let mainID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
     /// Personal, there from the start, and never deleted.
     static let main = Profile(id: mainID, name: "Personal", symbol: "person", color: .blue)
-    /// What a profile can be marked with (Settings › Profiles), as Safari offers.
-    static let symbols = ["person", "briefcase", "house", "graduationcap", "heart", "star",
-                          "book", "hammer", "gamecontroller", "airplane", "cart", "leaf"]
+    /// What a profile can be marked with (Settings › Profiles), as Safari
+    /// offers, with what VoiceOver calls each.
+    static let symbols: [(symbol: String, name: String)] = [
+        ("person", "Person"), ("briefcase", "Briefcase"), ("house", "House"), ("graduationcap", "Graduation Cap"),
+        ("heart", "Heart"), ("star", "Star"), ("book", "Book"), ("hammer", "Hammer"),
+        ("gamecontroller", "Game Controller"), ("airplane", "Aeroplane"), ("cart", "Cart"), ("leaf", "Leaf"),
+    ]
 
     let id: UUID
     var name: String
