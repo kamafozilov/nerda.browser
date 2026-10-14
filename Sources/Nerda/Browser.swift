@@ -16,6 +16,7 @@ final class Browser: NSObject {
             let open = Set(tabs.map(ObjectIdentifier.init))
             for tab in oldValue where !open.contains(ObjectIdentifier(tab)) { tab.silence() }
             recent.removeAll { !open.contains(ObjectIdentifier($0)) }
+            if selected.map({ !open.contains(ObjectIdentifier($0)) }) ?? (selectedID != nil) { findSelected() }
             sessionChanged()
             // Only once they have started, after the window: made any sooner
             // for this, they would hold up the window.
@@ -27,6 +28,7 @@ final class Browser: NSObject {
     @ObservationIgnored private(set) var recent: [Tab] = []
     var selectedID: Tab.ID? {
         didSet {
+            if selected?.id != selectedID { findSelected() }
             if let left = tabs.first(where: { $0.id == oldValue }) {
                 left.lastSeen = .now
                 left.pageMoved()
@@ -134,7 +136,15 @@ final class Browser: NSObject {
     /// The window it is shown in, which closing its last tab closes; none in tests.
     @ObservationIgnored weak var window: NSWindow?
 
-    var selected: Tab? { tabs.first { $0.id == selectedID } }
+    /// The tab on screen, kept rather than looked up: what shows it then
+    /// draws again when it changes, not on every change to the list, as
+    /// each step of a drag in the sidebar is.
+    private(set) var selected: Tab?
+
+    private func findSelected() {
+        let found = selectedID.flatMap { id in tabs.first { $0.id == id } }
+        if found !== selected { selected = found }
+    }
 
     /// The languages the tab on screen is translated between, for the
     /// window's translation session; none while it isn't.
