@@ -139,6 +139,11 @@ final class Tab: Identifiable {
     @ObservationIgnored var signIn: SentSignIn?
     /// A name sent on its own, for the password step that comes after it.
     @ObservationIgnored var nameSent: (host: String, user: String, at: Date)?
+    /// An address or card the page just sent in a form, until the next page shows it went through.
+    @ObservationIgnored var formSent: SentForm?
+    /// The address of the document in the page, from when it came in: the
+    /// page's `url` is already the next one's while that is still on its way.
+    @ObservationIgnored var committed: URL?
     /// The tab whose page opened this one's (a sign-in popup).
     @ObservationIgnored var opener: Tab.ID?
     /// The extension whose pages the page was made for (see `go`), or nil
@@ -714,6 +719,7 @@ final class Tab: Identifiable {
     /// site that gives none, as it means to be. WebKit holds the new page back
     /// until it has something to show, so the ground under it never shows through.
     func pageDidCommit() {
+        committed = page?.url
         hasUnsavedWork = false
         departureApproved = false
         // A new document, a reload's included: checked again once it has loaded.

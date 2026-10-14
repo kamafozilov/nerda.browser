@@ -14,6 +14,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Reader, as in Safari: on an article, the Reader button beside the address shows it alone, in plain type that follows light and dark, without the menus, ads and comments round it. Click it again, or use View › Show Reader (⌃⌘R), to go back to the page as you left it.
 - File › Import From Browser… brings in your history and bookmarks from Chrome, Arc, Brave, Edge, Vivaldi, Opera or Firefox on this Mac: pick the browser and profile, and History, Bookmarks or both. Pages you visited join those in your history, as far back as Settings › Security & Privacy keeps it, and bookmarks go in a folder of their own at the end.
 - Settings › Tabs › Load background tabs when shown: a link you open behind the page, with ⌘-click, the middle button or Open Link in New Tab, shows its tab at once but loads only when you go to it, so opening many takes no time or memory meanwhile. It is off unless you turn it on, as Safari and Chrome load them at once.
+- AutoFill, as in Safari: click a box of a form for your saved addresses and cards, and pick one to fill in the whole address or card. A card goes in after Touch ID or your Mac's password, and its security code is never saved.
+- After you send a form with a new address, or a new card on a secure page, Nerda offers to save it, never in an incognito window. Settings › AutoFill turns Contact info and Credit cards on or off, and adds, edits or removes them.
 
 ### Changed
 

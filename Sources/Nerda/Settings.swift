@@ -4,7 +4,7 @@ import WebKit
 /// The pages of Nerda's settings, listed down the settings tab's left. Only
 /// what works is listed: a page comes once it has something in it.
 enum SettingsPage: String, CaseIterable, Identifiable, Codable {
-    case general, appearance, tabs, passwords, siteSettings, privacy, extensions, shortcuts, releaseNotes
+    case general, appearance, tabs, passwords, autofill, siteSettings, privacy, extensions, shortcuts, releaseNotes
 
     var id: Self { self }
 
@@ -14,6 +14,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .appearance: "Appearance"
         case .tabs: "Tabs"
         case .passwords: "Passwords"
+        case .autofill: "AutoFill"
         case .siteSettings: "Site Settings"
         case .privacy: "Security & Privacy"
         case .extensions: "Extensions"
@@ -28,6 +29,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .appearance: "circle.lefthalf.filled"
         case .tabs: "square.on.square"
         case .passwords: "key"
+        case .autofill: "person.text.rectangle"
         case .siteSettings: "slider.horizontal.3"
         case .privacy: "lock"
         case .extensions: "puzzlepiece.extension"
@@ -39,7 +41,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
     /// The heading it is listed under.
     var section: String {
         switch self {
-        case .general, .appearance, .tabs, .passwords, .siteSettings, .privacy, .extensions, .shortcuts: "Personal"
+        case .general, .appearance, .tabs, .passwords, .autofill, .siteSettings, .privacy, .extensions, .shortcuts: "Personal"
         case .releaseNotes: "Nerda"
         }
     }
@@ -53,6 +55,8 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
                            "new tab", "wallpaper", "picture", "background", "ai chats", "chatgpt", "claude"]
         case .tabs: ["sleep", "memory", "performance", "inactive", "background", "load", "wait", "lazy", "pinned", "launch", "startup", "preview", "hover", "card"]
         case .passwords: ["autofill", "fill", "save", "never saved", "import", "keychain", "touch id", "accounts", "sign in", "login"]
+        case .autofill: ["contact info", "addresses", "credit cards", "debit cards", "payment", "forms", "fill", "name", "email", "phone",
+                         "shipping", "billing", "checkout"]
         case .siteSettings: ["permissions", "camera", "microphone", "location", "notifications", "sites", "allow", "block", "ads"]
         case .privacy: ["security", "https", "secure connections", "upgrade", "history", "keep history", "delete", "clear", "cookies", "cache", "site data", "ads", "trackers", "adblock", "blocking",
                         "filters", "easylist", "ublock", "adguard", "incognito", "private", "lock"]
@@ -86,6 +90,9 @@ struct SettingsView: View {
     @State private var editingSearch = false
     @State private var deletingData = false
     @State private var languages = PreferredLanguage.chosen
+    /// An address or card being added or changed (Settings › AutoFill).
+    @State private var editingContact: Contact?
+    @State private var editingCard: Card?
 
     var body: some View {
         let open = tab.settings.flatMap { $0 != .extensions || Extensions.available ? $0 : nil } ?? .general
@@ -137,6 +144,8 @@ struct SettingsView: View {
                         TabsSettings()
                     case .passwords:
                         PasswordsSettings(browser: browser)
+                    case .autofill:
+                        AutoFillSettings(edit: { editingContact = $0 }, editCard: { editingCard = $0 })
                     case .siteSettings:
                         SitePermissionsSettings()
                     case .privacy:
@@ -153,7 +162,7 @@ struct SettingsView: View {
                 .padding(.horizontal, 32)
                 .padding(.vertical, 56)
                 .frame(maxWidth: .infinity)
-                .dialogBlur(editingLanguages || editingSearch || deletingData)
+                .dialogBlur(editingLanguages || editingSearch || deletingData || editingContact != nil || editingCard != nil)
             }
             .scrollIndicators(.never)
             .scrollBounceBehavior(.basedOnSize)
@@ -178,6 +187,12 @@ struct SettingsView: View {
                 }
                 if deletingData {
                     DeleteDataDialog(browser: browser, escapes: dropdown == nil) { deletingData = false }
+                }
+                if let contact = editingContact {
+                    ContactDialog(contact: contact, escapes: dropdown == nil) { editingContact = nil }
+                }
+                if let card = editingCard {
+                    CardDialog(card: card, escapes: dropdown == nil) { editingCard = nil }
                 }
             }
         }
@@ -530,6 +545,67 @@ private struct PasswordsSettings: View {
     private var offerDetail: String {
         if let manager = Extensions.shared.passwordSavingTakenBy { return "\(manager) saves your passwords instead" }
         return "Ask to keep a new password once you have signed in with it"
+    }
+}
+
+/// Contact info and cards, as Safari's AutoFill has them: whether Nerda
+/// fills them in and offers to keep them, and those kept, to add, change or
+/// remove.
+private struct AutoFillSettings: View {
+    let edit: (Contact) -> Void
+    let editCard: (Card) -> Void
+
+    @AppStorage(AutoFill.addressesKey) private var fillsAddresses = true
+    @AppStorage(AutoFill.cardsKey) private var fillsCards = true
+    private let autofill = AutoFill.shared
+
+    var body: some View {
+        SettingsGroup {
+            SettingsRow(title: "Contact info", detail: "Fill in names, addresses, email and phone numbers, and offer to save new ones",
+                        icon: "person.text.rectangle") {
+                SettingsToggle(title: "Contact info", isOn: $fillsAddresses)
+            }
+            SettingsRow(title: "Credit cards", detail: "Fill in after Touch ID or your Mac's password, and offer to save new ones",
+                        icon: "creditcard") {
+                SettingsToggle(title: "Credit cards", isOn: $fillsCards)
+            }
+        }
+        SettingsGroup(title: "Addresses") {
+            ForEach(autofill.addresses) { contact in
+                SettingsRow(title: contact.title, detail: contact.summary.isEmpty ? nil : contact.summary, icon: "person.crop.circle") {
+                    editButton(for: contact.title) { edit(contact) }
+                }
+            }
+            SettingsRow(title: "Add an address",
+                        detail: autofill.addresses.isEmpty ? "Nerda offers to save the address you send in a form, or add one here" : nil,
+                        icon: "plus") {
+                Button("Add…") { edit(Contact()) }
+                    .buttonStyle(SettingsButtonStyle())
+                    .fixedSize()
+            }
+        }
+        SettingsGroup(title: "Cards") {
+            ForEach(autofill.cards) { card in
+                SettingsRow(title: card.title, detail: [card.name, "Expires \(card.expiry)"].filter { !$0.isEmpty }.joined(separator: " · "),
+                            icon: "creditcard") {
+                    editButton(for: card.title) { editCard(card) }
+                }
+            }
+            SettingsRow(title: "Add a card",
+                        detail: autofill.cards.isEmpty ? "Nerda offers to save the card you pay with on a secure page, or add one here" : nil,
+                        icon: "plus") {
+                Button("Add…") { editCard(Card()) }
+                    .buttonStyle(SettingsButtonStyle())
+                    .fixedSize()
+            }
+        }
+    }
+
+    private func editButton(for title: String, action: @escaping () -> Void) -> some View {
+        Button("Edit…", action: action)
+            .buttonStyle(SettingsButtonStyle())
+            .fixedSize()
+            .accessibilityLabel("Edit \(title)")
     }
 }
 
@@ -1753,6 +1829,200 @@ private struct CustomSearchDialog: View {
         savedAddress = valid
         engine = .custom
         done()
+    }
+}
+
+/// An address added or changed: what forms ask for, in the order they ask it.
+private struct ContactDialog: View {
+    let escapes: Bool
+    let done: () -> Void
+
+    @State private var contact: Contact
+    @FocusState private var focused: String?
+
+    init(contact: Contact, escapes: Bool, done: @escaping () -> Void) {
+        _contact = State(initialValue: contact)
+        self.escapes = escapes
+        self.done = done
+    }
+
+    private var isNew: Bool { !AutoFill.shared.addresses.contains { $0.id == contact.id } }
+
+    var body: some View {
+        SettingsDialog(width: 460, escapes: escapes, cancel: done) {
+            Text(isNew ? "New address" : "Edit address")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
+                GridRow {
+                    field("First name", $contact.givenName)
+                    field("Last name", $contact.familyName)
+                }
+                GridRow { field("Organisation", $contact.organisation, prompt: "Optional").gridCellColumns(2) }
+                GridRow { field("Street", $contact.line1).gridCellColumns(2) }
+                GridRow { field("Flat, suite or floor", $contact.line2, prompt: "Optional").gridCellColumns(2) }
+                GridRow {
+                    field("City", $contact.city)
+                    field("Region", $contact.region, prompt: "State or county")
+                }
+                GridRow {
+                    field("Postcode", $contact.postalCode)
+                    field("Country", $contact.country)
+                }
+                GridRow {
+                    field("Email", $contact.email)
+                    field("Phone", $contact.phone)
+                }
+            }
+            .padding(.top, 16)
+            HStack(spacing: 8) {
+                if !isNew {
+                    Button("Remove", role: .destructive) {
+                        AutoFill.shared.remove(contact)
+                        done()
+                    }
+                    .buttonStyle(SettingsButtonStyle())
+                }
+                Spacer()
+                Button("Cancel", action: done)
+                    .buttonStyle(SettingsButtonStyle())
+                Button("Save", action: save)
+                    .buttonStyle(SettingsButtonStyle(prominent: true))
+                    .disabled(contact.values.isEmpty)
+            }
+            .padding(.top, 22)
+        }
+        .textFieldStyle(.roundedBorder)
+        .onAppear { focused = "First name" }
+    }
+
+    private func field(_ title: String, _ text: Binding<String>, prompt: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Palette.ink)
+            TextField(title, text: text, prompt: prompt.map { Text($0) })
+                .labelsHidden()
+                .focused($focused, equals: title)
+                .onSubmit(save)
+        }
+    }
+
+    private func save() {
+        var kept = contact
+        for key: WritableKeyPath<Contact, String> in [\.givenName, \.familyName, \.organisation, \.line1, \.line2, \.city,
+                                                      \.region, \.postalCode, \.country, \.email, \.phone] {
+            kept[keyPath: key] = kept[keyPath: key].trimmingCharacters(in: .whitespaces)
+        }
+        guard !kept.values.isEmpty else { return }
+        AutoFill.shared.save(kept)
+        done()
+    }
+}
+
+/// A card added or changed. A kept card's number shows only as its last
+/// digits: one typed in takes its place, and left empty it stays as it is.
+private struct CardDialog: View {
+    let escapes: Bool
+    let done: () -> Void
+
+    @State private var card: Card
+    @State private var number = ""
+    @State private var expiry: String
+    @State private var saving = false
+    @FocusState private var focused: String?
+
+    init(card: Card, escapes: Bool, done: @escaping () -> Void) {
+        _card = State(initialValue: card)
+        _expiry = State(initialValue: card.month == 0 ? "" : card.expiry)
+        self.escapes = escapes
+        self.done = done
+    }
+
+    private var isNew: Bool { !AutoFill.shared.cards.contains { $0.id == card.id } }
+    private var digits: String? { CardNumber.digits(number) }
+    private var numberWorks: Bool { number.isEmpty ? !isNew : digits.map(CardNumber.isValid) ?? false }
+    private var expires: (month: Int, year: Int)? { CardNumber.expiry(expiry) }
+
+    /// Said once something is typed, not while a box is still empty.
+    private var problem: String {
+        if !number.isEmpty && !numberWorks { return "Check the card number" }
+        if !expiry.isEmpty && expires == nil { return "Write the expiry as MM/YY" }
+        return " "
+    }
+
+    var body: some View {
+        SettingsDialog(width: 420, escapes: escapes, cancel: done) {
+            Text(isNew ? "New card" : "Edit card")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
+                GridRow {
+                    field("Card number", $number, prompt: isNew ? "1234 5678 9012 3456" : "Ending in \(card.ending)")
+                        .gridCellColumns(2)
+                }
+                GridRow { field("Name on card", $card.name).gridCellColumns(2) }
+                GridRow {
+                    field("Expires", $expiry, prompt: "MM/YY")
+                    field("Nickname", $card.nickname, prompt: "Optional")
+                }
+            }
+            .padding(.top, 16)
+            Text(problem)
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .padding(.top, 8)
+            HStack(spacing: 8) {
+                if !isNew {
+                    Button("Remove", role: .destructive) {
+                        AutoFill.shared.remove(card)
+                        done()
+                    }
+                    .buttonStyle(SettingsButtonStyle())
+                }
+                Spacer()
+                Button("Cancel", action: done)
+                    .buttonStyle(SettingsButtonStyle())
+                Button("Save", action: save)
+                    .buttonStyle(SettingsButtonStyle(prominent: true))
+                    .disabled(!numberWorks || expires == nil || saving)
+            }
+            .padding(.top, 14)
+        }
+        .textFieldStyle(.roundedBorder)
+        .onAppear { focused = isNew ? "Card number" : "Name on card" }
+    }
+
+    private func field(_ title: String, _ text: Binding<String>, prompt: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Palette.ink)
+            TextField(title, text: text, prompt: prompt.map { Text($0) })
+                .labelsHidden()
+                .focused($focused, equals: title)
+                .onSubmit(save)
+        }
+    }
+
+    private func save() {
+        guard numberWorks, let expires, !saving else { return }
+        var kept = card
+        kept.name = card.name.trimmingCharacters(in: .whitespaces)
+        kept.nickname = card.nickname.trimmingCharacters(in: .whitespaces)
+        kept.month = expires.month
+        kept.year = expires.year
+        let typed = number.isEmpty ? nil : digits
+        if let typed {
+            kept.ending = String(typed.suffix(4))
+            kept.brand = CardNumber.brand(of: typed)
+        }
+        saving = true
+        Task {
+            let saved = await AutoFill.shared.save(kept, number: typed)
+            saving = false
+            if saved { done() } else { Browser.tell("Couldn't save the card", "The keychain didn't take it.") }
+        }
     }
 }
 

@@ -33,7 +33,8 @@ struct SentSignIn: Equatable {
     var isRecent: Bool { Date.now.timeIntervalSince(at) < 45 }
 }
 
-/// The saved accounts that could go in the sign-in box the caret is in, and
+/// The saved accounts that could go in the sign-in box the caret is in, or
+/// the addresses or cards for the form box it is in (AutoFill.swift), and
 /// where that box is on the page (in points, from the page's top left).
 struct PasswordChoices: Equatable {
     let tab: Tab.ID
@@ -44,6 +45,8 @@ struct PasswordChoices: Equatable {
     /// list starts again as if just shown.
     var spot: CGRect { didSet { if spot != oldValue { shown = .now } } }
     var accounts: [Account]
+    var addresses: [Contact] = []
+    var cards: [Card] = []
     /// When it came up where it is. A page can put the caret in a sign-in
     /// box itself, an invisible one under the pointer included, or move the
     /// box there: a click that was already on its way is not a choice, so
@@ -52,6 +55,7 @@ struct PasswordChoices: Equatable {
     var frame: WKFrameInfo? = nil
 
     var takesClicks: Bool { Date.now.timeIntervalSince(shown) > 0.5 }
+    var isEmpty: Bool { accounts.isEmpty && addresses.isEmpty && cards.isEmpty }
 }
 
 /// A sign-in that worked, with a password not yet kept.
@@ -551,6 +555,47 @@ enum Passwords {
                 && isName(box);
             const isField = (box) => isPassword(box) || (isName(box) && (nameAlone(box) || passwordFor(box) !== null));
 
+            \#(AutoFill.classifier)
+            // The boxes an address or card goes in: lists and text areas too.
+            const fillable = (box) => (box instanceof HTMLInputElement ? ['text', 'email', 'tel', 'number'].includes(box.type) && !box.readOnly
+                : box instanceof HTMLTextAreaElement ? !box.readOnly : box instanceof HTMLSelectElement) && !box.disabled && shown(box);
+            // What a box's label says, without the text of a list inside it (every country's name).
+            const labelled = (label) => {
+                const copy = label.cloneNode(true);
+                copy.querySelectorAll('input, select, textarea').forEach((inside) => inside.remove());
+                return copy.textContent.slice(0, 200);
+            };
+            const classify = (box) => autofillToken(box.getAttribute('autocomplete'),
+                [box.name, box.id, box.placeholder, box.getAttribute('aria-label'), ...[...(box.labels ?? [])].map(labelled)].join(' '),
+                box.type);
+            const kindOf = (token) => token?.startsWith('cc-') ? 'card' : token ? 'address' : null;
+            // The boxes of one address or one card in the form around a box,
+            // with what each takes: its run of them, which ends where a kind of
+            // box comes round again (a billing address after a shipping one).
+            const group = (box, kind) => {
+                const groups = [[]];
+                for (const other of (box.form ?? document).querySelectorAll('input, select, textarea')) {
+                    if (!fillable(other)) continue;
+                    const token = classify(other);
+                    if (kindOf(token) !== kind) continue;
+                    if (groups.at(-1).some((field) => field.token === token)) groups.push([]);
+                    groups.at(-1).push({ box: other, token });
+                }
+                return groups.find((fields) => fields.some((field) => field.box === box)) ?? [];
+            };
+            // Whether the box the caret is in lists addresses or cards: a card's
+            // box in a form with its number, over https; an address's box with
+            // another beside it, or one the page itself said takes a name, an
+            // email, a phone.
+            const formKind = (box) => {
+                if (box instanceof HTMLSelectElement || !fillable(box)) return null;
+                const kind = kindOf(classify(box));
+                const fields = kind ? group(box, kind) : [];
+                if (kind === 'card') return location.protocol === 'https:' && fields.some((field) => field.token === 'cc-number') ? kind : null;
+                const named = autofillTokens.includes(box.getAttribute('autocomplete')?.toLowerCase().split(/\s+/).at(-1));
+                return kind && (fields.length > 1 || named) ? kind : null;
+            };
+
             // The sign-in box the caret is in, and whether the browser lists accounts under it.
             let field = null;
             let listed = false;
@@ -566,11 +611,18 @@ enum Passwords {
 
             const arrive = (box) => {
                 if (filling) return;
-                if (!isField(box)) {
+                // A sign-in's boxes are the passwords', whatever else they look like.
+                const form = isPassword(box) || (isName(box) && passwordFor(box) !== null) ? null : formKind(box);
+                if (!form && !isField(box)) {
                     field = null;
                     return unlist('blur');
                 }
                 field = box;
+                if (form) {
+                    if (box.value) return unlist('blur');
+                    listed = true;
+                    return post({ kind: 'focus', spot: spot(), form });
+                }
                 // Filled already (by hand, or by picking): nothing to offer.
                 const password = field.type === 'password' ? field : passwordFor(field);
                 if ((password ?? field).value) return unlist('blur');
@@ -607,9 +659,29 @@ enum Passwords {
             addEventListener('scroll', moved, true);
             addEventListener('resize', moved);
 
+            // The address and card a page's forms hold as they are sent: the
+            // first of each kind of box with something in it.
+            const formSent = () => {
+                const sent = {};
+                // Said on every click of a button: the cheap checks first, laying
+                // out only a box that holds something AutoFill keeps.
+                for (const box of document.querySelectorAll('input, select, textarea')) {
+                    const number = box instanceof HTMLSelectElement && /^\d+$/.test(box.value);
+                    const value = (box instanceof HTMLSelectElement && !number ? box.selectedOptions[0]?.text ?? '' : box.value).trim();
+                    if (!value) continue;
+                    const token = classify(box);
+                    const kind = kindOf(token);
+                    if (!kind || !fillable(box)) continue;
+                    sent[kind] ??= {};
+                    sent[kind][token] ??= value;
+                }
+                if (sent.address || sent.card) post({ kind: 'form', ...sent });
+            };
+
             // What the boxes hold as they are sent, said on every way of sending
             // them; the browser keeps the last.
             const sent = () => {
+                formSent();
                 const boxes = passwords();
                 const filled = boxes.filter((box) => box.value);
                 if (filled.length) {
@@ -684,6 +756,59 @@ enum Passwords {
                 }
                 return true;
             };
+
+            // A list's option for a value: the same, the same number (4 for 04,
+            // 27 for 2027), or else the first whose text starts with it.
+            const choose = (select, value) => {
+                const want = value.toLowerCase();
+                const number = /^\d+$/.test(want) ? Number(want) : null;
+                const options = [...select.options].filter((option) => !option.disabled);
+                const option = options.find((option) => [option.value, option.text].some((text) => text.trim().toLowerCase() === want))
+                    ?? (number === null ? undefined : options.find((option) => option.value.trim() !== '' && [number, number % 100].includes(Number(option.value))))
+                    ?? (want.length > 1 ? options.find((option) => option.text.trim().toLowerCase().startsWith(want)) : undefined);
+                if (!option || option.selected) return;
+                select.value = option.value;
+                select.dispatchEvent(new Event('input', { bubbles: true }));
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            };
+            // What goes in a box, as it takes it: a street on one line, an
+            // expiry as MM/YY, or MM/YYYY where the page asks for that.
+            const valueFor = (box, token, values) => {
+                if (token === 'street-address' && !(box instanceof HTMLTextAreaElement)) return values[token]?.replace(/\n/g, ', ');
+                const year = values['cc-exp-year'];
+                if (token === 'cc-exp') {
+                    const month = values['cc-exp-month'];
+                    const hint = `${box.placeholder} ${box.getAttribute('aria-label') ?? ''}`.toLowerCase();
+                    if (!month || !year) return null;
+                    return `${month}${hint.includes(' / ') ? ' / ' : '/'}${/yyyy|aaaa/.test(hint) ? year : year.slice(2)}`;
+                }
+                if (token === 'cc-exp-year' && (box.maxLength === 2 || /^\s*yy\s*$/i.test(box.placeholder ?? ''))) return year?.slice(2);
+                return values[token];
+            };
+            // An address or card picked under one of a form's boxes, into each
+            // box of its group the page left empty, and its lists. Only on the
+            // site it was listed for; a card, or anything listed for a page
+            // over https, only over https.
+            window.nerdaFillForm = (kind, values, site, secure) => {
+                if (location.hostname.toLowerCase().replace(/^www\./, '') !== site) return false;
+                if ((secure || kind === 'card') && location.protocol !== 'https:') return false;
+                const box = field?.isConnected ? field : null;
+                if (!box) return false;
+                listed = false;
+                filling = true;
+                try {
+                    for (const { box: other, token } of group(box, kind)) {
+                        const value = valueFor(other, token, values);
+                        if (!value) continue;
+                        if (other instanceof HTMLSelectElement) choose(other, value);
+                        else if (other === box || !other.value) put(other, value);
+                    }
+                    box.focus();
+                } finally {
+                    filling = false;
+                }
+                return true;
+            };
         })();
         """#
 }
@@ -696,15 +821,26 @@ extension Browser {
         guard let tab = tab(for: page) else { return }
         switch kind {
         case "focus":
-            guard Passwords.fills, let spot = Self.spot(body, on: page, frame: frame) else { return }
+            // A box of a form takes an address or a card, on the page's own frames only.
+            let form = body["form"] as? String
+            let fills = switch form {
+            case nil: Passwords.fills
+            case "card": AutoFill.fillsCards && !clear && Self.isPagesOwn(frame, on: tab)
+            default: AutoFill.fillsAddresses && Self.isPagesOwn(frame, on: tab)
+            }
+            guard fills, let spot = Self.spot(body, on: page, frame: frame) else { return }
             choicesAsked += 1
             let asked = choicesAsked
             Task {
-                let accounts = await vault.accounts(for: host, clear: clear)
+                var choices = PasswordChoices(tab: tab.id, site: host, clear: clear, spot: spot, accounts: [], frame: frame)
+                switch form {
+                case "address": choices.addresses = Array(AutoFill.shared.addresses.prefix(6))
+                case "card": choices.cards = Array(AutoFill.shared.cards.prefix(6))
+                default: choices.accounts = Array(await vault.accounts(for: host, clear: clear).prefix(6))
+                }
                 // Gone meanwhile: the caret moved on, or the tab did.
                 guard asked == choicesAsked, tab.id == selectedID else { return }
-                passwordChoices = accounts.isEmpty ? nil
-                    : PasswordChoices(tab: tab.id, site: host, clear: clear, spot: spot, accounts: Array(accounts.prefix(6)), frame: frame)
+                passwordChoices = choices.isEmpty ? nil : choices
             }
         case "move":
             guard passwordChoices?.tab == tab.id, passwordChoices?.site == host,
@@ -726,6 +862,8 @@ extension Browser {
             guard let sent = tab.signIn, sent.isRecent, sent.host == host else { return }
             tab.signIn = nil
             offer(sent, on: tab)
+        case "form":
+            self.page(page, sentForm: body, on: tab, clear: clear, frame: frame)
         default:
             break
         }
@@ -781,10 +919,7 @@ extension Browser {
 
     /// One of the accounts listed, into the page it was listed on.
     func fill(_ account: Account) {
-        guard let choices = passwordChoices, choices.takesClicks,
-              let page = tabs.first(where: { $0.id == choices.tab })?.page else { return }
-        choicesAsked += 1
-        passwordChoices = nil
+        guard let (choices, page) = takeChoice() else { return }
         Task {
             // nil when the Mac was asked whether Nerda may read it, and said no.
             guard let password = await vault.password(for: account) else { return }
@@ -797,6 +932,16 @@ extension Browser {
             page.window?.makeFirstResponder(page)
             if filled == true { await vault.touch([account]) }
         }
+    }
+
+    /// What was listed, and the page it was listed on, as one is picked;
+    /// nil for a pick the list takes no click for yet.
+    func takeChoice() -> (PasswordChoices, WKWebView)? {
+        guard let choices = passwordChoices, choices.takesClicks,
+              let page = tabs.first(where: { $0.id == choices.tab })?.page else { return nil }
+        choicesAsked += 1
+        passwordChoices = nil
+        return (choices, page)
     }
 
     func forget(_ account: Account) {
@@ -854,8 +999,9 @@ extension Browser {
     }
 }
 
-/// The accounts kept for the site, hanging from the sign-in box. A click puts
-/// one in; right-click to forget it.
+/// The accounts kept for the site, hanging from the sign-in box, or the
+/// addresses or cards kept, from a box of a form. A click puts one in;
+/// right-click an account to forget it.
 // ponytail: always below the box; one at the window's bottom edge would want it above.
 struct PasswordChoicesView: View {
     let browser: Browser
@@ -864,10 +1010,18 @@ struct PasswordChoicesView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(choices.accounts, id: \.self) { account in
-                ChoiceRow(account: account) { browser.fill(account) }
-                    .contextMenu {
-                        Button("Remove Saved Password") { browser.forget(account) }
-                    }
+                ChoiceRow(icon: "key.fill", title: account.user.isEmpty ? "No user name" : account.user, detail: account.host) {
+                    browser.fill(account)
+                }
+                .contextMenu {
+                    Button("Remove Saved Password") { browser.forget(account) }
+                }
+            }
+            ForEach(choices.addresses) { address in
+                ChoiceRow(icon: "person.text.rectangle", title: address.title, detail: address.summary) { browser.fill(address) }
+            }
+            ForEach(choices.cards) { card in
+                ChoiceRow(icon: "creditcard", title: card.title, detail: "Expires \(card.expiry)") { browser.fill(card) }
             }
         }
         .padding(4)
@@ -876,23 +1030,27 @@ struct PasswordChoicesView: View {
     }
 
     private struct ChoiceRow: View {
-        let account: Account
+        let icon: String
+        let title: String
+        let detail: String
         let pick: () -> Void
         @State private var hovering = false
 
         var body: some View {
             Button(action: pick) {
                 HStack(spacing: 10) {
-                    Image(systemName: "key.fill")
+                    Image(systemName: icon)
                         .font(.system(size: 11))
                         .foregroundStyle(Palette.muted)
                         .frame(width: 20)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(account.user.isEmpty ? "No user name" : account.user)
+                        Text(title)
                             .foregroundStyle(Palette.ink)
-                        Text(account.host)
-                            .font(.caption)
-                            .foregroundStyle(Palette.muted)
+                        if !detail.isEmpty {
+                            Text(detail)
+                                .font(.caption)
+                                .foregroundStyle(Palette.muted)
+                        }
                     }
                     .lineLimit(1)
                     Spacer(minLength: 0)
@@ -914,14 +1072,32 @@ struct PasswordOfferBar: View {
     let offer: PasswordOffer
 
     var body: some View {
+        OfferBar(icon: "key.fill", title: offer.replaces ? "Update the saved password?" : "Save this password?",
+                 detail: offer.account.user.isEmpty ? offer.account.host : "\(offer.account.user) on \(offer.account.host)") {
+            Button("Never for This Site", action: browser.neverSavePasswords)
+            Button("Not Now", action: browser.dropPasswordOffer)
+            Button(offer.replaces ? "Update" : "Save", action: browser.keepOfferedPassword)
+                .buttonStyle(.borderedProminent)
+        }
+    }
+}
+
+/// Something a page sent, offered to keep, over the top of the page.
+struct OfferBar<Actions: View>: View {
+    let icon: String
+    let title: String
+    let detail: String
+    @ViewBuilder let actions: Actions
+
+    var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "key.fill")
+            Image(systemName: icon)
                 .foregroundStyle(Palette.muted)
             VStack(alignment: .leading, spacing: 2) {
-                Text(offer.replaces ? "Update the saved password?" : "Save this password?")
+                Text(title)
                     .fontWeight(.semibold)
                     .foregroundStyle(Palette.ink)
-                Text(offer.account.user.isEmpty ? offer.account.host : "\(offer.account.user) on \(offer.account.host)")
+                Text(detail)
                     .font(.callout)
                     .foregroundStyle(Palette.muted)
                     .truncationMode(.middle)
@@ -931,10 +1107,7 @@ struct PasswordOfferBar: View {
             .frame(maxWidth: 360, alignment: .leading)
             .fixedSize(horizontal: true, vertical: false)
             .padding(.trailing, 8)
-            Button("Never for This Site", action: browser.neverSavePasswords)
-            Button("Not Now", action: browser.dropPasswordOffer)
-            Button(offer.replaces ? "Update" : "Save", action: browser.keepOfferedPassword)
-                .buttonStyle(.borderedProminent)
+            actions
         }
         .padding(.horizontal, 16)
         .frame(height: 56)

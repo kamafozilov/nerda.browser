@@ -740,13 +740,20 @@ func iconsAreKeptPerOrigin(url: String, origin: String?) {
 }
 
 @MainActor
-@Test func closingTheWindowClosesItsTabs() {
+@Test func closingTheWindowClosesItsTabs() throws {
     let browser = Browser()
     browser.open(somewhere)
     browser.open(somewhere)
+    let tab = try #require(browser.tabs.first?.id)
+    browser.passwordOffer = PasswordOffer(tab: tab, account: Account(host: "example.com", user: "me"), password: "secret",
+                                          clear: false, replaces: false)
+    browser.autofillOffers = [AutoFillOffer(tab: tab, item: .card(Card(), number: "4242424242424242"))]
     browser.closeAll()
     #expect(browser.tabs.isEmpty)
     #expect(browser.selectedID == nil)
+    // Nothing secret is kept for a window no longer there.
+    #expect(browser.passwordOffer == nil)
+    #expect(browser.autofillOffers.isEmpty)
 }
 
 /// Full screen stays in the page: the element fills it from inside a box
