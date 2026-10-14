@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.25] - 2026-10-14
+
 ### Fixed
 
 - Dragging a tab off its window shows it leaving, as in Safari and Chrome: its place in the list closes up and a card of it follows the pointer onto the other display. Over the tabs of another window, a gap opens where it will land, with the tab in it, where before nothing showed until you let go.
@@ -399,7 +401,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.24...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.25...HEAD
+[0.0.25]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.24...v0.0.25
 [0.0.24]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.23...v0.0.24
 [0.0.23]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.22...v0.0.23
 [0.0.22]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.21...v0.0.22
