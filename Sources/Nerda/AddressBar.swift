@@ -30,7 +30,8 @@ struct AddressBar: View {
         // playing, after it is closed.
         let tab = browser.selected
         let loading = tab?.isLoading == true
-        let color = tab?.color
+        // Reader's own ground, not the page's, while it shows.
+        let color = tab?.reader == nil ? tab?.color : nil
 
         HStack(spacing: Self.gap) {
             if !horizontal {
@@ -73,6 +74,19 @@ struct AddressBar: View {
                 }
             }
             .padding(.leading, 4)
+            // At the address's end, as Safari's.
+            if let tab, tab.pageLanguage != nil, !browser.editingAddress {
+                TranslateButton(tab: tab) { browser.openSettings(.general) }
+                    .padding(.leading, 4)
+            }
+            // Only on an article, as in Safari, and not while the address is edited.
+            if let tab, tab.readable || tab.reader != nil, !browser.editingAddress {
+                let label = tab.reader == nil ? "Show Reader" : "Hide Reader"
+                BarButton(icon: tab.reader == nil ? "doc.plaintext" : "doc.plaintext.fill", help: "\(label)  ⌃⌘R",
+                          action: browser.toggleReader)
+                    .accessibilityLabel(label)
+                    .padding(.leading, 4)
+            }
             if let tab, tab.isOnThisMac {
                 DevButtons(browser: browser)
                     .padding(.leading, 4)
@@ -109,6 +123,7 @@ struct AddressBar: View {
     /// page's colour, or over a new tab or the settings, their own tinted glass.
     static func ground(of tab: Tab?) -> Color {
         if tab?.isBlank == true { return Palette.glass }
+        if tab?.reader != nil { return Palette.ground }
         if tab?.settings != nil || tab?.showsHistory == true { return Palette.panel }
         return tab?.color.map { Color(nsColor: $0) } ?? Palette.ground
     }

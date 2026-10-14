@@ -1,4 +1,5 @@
 import SwiftUI
+@preconcurrency import Translation
 import WebKit
 
 /// One browser window: its tabs, newest first, which one is showing, and what
@@ -44,6 +45,8 @@ final class Browser: NSObject {
                 selected?.page?.evaluateJavaScript(PictureInPicture.exit)
             }
             if selectedID != oldValue, Extensions.started { Extensions.shared.activated(self, from: oldValue) }
+            // Its page may be the one to translate now.
+            if selectedID != oldValue { translator.nudge() }
             sessionChanged()
         }
     }
@@ -77,12 +80,18 @@ final class Browser: NSObject {
     let siteSettings: SiteSettings
     /// A site's question waiting for an answer (`askPermission`).
     var permissionRequest: PermissionRequest?
-    /// Find in page (⌘F): the bar, what it looks for, and whether the last look found it.
+    /// Find in page (⌘F): the bar, what it looks for, and where the last look got to.
     var findBarOpen = false
     var findQuery = ""
-    /// The page last looked in, whose match is still selected.
+    /// The page last looked in, whose matches are still lit.
     @ObservationIgnored private weak var foundOn: WKWebView?
-    private(set) var findMissing = false
+    /// Nil before a look, and where only WebKit's own find works (a PDF),
+    /// which counts nothing, once it has found one.
+    private(set) var findMatches: Find.Matches?
+    @ObservationIgnored private var findTyping: Task<Void, Never>?
+    /// Find's options (the magnifying glass's menu), kept for every window.
+    static let findMatchCaseKey = "findMatchCase"
+    static let findWholeWordsKey = "findWholeWords"
     /// Counts ⌘Fs, so one with the bar already open still puts the keyboard in it.
     var findRequests = 0
     /// The saved accounts listed under the sign-in box the caret is in, and a
@@ -96,6 +105,8 @@ final class Browser: NSObject {
     @ObservationIgnored var vault = Vault.shared
     /// The same for bookmarks.
     @ObservationIgnored var bookmarks = Bookmarks.shared
+    /// Translates the tab on screen, while it is translated (`translationTask`).
+    @ObservationIgnored let translator = Translator()
 
     /// A tab taking more than `heavy` sleeps after this long unseen, pinned
     /// or not. Most pages take 100–400 MB; x.com and Gmail kept 650–750 MB
@@ -122,6 +133,14 @@ final class Browser: NSObject {
     @ObservationIgnored weak var window: NSWindow?
 
     var selected: Tab? { tabs.first { $0.id == selectedID } }
+
+    /// The languages the tab on screen is translated between, for the
+    /// window's translation session; none while it isn't.
+    var translationConfiguration: TranslationSession.Configuration? {
+        selected?.translation.map {
+            .init(source: Locale.Language(identifier: $0.source), target: Locale.Language(identifier: $0.target))
+        }
+    }
 
     /// Where its pages keep cookies, cache and site data: the one on disk, or
     /// for an incognito window, one in memory, gone with the window.
@@ -245,7 +264,7 @@ final class Browser: NSObject {
     /// The keyboard back on the page on screen, once something of ours
     /// that had it (a field) is done with it.
     func focusPage() {
-        if let page = selected?.page { page.window?.makeFirstResponder(page) }
+        if let page = selected.flatMap({ $0.reader ?? $0.page }) { page.window?.makeFirstResponder(page) }
     }
 
     /// Puts a tab at `position` among the pinned tabs, or among the rest
@@ -372,29 +391,51 @@ final class Browser: NSObject {
         selectedID = tabs[(index + step + tabs.count) % tabs.count].id
     }
 
-    /// The next match on the page, or the one before; round to the start past the end.
-    func find(backwards: Bool = false) {
-        guard let page = selected?.page, !findQuery.isEmpty else {
-            clearFound()
-            return findMissing = false
-        }
-        if foundOn !== page { clearFound() }
-        foundOn = page
-        let configuration = WKFindConfiguration()
-        configuration.backwards = backwards
-        let query = findQuery
-        Task {
-            let found = (try? await page.find(query, configuration: configuration))?.matchFound ?? false
-            if query == findQuery { findMissing = !found }
+    /// The next match on the page, or the one before; round to the start past
+    /// the end. A query not yet looked for starts at the first.
+    func find(backwards: Bool = false) { find(step: backwards ? -1 : 1) }
+
+    /// Looks again once typing stops for a moment (the query, or an option),
+    /// so a long page isn't read for every letter. The same query typed back
+    /// stays on its match.
+    func findTyped() {
+        findTyping?.cancel()
+        findTyping = Task {
+            try? await Task.sleep(for: .milliseconds(50))
+            if !Task.isCancelled { find(step: 0) }
         }
     }
 
-    /// WebKit leaves the match it found selected, highlighted on the page
-    /// after the bar is gone; it goes with the bar, or the query.
+    private func find(step: Int) {
+        findTyping?.cancel()
+        // Reader's article, while it shows.
+        guard let page = selected.flatMap({ $0.reader ?? $0.page }), !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return clearFound() }
+        if foundOn !== page { clearFound() }
+        foundOn = page
+        let query = findQuery
+        let matchCase = UserDefaults.standard.bool(forKey: Self.findMatchCaseKey)
+        let wholeWords = UserDefaults.standard.bool(forKey: Self.findWholeWordsKey)
+        Task {
+            var matches = await Find.look(for: query, matchCase: matchCase, wholeWords: wholeWords, step: step, on: page)
+            if matches == nil {
+                // ponytail: a PDF knows no whole words.
+                let configuration = WKFindConfiguration()
+                configuration.backwards = step < 0
+                configuration.caseSensitive = matchCase
+                let found = (try? await page.find(query, configuration: configuration))?.matchFound ?? false
+                matches = found ? nil : Find.Matches(index: 0, count: 0, more: false)
+            }
+            if query == findQuery, foundOn === page { findMatches = matches }
+        }
+    }
+
+    /// The matches lit, and the one selected, go with the bar, the query or
+    /// the tab.
     func clearFound() {
-        // ponytail: the top frame's selection; a match found inside a frame stays selected.
-        foundOn?.evaluateJavaScript("getSelection().removeAllRanges()", in: nil, in: .defaultClient)
+        findTyping?.cancel()
+        if let foundOn { Find.clear(on: foundOn) }
         foundOn = nil
+        findMatches = nil
     }
 
     /// A page going full screen, or coming back. Only the page on screen, and
@@ -814,6 +855,7 @@ extension Browser: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         tab(for: webView)?.pageDidLoad()
+        tab(for: webView)?.checkReadable()
         if let tab = tab(for: webView) { signInLanded(on: tab) }
         WebStore.tell(webView)
         sessionChanged()

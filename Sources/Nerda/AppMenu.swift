@@ -120,6 +120,14 @@ final class AppMenu: NSObject {
                 // ⌘⇧R, as Chrome's and Firefox's hard reload.
                 item("Hard Reload Page", #selector(hardReload), "r", [.command, .shift], target: self),
                 item("Mute Tab", #selector(toggleMute), target: self),
+                // As Safari's View › Translation, which has no key either.
+                submenu("Translation", [
+                    item("Translate", #selector(translatePage), target: self),
+                    item("Show Original", #selector(showOriginal), target: self),
+                ]),
+                .separator(),
+                // Safari's ⇧⌘R is Hard Reload here, as in Chrome.
+                item("Show Reader", #selector(toggleReader), "r", [.command, .control], target: self),
                 .separator(),
                 zoom("Zoom In", 1, "+"),
                 // ⌘= as well as ⌘+: they're the same key on most keyboards.
@@ -189,7 +197,7 @@ final class AppMenu: NSObject {
     private static let latinKeys: [UInt16: String] = [17: "t", 13: "w", 37: "l", 12: "q", 43: ",", 0: "a", 45: "n", 2: "d",
                                                       34: "i", 38: "j", 8: "c", 15: "r", 32: "u", 31: "o"]
 
-    /// ⌘T, ⌘W, ⌘L, ⌘O, ⌘Q, ⌘D and ⌘, ⌘⇧W, ⌘⇧A and ⌘⇧N, and Developer's ⌥⌘ keys, straight to the menu while
+    /// ⌘T, ⌘W, ⌘L, ⌘O, ⌘Q, ⌘D and ⌘, ⌘⇧W, ⌘⇧A and ⌘⇧N, ⌃⌘R, and Developer's ⌥⌘ keys, straight to the menu while
     /// a page has the keyboard (and no sheet or dialog is up).
     private static func browserKey(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
@@ -199,6 +207,7 @@ final class AppMenu: NSObject {
         let reserved = modifiers == .command && ["t", "w", "l", "o", "q", "d", ","].contains(key)
             || modifiers == [.command, .shift] && ["t", "w", "a", "n"].contains(key)
             || modifiers == [.command, .option] && ["i", "j", "c", "r", "u"].contains(key)
+            || modifiers == [.command, .control] && key == "r"
         return reserved && NSApp.mainMenu?.performKeyEquivalent(with: event) == true
     }
 
@@ -245,6 +254,11 @@ final class AppMenu: NSObject {
     @objc private func printPage() { browser.printPage() }
     @objc private func exportPDF() { browser.exportPDF() }
     @objc private func toggleMute() { browser.selectedID.map(browser.toggleMute) }
+    @objc private func translatePage() {
+        guard let tab = browser.selected, let language = tab.translationTargets.first else { return }
+        tab.translate(to: language)
+    }
+    @objc private func showOriginal() { browser.selected?.showOriginal() }
     @objc private func reload() { browser.selected?.reload() }
     @objc private func hardReload() { browser.selected?.reload(fromOrigin: true) }
     @objc private func goBack() { browser.selected?.webView.goBack() }
@@ -258,6 +272,7 @@ final class AppMenu: NSObject {
     @objc private func exportBookmarks() { regular.exportBookmarks() }
     @objc private func toggleBookmark() { browser.toggleBookmark() }
     @objc private func toggleResponsive() { browser.toggleResponsive() }
+    @objc private func toggleReader() { browser.toggleReader() }
     @objc private func viewSource() { browser.viewSource() }
     @objc private func toggleJavaScript() { browser.selected.map { $0.javaScriptOff.toggle() } }
     @objc private func clearSiteData() {
@@ -358,15 +373,25 @@ extension AppMenu: NSMenuItemValidation {
         case #selector(reload), #selector(hardReload), #selector(zoom(_:)):
             // Actual Size only once there is a zoom to undo.
             guard let tab = browser.selected, tab.hasPage else { return false }
-            return item.action != #selector(zoom(_:)) || item.tag != 0 || tab.webView.pageZoom != PageZoom.current
+            return item.action != #selector(zoom(_:)) || item.tag != 0 || (tab.reader ?? tab.webView).pageZoom != PageZoom.current
         case #selector(toggleBookmark):
             item.title = browser.selected?.bookmark == nil ? "Bookmark This Tab" : "Remove Bookmark"
             return !browser.isPrivate && browser.selected?.hasPage == true
+        case #selector(translatePage):
+            // Into the first of your languages it can go into, as Safari's.
+            let target = browser.selected?.translationTargets.first
+            item.title = (target ?? PreferredLanguage.chosen.first).map { "Translate to \(Translator.name($0))" } ?? "Translate"
+            return target != nil && browser.selected?.translation?.target != target
+        case #selector(showOriginal):
+            return browser.selected?.translation != nil
         case #selector(toggleMute):
             item.title = browser.selected?.isMuted == true ? "Unmute Tab" : "Mute Tab"
             return browser.selected?.hasPage == true
         case #selector(showFind), #selector(inspect(_:)), #selector(clearSiteData), #selector(printPage), #selector(exportPDF):
             return browser.selected?.hasPage == true
+        case #selector(toggleReader):
+            item.title = browser.selected?.reader != nil ? "Hide Reader" : "Show Reader"
+            return browser.selected.map { $0.hasPage && ($0.readable || $0.reader != nil) } ?? false
         case #selector(toggleResponsive):
             item.state = browser.selected?.responsive != nil ? .on : .off
             return browser.selected?.hasPage == true
