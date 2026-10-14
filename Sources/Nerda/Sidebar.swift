@@ -94,6 +94,7 @@ struct Sidebar: View {
     }
 
     var body: some View {
+        let rest = rest
         VStack(spacing: 0) {
             // The traffic lights sit on this row, and it moves the window, as
             // the title bar under it would. The sidebar's button is on the
@@ -146,28 +147,8 @@ struct Sidebar: View {
                     // height, so `rowFrame` places those out of sight all the same.
                     LazyVStack(alignment: .leading, spacing: Self.rowGap) {
                         ForEach(rest) { tab in
-                            // The buttons hold only the id: SwiftUI keeps their actions a
-                            // while after the row goes, and a tab held there keeps its page,
-                            // playing, after it is closed.
                             let id = tab.id
-                            SidebarRow(
-                                icon: tab.settings != nil ? "gearshape" : tab.showsHistory ? "clock.arrow.circlepath" : "globe",
-                                site: tab.site,
-                                loading: tab.isLoading,
-                                title: tab.title,
-                                selected: id == browser.selectedID,
-                                dev: tab.isOnThisMac,
-                                close: { withAnimation(.slide) { browser.close(id) } },
-                                muted: tab.speaker,
-                                mute: { browser.toggleMute(id) },
-                                // A new tab, or the settings, keeps the name it has.
-                                rename: tab.hasPage ? { name in
-                                    if let name { browser.rename(id, to: name) }
-                                } : nil,
-                                press: { browser.select(id) }
-                            ) {
-                                browser.select(id)
-                            }
+                            ListedTab(browser: browser, tab: tab, selected: id == browser.selectedID)
                             // Its place stays empty while it is dragged: where it will land.
                             .opacity(dragged?.id == id ? 0 : 1)
                             // A sleeping tab's site is connected to on the way to a click
@@ -321,12 +302,7 @@ struct Sidebar: View {
             ForEach(items, id: \.self) { id in
                 if let id {
                     if let tab = byID[id] {
-                        PinnedTile(site: tab.site, loading: tab.isLoading, title: tab.title,
-                                   selected: id == browser.selectedID, asleep: tab.isAsleep,
-                                   muted: tab.speaker, mute: { browser.toggleMute(id) },
-                                   press: { browser.select(id) }) {
-                            browser.select(id)
-                        }
+                        PinnedTab(browser: browser, tab: tab, selected: id == browser.selectedID)
                         .opacity(dragged?.id == id ? 0 : 1)
                         .simultaneousGesture(drag(id))
                         // Back to where it was pinned, from wherever it has been since.
@@ -937,6 +913,62 @@ private struct BookmarksLine: View {
         .padding(.trailing, 2)
         .frame(height: 20)
         .contentShape(Rectangle())
+    }
+}
+
+/// A tab's row in the list, made from the tab in a body of its own: a switch
+/// of tab, or a step of a drag, draws again only the rows it changes, not
+/// every row in sight.
+private struct ListedTab: View {
+    let browser: Browser
+    /// Held weakly, as the buttons hold only its id: SwiftUI keeps a row a
+    /// while after it goes, and a tab held there keeps its page, playing,
+    /// after it is closed.
+    weak var tab: Tab?
+    let selected: Bool
+
+    var body: some View {
+        if let tab {
+            let id = tab.id
+            SidebarRow(
+                icon: tab.settings != nil ? "gearshape" : tab.showsHistory ? "clock.arrow.circlepath" : "globe",
+                site: tab.site,
+                loading: tab.isLoading,
+                title: tab.title,
+                selected: selected,
+                dev: tab.isOnThisMac,
+                close: { withAnimation(.slide) { browser.close(id) } },
+                muted: tab.speaker,
+                mute: { browser.toggleMute(id) },
+                // A new tab, or the settings, keeps the name it has.
+                rename: tab.hasPage ? { name in
+                    if let name { browser.rename(id, to: name) }
+                } : nil,
+                press: { browser.select(id) }
+            ) {
+                browser.select(id)
+            }
+        }
+    }
+}
+
+/// A pinned tab's tile, made from the tab in a body of its own, as `ListedTab`.
+private struct PinnedTab: View {
+    let browser: Browser
+    /// Held weakly, as `ListedTab`'s.
+    weak var tab: Tab?
+    let selected: Bool
+
+    var body: some View {
+        if let tab {
+            let id = tab.id
+            PinnedTile(site: tab.site, loading: tab.isLoading, title: tab.title,
+                       selected: selected, asleep: tab.isAsleep,
+                       muted: tab.speaker, mute: { browser.toggleMute(id) },
+                       press: { browser.select(id) }) {
+                browser.select(id)
+            }
+        }
     }
 }
 

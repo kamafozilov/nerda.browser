@@ -42,7 +42,6 @@ struct TabStrip: View {
     /// The tab the pointer is on, and the one whose card shows (`TabPeek`).
     @State private var hovered = Hovered()
     @State private var peeked: Peek?
-    @Environment(\.colorScheme) private var scheme
 
     /// A tab or pinned site being dragged.
     private struct Drag {
@@ -67,6 +66,8 @@ struct TabStrip: View {
     }
 
     var body: some View {
+        let pins = pins, items = items
+        let tabWidth = tabWidth(of: items.count)
         HStack(spacing: 0) {
             #if DEBUG
             DevBadge()
@@ -74,11 +75,11 @@ struct TabStrip: View {
             #endif
             // Incognito tabs go with their window: nothing there to keep pinned.
             if !browser.isPrivate, !pins.isEmpty || pinning {
-                pinned
+                pinned(pins)
                     .padding(.trailing, 6)
                     .transition(.opacity)
             }
-            GeometryReader { space in tabs(room: space.size.width) }
+            GeometryReader { space in tabs(items, room: space.size.width) }
             HStack(spacing: 6) {
                 DownloadsButton(browser: browser, shown: $downloadsShown, arrowEdge: .bottom)
                 SidebarMenuButton(shown: $menuShown, incognito: browser.isPrivate)
@@ -108,7 +109,7 @@ struct TabStrip: View {
                     if asPin {
                         PinnedIcon(site: tab.site, loading: false, title: tab.title, selected: true) {}
                     } else {
-                        look(tab, selected: true, compact: width < 72)
+                        TabLook(browser: browser, tab: tab, selected: true, compact: width < 72)
                             .frame(width: width)
                             // The card's edge keeps its gap under it, wherever it is taken.
                             .anchorPreference(key: SelectedTabKey.self, value: .bounds) { $0 }
@@ -147,9 +148,10 @@ struct TabStrip: View {
         return items
     }
 
-    private var tabWidth: CGFloat {
-        let count = items.count
-        return count == 0 ? 0 : layout.tabs.width / CGFloat(count)
+    private var tabWidth: CGFloat { tabWidth(of: items.count) }
+
+    private func tabWidth(of count: Int) -> CGFloat {
+        count == 0 ? 0 : layout.tabs.width / CGFloat(count)
     }
 
     /// A tab with a site is being dragged: the pinned sites show, to take it,
@@ -159,7 +161,7 @@ struct TabStrip: View {
     /// The pinned sites, as icons in a group of their own. A tab dragged over
     /// them opens a gap where it would go; with none pinned yet, the group
     /// shows where to drop it, lit once it is over it.
-    private var pinned: some View {
+    private func pinned(_ pins: [Tab]) -> some View {
         let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
         let byID = Dictionary(uniqueKeysWithValues: pins.map { ($0.id, $0) })
         var items: [Tab.ID?] = pins.map(\.id)
@@ -175,11 +177,7 @@ struct TabStrip: View {
             // One list, the gap in it, so the icons make way for it.
             ForEach(items, id: \.self) { id in
                 if let id, let tab = byID[id] {
-                    PinnedIcon(site: tab.site, loading: tab.isLoading, title: tab.title,
-                               selected: id == browser.selectedID, asleep: tab.isAsleep,
-                               muted: tab.speaker, mute: { browser.toggleMute(id) }, press: { browser.select(id) }) {
-                        browser.select(id)
-                    }
+                    PinnedTab(browser: browser, tab: tab, selected: id == browser.selectedID)
                     // Its place stays empty while it is dragged: where it will land.
                     .opacity(dragged?.id == id ? 0 : 1)
                     .simultaneousGesture(drag(id))
@@ -201,8 +199,7 @@ struct TabStrip: View {
 
     /// The tabs in `room`, each an even share of it, with the + button after
     /// the last. A pinned site dragged over them opens a gap where it would go.
-    private func tabs(room: CGFloat) -> some View {
-        let items = items
+    private func tabs(_ items: [Tab.ID?], room: CGFloat) -> some View {
         let byID = Dictionary(uniqueKeysWithValues: browser.tabs.map { ($0.id, $0) })
         let room = max(room - 34, 0)
         let width = min(max(room / CGFloat(max(items.count, 1)), Self.widths.lowerBound), Self.widths.upperBound)
@@ -234,7 +231,7 @@ struct TabStrip: View {
     private func row(_ tab: Tab, width: CGFloat, separated: Bool) -> some View {
         let id = tab.id
         let selected = id == browser.selectedID
-        return look(tab, selected: selected, separated: separated, compact: width < 72)
+        return TabLook(browser: browser, tab: tab, selected: selected, separated: separated, compact: width < 72)
             .frame(width: width)
             .opacity(dragged?.id == id ? 0 : 1)
             // Where the card's edge leaves room for it to run into the card.
@@ -251,34 +248,6 @@ struct TabStrip: View {
             .simultaneousGesture(drag(id))
             .contextMenu { TabMenu(browser: browser, id: id) }
             .transition(.opacity)
-    }
-
-    /// A tab as it is drawn, in its place or under the pointer.
-    private func look(_ tab: Tab, selected: Bool, separated: Bool = false, compact: Bool) -> some View {
-        let id = tab.id
-        return StripTab(
-            icon: tab.settings != nil ? "gearshape" : tab.showsHistory ? "clock.arrow.circlepath" : "globe",
-            site: tab.site,
-            loading: tab.isLoading,
-            title: tab.title,
-            selected: selected,
-            separated: separated,
-            compact: compact,
-            close: { withAnimation(.slide) { browser.close(id) } },
-            muted: tab.speaker,
-            mute: { browser.toggleMute(id) },
-            // A new tab, or the settings, keeps the name it has.
-            rename: tab.hasPage ? { name in
-                if let name { browser.rename(id, to: name) }
-            } : nil,
-            press: { browser.select(id) }
-        ) {
-            browser.select(id)
-        }
-        // Light or dark to suit its page's colour, as the address bar it runs into.
-        .environment(\.colorScheme, selected ? tab.color.map(AddressBar.colorScheme) ?? scheme : scheme)
-        // Outside that, so its edge is the card's, whatever the page's colour.
-        .background { if selected { TabGround(ground: AddressBar.ground(of: tab)) } }
     }
 
     /// Dragging a tab or pinned site, by the id alone (see the rows).
@@ -374,6 +343,49 @@ private struct Along<Content: View>: View {
     var body: some View {
         let span = span()
         content.position(x: max(min(pointer.at.x - grab, span.to - width / 2), span.from + width / 2), y: y)
+    }
+}
+
+/// A tab as it is drawn, in its place or under the pointer, made from the
+/// tab in a body of its own: a switch of tab, or a step of a drag, draws
+/// again only the tabs it changes, not every one.
+private struct TabLook: View {
+    let browser: Browser
+    /// Held weakly: SwiftUI keeps a tab's look a while after it goes, and a
+    /// tab held there keeps its page, playing, after it is closed.
+    weak var tab: Tab?
+    let selected: Bool
+    var separated = false
+    let compact: Bool
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        if let tab {
+            let id = tab.id
+            StripTab(
+                icon: tab.settings != nil ? "gearshape" : tab.showsHistory ? "clock.arrow.circlepath" : "globe",
+                site: tab.site,
+                loading: tab.isLoading,
+                title: tab.title,
+                selected: selected,
+                separated: separated,
+                compact: compact,
+                close: { withAnimation(.slide) { browser.close(id) } },
+                muted: tab.speaker,
+                mute: { browser.toggleMute(id) },
+                // A new tab, or the settings, keeps the name it has.
+                rename: tab.hasPage ? { name in
+                    if let name { browser.rename(id, to: name) }
+                } : nil,
+                press: { browser.select(id) }
+            ) {
+                browser.select(id)
+            }
+            // Light or dark to suit its page's colour, as the address bar it runs into.
+            .environment(\.colorScheme, selected ? tab.color.map(AddressBar.colorScheme) ?? scheme : scheme)
+            // Outside that, so its edge is the card's, whatever the page's colour.
+            .background { if selected { TabGround(ground: AddressBar.ground(of: tab)) } }
+        }
     }
 }
 
@@ -535,6 +547,25 @@ nonisolated private struct TabShape: Shape {
         path.addArc(tangent1End: CGPoint(x: right, y: rect.maxY), tangent2End: CGPoint(x: rect.maxX, y: rect.maxY), radius: flare)
         if !open { path.closeSubpath() }
         return path
+    }
+}
+
+/// A pinned tab across the top, made from the tab in a body of its own, as `TabLook`.
+private struct PinnedTab: View {
+    let browser: Browser
+    /// Held weakly, as `TabLook`'s.
+    weak var tab: Tab?
+    let selected: Bool
+
+    var body: some View {
+        if let tab {
+            let id = tab.id
+            PinnedIcon(site: tab.site, loading: tab.isLoading, title: tab.title,
+                       selected: selected, asleep: tab.isAsleep,
+                       muted: tab.speaker, mute: { browser.toggleMute(id) }, press: { browser.select(id) }) {
+                browser.select(id)
+            }
+        }
     }
 }
 

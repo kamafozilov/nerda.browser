@@ -48,7 +48,7 @@ struct CommandBar: View {
 
     private var inline: Bool { place == .address }
 
-    struct Suggestion: Identifiable {
+    nonisolated struct Suggestion: Identifiable {
         var id: String { tab?.uuidString ?? url.absoluteString }
         let title: String
         let detail: String
@@ -65,8 +65,11 @@ struct CommandBar: View {
     /// ones seen last first. Then, with nothing typed, the sites you went to
     /// last, latest first. Typing, what it means (a search, or an address), the sites and
     /// pages you've been to that match it, and the search engine's guesses.
+    /// Not `waiting`, history's rows for what is typed are only those `found`
+    /// has: the ones for what was typed before stay up until `lookUp` brings
+    /// those for now. With nothing typed, they are found at once.
     static func suggestions(for query: String, guesses searches: [String], history: History,
-                            tabs: [Tab] = [], found: Found = Found()) -> [Suggestion] {
+                            tabs: [Tab] = [], found: Found = Found(), waiting: Bool = true) -> [Suggestion] {
         let text = query.trimmingCharacters(in: .whitespaces)
         let open = tabs
             .filter { tab in
@@ -76,14 +79,19 @@ struct CommandBar: View {
             }
             .sorted { $0.lastSeen > $1.lastSeen }
             .map { Suggestion(title: $0.title, detail: "Switch to Tab", url: $0.site!, tab: $0.id) }
-        guard !text.isEmpty, let url = Address.url(from: text) else {
-            // Through `found` too: the switcher is drawn again for each arrow
-            // key and hover, and a new bar starts with a new one.
-            let recent = found.rows(for: text) { history.recentSites(6).map(Self.suggestion) }
-            return Array(Self.unique(open + recent)
+        let matched: Matched
+        if waiting || text.isEmpty {
+            matched = found.matched(for: text) { Self.matched(text, in: history.snapshot) }
+        } else {
+            // Not the sites you went to last under what is typed: its open
+            // tabs come first, and history's rows join them below.
+            matched = found.matched.typed ? found.matched : Matched(rows: [], typed: true)
+        }
+        guard matched.typed else {
+            return Array(Self.unique(open + matched.rows)
                 .prefix(Self.maxRows))
         }
-        var rows = found.rows(for: text) { Self.typed(text, url: url, history: history) }
+        var rows = matched.rows
         rows += searches
             .filter { $0.caseInsensitiveCompare(text) != .orderedSame }
             .compactMap { guess in Address.search(guess).map { Suggestion(title: guess, detail: "", url: $0, isSearch: true) } }
@@ -93,20 +101,48 @@ struct CommandBar: View {
     /// History's rows for what was typed last, kept while it stays the same:
     /// the list is drawn again for each of the search engine's guesses, each
     /// arrow key and each row the pointer passes, and looking through 20,000
-    /// pages each time made those as slow as a key.
+    /// pages each time made those as slow as a key. With nothing typed too: a
+    /// new bar starts with a new one.
     final class Found {
-        private var text: String?
-        private var rows: [Suggestion] = []
+        private(set) var text: String?
+        private(set) var matched = Matched(rows: [], typed: false)
 
-        func rows(for text: String, _ find: () -> [Suggestion]) -> [Suggestion] {
-            if text != self.text { (self.text, rows) = (text, find()) }
-            return rows
+        init() {}
+
+        init(_ text: String, _ matched: Matched) {
+            (self.text, self.matched) = (text, matched)
         }
+
+        func matched(for text: String, _ find: () -> Matched) -> Matched {
+            if text != self.text { (self.text, matched) = (text, find()) }
+            return matched
+        }
+    }
+
+    /// History's rows for what is typed: what it means, and the sites and
+    /// pages you've been to that match it (`typed`); or with nothing typed,
+    /// or nothing it could mean, the sites you went to last.
+    nonisolated struct Matched: Sendable {
+        let rows: [Suggestion]
+        let typed: Bool
+    }
+
+    nonisolated static func matched(_ text: String, in history: History.Snapshot) -> Matched {
+        guard !text.isEmpty, let url = Address.url(from: text) else {
+            return Matched(rows: history.recentSites(6).map(Self.suggestion), typed: false)
+        }
+        return Matched(rows: Self.typed(text, url: url, history: history), typed: true)
+    }
+
+    /// `matched`, off the main thread: with 20,000 pages a few ms a key, and
+    /// a path typed is looked for on disk, which a drive asleep holds up.
+    @concurrent nonisolated static func lookUp(_ text: String, in history: History.Snapshot) async -> Matched {
+        matched(text, in: history)
     }
 
     /// What is typed and what it means, with the sites and pages you've been
     /// to that match it.
-    private static func typed(_ text: String, url: URL, history: History) -> [Suggestion] {
+    nonisolated private static func typed(_ text: String, url: URL, history: History.Snapshot) -> [Suggestion] {
         let isSearch = url == Address.search(text)
         let typed = Suggestion(title: text, detail: isSearch ? "Search \(SearchEngine.current.name)" : "Open",
                                url: url, isSearch: isSearch)
@@ -127,7 +163,7 @@ struct CommandBar: View {
         return rows
     }
 
-    private static func suggestion(_ visit: History.Visit) -> Suggestion {
+    nonisolated private static func suggestion(_ visit: History.Visit) -> Suggestion {
         let site = History.site(of: visit.url) ?? visit.url.absoluteString
         return visit.title.isEmpty
             ? Suggestion(title: site, detail: "", url: visit.url)
@@ -151,13 +187,21 @@ struct CommandBar: View {
         if let tab = row.tab { select(tab) } else { go(row.url) }
     }
 
+    /// Opened on an address, the list waits for it to be changed: until
+    /// then Enter just goes there again.
+    private var untouched: Bool { !text.isEmpty && query == text }
+    private var blank: Bool { place == .newTab && query.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// The list for what is typed. Drawn, it doesn't wait for history to be
+    /// looked through; Enter does, typed before it was.
+    private func rows(waiting: Bool) -> [Suggestion] {
+        untouched || blank ? []
+            : Self.suggestions(for: query, guesses: searches, history: history, tabs: tabs, found: found, waiting: waiting)
+    }
+
     var body: some View {
-        // Opened on an address, the list waits for it to be changed: until
-        // then Enter just goes there again.
-        let untouched = !text.isEmpty && query == text
-        let blank = place == .newTab && query.trimmingCharacters(in: .whitespaces).isEmpty
-        let rows = untouched || blank ? []
-            : Self.suggestions(for: query, guesses: searches, history: history, tabs: tabs, found: found)
+        let untouched = untouched
+        let rows = rows(waiting: false)
 
         Group {
             if inline {
@@ -214,6 +258,14 @@ struct CommandBar: View {
         .onChange(of: target(in: rows).flatMap { $0.tab == nil ? $0.url : nil }) { _, url in
             if let url { Tab.preconnect(to: url) }
         }
+        // History is looked through off the main thread, the last rows up
+        // meanwhile, as the guesses below; typing on cancels the look.
+        .task(id: query) {
+            let typed = query.trimmingCharacters(in: .whitespaces)
+            guard !typed.isEmpty, !untouched, !blank, found.text != typed else { return }
+            let matched = await Self.lookUp(typed, in: history.snapshot)
+            if !Task.isCancelled { found = Found(typed, matched) }
+        }
         // The last guesses stay up while the next are on their way, so the
         // list doesn't flicker with every key; typing on cancels the ask.
         .task(id: query) {
@@ -249,7 +301,7 @@ struct CommandBar: View {
                 .font(inline ? .system(size: 12.5) : place == .newTab ? .title3 : .title2)
                 .focused($focused)
                 .onSubmit {
-                    if let row = target(in: rows) {
+                    if let row = target(in: self.rows(waiting: true)) {
                         open(row)
                     } else if untouched, let url = Address.url(from: query) {
                         go(url)

@@ -164,7 +164,7 @@ final class Extensions: NSObject {
     /// (chrome-extension://<its id>/*) or every one's. No extension is ever
     /// given them, not from its manifest, not asked for later, as Chrome
     /// doesn't; its own pages are its own without asking.
-    nonisolated static func reachesExtensions(_ pattern: WKWebExtension.MatchPattern) -> Bool {
+    static func reachesExtensions(_ pattern: WKWebExtension.MatchPattern) -> Bool {
         pageSchemes.contains(pattern.scheme?.lowercased() ?? "")
     }
 

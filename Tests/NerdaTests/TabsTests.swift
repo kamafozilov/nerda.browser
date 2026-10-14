@@ -42,6 +42,43 @@ private func saved(_ host: String, pinned: Bool = false) -> Session.Tab {
     #expect(browser.tabs.map(\.title) == ["r.test", "p.test", "q.test", "c.test", "a.test", "b.test"])
 }
 
+/// The tab on screen is kept as the list changes, and what shows it hears
+/// only of a change to it, not of every tab moved in the list.
+@MainActor
+@Test func theTabOnScreenIsKeptAsTheListChanges() throws {
+    let folder = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appending(path: "session.json")
+    try JSONEncoder().encode(Session(tabs: [saved("a.test"), saved("b.test"), saved("c.test")], selected: 1))
+        .write(to: file)
+
+    let browser = Browser()
+    browser.restore(from: file)
+    #expect(browser.selected?.title == "b.test")
+
+    final class Flag: @unchecked Sendable { var raised = false }
+    let told = Flag()
+    withObservationTracking { _ = browser.selected } onChange: { told.raised = true }
+    browser.move(browser.tabs[2].id, pinned: false, to: 0)
+    #expect(!told.raised)
+    #expect(browser.selected?.title == "b.test")
+
+    browser.select(browser.tabs[0].id)
+    #expect(told.raised)
+    #expect(browser.selected === browser.tabs[0])
+
+    let closed = browser.selected!
+    browser.close(closed.id)
+    #expect(browser.selected?.title == "b.test")
+    #expect(browser.selected?.id == browser.selectedID)
+    browser.reopenClosedTab()
+    #expect(browser.selected?.title == closed.title)
+    #expect(browser.selected !== closed)
+
+    browser.closeAll()
+    #expect(browser.selected == nil)
+}
+
 /// Saved off the main thread, the file is what it always was, and written
 /// only when the tabs changed; a save that waits comes after one on its way.
 @MainActor
@@ -136,7 +173,7 @@ private func saved(_ host: String, pinned: Bool = false) -> Session.Tab {
     browser.open(URL(string: "about:blank")!)
     let asking = browser.open(URL(string: "data:text/html,<title>waiting</title>")!, inBackground: true)
     try await until { asking.title == "waiting" }
-    asking.webView.evaluateJavaScript("setTimeout(() => { confirm('Leave?'); document.title = 'answered'; })", completionHandler: nil)
+    _ = try await asking.webView.evaluateJavaScript("setTimeout(() => { confirm('Leave?'); document.title = 'answered'; })")
     try await Task.sleep(for: .milliseconds(300))
     #expect(asking.title == "waiting")
 
