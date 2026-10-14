@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.24] - 2026-10-14
+
 ### Added
 
 - Move a tab to a window of its own, to watch a video or read on another display: drag it out of the sidebar or the tab strip and let go on the other screen, or choose Move to New Window from its menu or the Window menu, which opens it on the next display. The page goes on as it was, without loading again. The new window shows only its tabs: your pinned sites and bookmarks stay in the main window. Drag a tab onto another window, or use Move to Window, to put it there, and Window › Merge All Windows brings them all back. Windows you leave open come back on their display when Nerda opens.
@@ -393,7 +395,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.23...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.24...HEAD
+[0.0.24]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.23...v0.0.24
 [0.0.23]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.22...v0.0.23
 [0.0.22]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.21...v0.0.22
 [0.0.21]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.20...v0.0.21
