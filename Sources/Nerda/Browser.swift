@@ -15,7 +15,7 @@ final class Browser: NSObject {
         // the list took longer than the change itself.
         didSet {
             let open = Set(tabs.map(ObjectIdentifier.init))
-            for tab in oldValue where !open.contains(ObjectIdentifier(tab)) { tab.silence() }
+            for tab in oldValue where !open.contains(ObjectIdentifier(tab)) && tab !== handedOver { tab.silence() }
             recent.removeAll { !open.contains(ObjectIdentifier($0)) }
             if selected.map({ !open.contains(ObjectIdentifier($0)) }) ?? (selectedID != nil) { findSelected() }
             sessionChanged()
@@ -80,6 +80,8 @@ final class Browser: NSObject {
     @ObservationIgnored var downloadFolder: URL?
     var recentlyClosed: [Session.ClosedTab] = []
     @ObservationIgnored private var closing: Set<Tab.ID> = []
+    /// A tab on its way to another window, which goes on playing there.
+    @ObservationIgnored private var handedOver: Tab?
     let siteSettings: SiteSettings
     /// A site's question waiting for an answer (`askPermission`).
     var permissionRequest: PermissionRequest?
@@ -168,13 +170,20 @@ final class Browser: NSObject {
     let dataStore: WKWebsiteDataStore
     /// An incognito window's: no history kept, no session saved, nothing on disk.
     var isPrivate: Bool { !dataStore.isPersistent }
+    /// A window a tab was moved out to (Move to New Window), as for another
+    /// display: tabs only. The profile's pinned sites and bookmarks stay in
+    /// its own window, rather than each have a page in every window.
+    let isSecondary: Bool
+    /// Where the pinned sites and bookmarks show: not in incognito, nor in a secondary window.
+    var keepsPins: Bool { !isPrivate && !isSecondary }
     /// The profile its window is marked with: none with Personal alone, nor in incognito.
     var markedProfile: Profile? { Profiles.shared.many && !isPrivate ? profile : nil }
     /// What its fields suggest from: the profile's history, or in incognito, nothing of it.
     var history: History { isPrivate ? History.empty : profile.history }
 
-    init(profile: Profile = .main, dataStore: WKWebsiteDataStore? = nil) {
+    init(profile: Profile = .main, dataStore: WKWebsiteDataStore? = nil, secondary: Bool = false) {
         self.profile = profile
+        isSecondary = secondary
         let dataStore = dataStore ?? profile.dataStore
         self.dataStore = dataStore
         siteSettings = dataStore.isPersistent ? profile.siteSettings : SiteSettings(defaults: nil)
@@ -317,7 +326,7 @@ final class Browser: NSObject {
     func move(_ id: Tab.ID, pinned: Bool, to position: Int, among: (Tab) -> Bool = { _ in true }) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         // A new tab, or the settings, has no site to pin; a bookmark's tab has its place.
-        guard !pinned || tabs[index].hasPage && tabs[index].bookmark == nil else { return }
+        guard !pinned || keepsPins && tabs[index].hasPage && tabs[index].bookmark == nil else { return }
         // Moved in one change: `tabs` taking it out on its own would silence its page.
         var moved = tabs
         let tab = moved.remove(at: index)
@@ -369,6 +378,40 @@ final class Browser: NSObject {
             else if let window { window.close() }
             else { add(Tab()) }
         }
+    }
+
+    /// Moves a tab to another window of the same browsing, page and all: a
+    /// video goes on playing, a form keeps what was typed. A pinned site or a
+    /// bookmark's tab stays here, asleep, and only its page goes, as a tab of
+    /// that window's list. A secondary window left with nothing closes; the
+    /// profile's own window starts on a new tab.
+    func move(_ id: Tab.ID, to target: Browser) {
+        guard target !== self, target.dataStore === dataStore, let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let tab = tabs[index]
+        if fullscreenTab == id { exitPageFullscreen() }
+        var left = tabs
+        if tab.isPinned || tab.bookmark != nil, let saved = tab.saved {
+            let stays = Tab(restoring: saved)
+            stays.dataStore = dataStore
+            stays.delegate = self
+            left[index] = stays
+        } else {
+            left.remove(at: index)
+        }
+        tab.isPinned = false
+        tab.home = nil
+        tab.bookmark = nil
+        handedOver = tab
+        tabs = left
+        handedOver = nil
+        if passwordOffer?.tab == id { passwordOffer = nil }
+        autofillOffers.removeAll { $0.tab == id }
+        if selectedID == id {
+            selectedID = recent.last?.id ?? tabs.first(where: Self.listed)?.id
+            if selectedID == nil, !isSecondary || window == nil { add(Tab()) }
+        }
+        target.add(tab)
+        if tabs.isEmpty { window?.close() }
     }
 
     func reopenClosedTab(_ id: Session.ClosedTab.ID? = nil) {

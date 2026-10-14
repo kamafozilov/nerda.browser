@@ -21,6 +21,8 @@ enum Windows {
     private static var profiles: [AppDelegate] = []
     /// Each open incognito window, with what looks after it.
     private static var incognito: [AppDelegate] = []
+    /// Each open secondary window, a tab was moved out to, with what looks after it.
+    private static var secondary: [AppDelegate] = []
     private static var lockTimer: Task<Void, Never>?
     private static var watching = false
 
@@ -134,6 +136,122 @@ enum Windows {
     /// what an incognito window leaves to it (settings, history).
     static func showRegular() -> Browser { show(.main) }
 
+    /// The window what `browser`'s doesn't keep (settings, history, bookmarks)
+    /// opens in: its profile's own, Personal's for incognito.
+    static func home(of browser: Browser) -> Browser { show(browser.isPrivate ? .main : browser.profile) }
+
+    /// Move to New Window: a window of its own for a tab, page and all,
+    /// filling `screen`. Incognito, another incognito window; otherwise a
+    /// secondary one, with tabs only, saved with the profile's
+    /// (`Windows/<id>.json`) to open again at the next launch.
+    static func moveToNewWindow(_ id: Tab.ID, from browser: Browser, on screen: NSScreen?) {
+        guard browser.tabs.contains(where: { $0.id == id }) else { return }
+        let moved = browser.isPrivate ? Browser(dataStore: browser.dataStore)
+            : Browser(profile: browser.profile, secondary: true)
+        let window = BrowserWindow(browser: moved, screen: screen)
+        let delegate = AppDelegate(window: window, browser: moved)
+        window.delegate = delegate
+        if browser.isPrivate {
+            incognito.append(delegate)
+        } else {
+            secondary.append(delegate)
+            moved.sessionFile = windowsFolder(of: browser.profile).appending(path: "\(UUID().uuidString).json")
+        }
+        browser.move(id, to: moved)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    /// A tab dragged off its window and let go at `point`, on the screen: into
+    /// the window under it, of the same browsing, or else a window of its own
+    /// filling the display under it. False while still over its own window.
+    static func drop(_ id: Tab.ID, from browser: Browser, at point: NSPoint) -> Bool {
+        guard let own = browser.window, !own.frame.contains(point) else { return false }
+        let under = NSApp.orderedWindows.first { $0.isVisible && $0.frame.contains(point) } as? BrowserWindow
+        if let under, under.browser.dataStore === browser.dataStore, !under.browser.locked {
+            withAnimation(.slide) { browser.move(id, to: under.browser) }
+            under.makeKeyAndOrderFront(nil)
+        } else {
+            moveToNewWindow(id, from: browser, on: NSScreen.screens.first { $0.frame.contains(point) })
+        }
+        return true
+    }
+
+    /// The other windows a tab of `browser`'s can be moved to: those of the
+    /// same browsing, in front first.
+    static func others(of browser: Browser) -> [Browser] {
+        NSApp.orderedWindows.compactMap { ($0 as? BrowserWindow)?.browser }
+            .filter { $0 !== browser && $0.dataStore === browser.dataStore && !$0.tabs.isEmpty && !$0.locked }
+    }
+
+    /// For Move Tab to New Window from the menu: the next display, if there
+    /// is more than one, as that is what a window of its own is mostly for.
+    static func nextScreen(after window: NSWindow?) -> NSScreen? {
+        let screens = NSScreen.screens
+        guard let current = window?.screen, let index = screens.firstIndex(of: current) else { return NSScreen.main }
+        return screens[(index + 1) % screens.count]
+    }
+
+    /// Window › Merge All Windows: every secondary window's tabs back in the
+    /// profile's own window, as Safari merges its windows.
+    static func merge(into profile: Profile) {
+        let home = show(profile)
+        for delegate in secondary where delegate.browser.profile === profile {
+            // Each goes where a new tab would, above the rest down the side, after them across the top.
+            let tabs = TabStyle.current == .horizontal ? delegate.browser.tabs : delegate.browser.tabs.reversed()
+            for tab in tabs { delegate.browser.move(tab.id, to: home) }
+        }
+    }
+
+    static func hasSecondary(of profile: Profile) -> Bool { secondary.contains { $0.browser.profile === profile } }
+
+    /// A secondary window is closing: its tabs go to the profile's own
+    /// window's Recently Closed, for ⇧⌘T to bring back, and its file goes,
+    /// so it doesn't open again at the next launch.
+    static func closedSecondary(_ delegate: AppDelegate) {
+        let browser = delegate.browser
+        let file = browser.sessionFile
+        browser.pendingSave?.cancel()
+        browser.sessionFile = nil
+        if let home = window(of: browser.profile, making: false)?.browser {
+            let closed = browser.tabs.compactMap(\.saved).filter { $0.url != nil }.map { Session.ClosedTab(tab: $0, index: 0) }
+            home.recentlyClosed = Array((home.recentlyClosed + closed).suffix(25))
+            home.sessionChanged()
+        }
+        browser.closeAll()
+        if let file { Session.writer.async { try? FileManager.default.removeItem(at: file) } }
+        DispatchQueue.main.async {
+            delegate.window.contentView = nil
+            secondary.removeAll { $0 === delegate }
+        }
+    }
+
+    /// At launch, each secondary window left open, with its tabs, on the
+    /// display it was on, behind the regular one.
+    static func reopenSecondary() {
+        for profile in Profiles.shared.all {
+            let folder = windowsFolder(of: profile)
+            for name in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [] where name.hasSuffix(".json") {
+                let file = folder.appending(path: name)
+                guard let session = Session.read(from: file), !session.tabs.isEmpty else {
+                    try? FileManager.default.removeItem(at: file)
+                    continue
+                }
+                let screen = session.frame.flatMap { frame in
+                    NSScreen.screens.first { $0.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) }
+                }
+                let browser = Browser(profile: profile, secondary: true)
+                browser.restore(session, from: file)
+                let window = BrowserWindow(browser: browser, screen: screen ?? NSScreen.main)
+                let delegate = AppDelegate(window: window, browser: browser)
+                window.delegate = delegate
+                secondary.append(delegate)
+                window.order(.below, relativeTo: regular.windowNumber)
+            }
+        }
+    }
+
+    private static func windowsFolder(of profile: Profile) -> URL { profile.folder.appending(path: "Windows") }
+
     /// A profile's window in front: made the first time, and brought back
     /// with its tabs if it was closed.
     @discardableResult
@@ -145,11 +263,14 @@ enum Windows {
         return window.browser
     }
 
-    private static func window(of profile: Profile) -> BrowserWindow {
+    private static func window(of profile: Profile) -> BrowserWindow { window(of: profile, making: true)! }
+
+    private static func window(of profile: Profile, making: Bool) -> BrowserWindow? {
         if profile.isMain { return regular }
         if let made = profiles.lazy.compactMap({ $0.window as? BrowserWindow }).first(where: { $0.browser.profile === profile }) {
             return made
         }
+        guard making else { return nil }
         let browser = Browser(profile: profile)
         let window = BrowserWindow(browser: browser)
         let delegate = AppDelegate(window: window, browser: browser)
@@ -179,6 +300,7 @@ enum Windows {
     /// Its window closed and let go of, before the profile is deleted:
     /// WebKit removes a store only once no page uses it.
     static func forget(_ profile: Profile) {
+        for delegate in secondary where delegate.browser.profile === profile { delegate.window.close() }
         guard let index = profiles.firstIndex(where: { $0.browser.profile === profile }) else { return }
         let delegate = profiles.remove(at: index)
         delegate.window.close()
@@ -187,7 +309,9 @@ enum Windows {
     }
 
     /// Every window's browser but incognito ones': what is saved as Nerda quits.
-    static var browsers: [Browser] { [regular?.browser].compactMap(\.self) + profiles.map(\.browser) }
+    static var browsers: [Browser] {
+        [regular?.browser].compactMap(\.self) + profiles.map(\.browser) + secondary.map(\.browser)
+    }
 
     /// The window of a profile used last, in front of the others, where links
     /// from other apps open, as in Safari; none with none showing.

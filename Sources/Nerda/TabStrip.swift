@@ -74,7 +74,7 @@ struct TabStrip: View {
                 .padding(.trailing, 8)
             #endif
             // Incognito tabs go with their window: nothing there to keep pinned.
-            if !browser.isPrivate, !pins.isEmpty || pinning {
+            if browser.keepsPins, !pins.isEmpty || pinning {
                 pinned(pins)
                     .padding(.trailing, 6)
                     .transition(.opacity)
@@ -288,7 +288,7 @@ struct TabStrip: View {
         var over: Landing?
         if tab.isPinned, x >= layout.tabs.minX {
             over = .tabs(min(Self.index(at: x, from: layout.tabs.minX, width: tabWidth), rest.count))
-        } else if !tab.isPinned, !browser.isPrivate, tab.hasPage, x < layout.tabs.minX {
+        } else if !tab.isPinned, browser.keepsPins, tab.hasPage, x < layout.tabs.minX {
             over = .pins(min(Self.index(at: x, from: layout.pins.minX, width: icon), pins.count))
         } else {
             let index = tab.isPinned ? Self.index(at: middle, from: layout.pins.minX, width: icon)
@@ -300,8 +300,14 @@ struct TabStrip: View {
 
     /// Let go over its own group, it slides into its place, and only there
     /// takes it back; over the other group, it goes there: pinned, or unpinned.
+    /// Off the window, to the window it is let go on, or one of its own.
     private func drop(_ id: Tab.ID) {
         let landing = landing
+        if Windows.drop(id, from: browser, at: NSEvent.mouseLocation) {
+            dragged = nil
+            self.landing = nil
+            return
+        }
         if landing == nil, let drag = dragged, let middle = middle(of: id) {
             withAnimation(.snappy(duration: 0.18)) {
                 pointer.at.x = middle + drag.grab

@@ -327,3 +327,37 @@ private final class UnclickedAction: WKNavigationAction {
     #expect(page.url == file)
     #expect(site.page == nil)
 }
+
+/// Moved to another window, a tab takes its page along, still awake; a
+/// pinned site stays behind, asleep, and only its page goes, as a tab of
+/// the list. A secondary window keeps no pinned sites or bookmarks.
+@MainActor
+@Test func aTabMovesToAnotherWindowWithItsPage() throws {
+    let browser = Browser()
+    browser.add([Nerda.Tab(restoring: saved("pin.test", pinned: true))])
+    let tab = browser.open(URL(string: "about:blank")!)
+    let page = tab.webView
+    let moved = Browser(secondary: true)
+
+    browser.move(tab.id, to: moved)
+    #expect(!browser.tabs.contains { $0 === tab })
+    #expect(moved.tabs.map(\.id) == [tab.id] && moved.selectedID == tab.id)
+    #expect(tab.page === page && tab.delegate === moved)
+    // The pinned site alone was left: a new tab goes on screen, not the site.
+    #expect(browser.selected?.isBlank == true)
+
+    let pin = browser.tabs[0]
+    browser.move(pin.id, to: moved)
+    #expect(browser.tabs[0].isPinned && browser.tabs[0].site == URL(string: "https://pin.test/") && browser.tabs[0] !== pin)
+    #expect(moved.tabs.contains { $0 === pin } && !pin.isPinned && pin.home == nil)
+
+    moved.setPinned(true, tab.id)
+    moved.bookmark(tab.id)
+    #expect(!tab.isPinned && tab.bookmark == nil)
+    // An incognito window's tab can't go to a window that keeps cookies.
+    let incognito = Browser(dataStore: .nonPersistent())
+    moved.move(tab.id, to: incognito)
+    #expect(moved.tabs.contains { $0 === tab })
+    browser.closeAll()
+    moved.closeAll()
+}

@@ -120,7 +120,8 @@ struct Sidebar: View {
             .frame(height: Self.topRow)
 
             // Incognito tabs go with their window: nothing there to keep pinned.
-            if !browser.isPrivate {
+            // A secondary window leaves them to the profile's own.
+            if browser.keepsPins {
                 tiles
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.tiles = $0 }
                     .padding(.horizontal, 8)
@@ -128,7 +129,7 @@ struct Sidebar: View {
             }
 
             // Incognito keeps no bookmarks either.
-            if !browser.isPrivate {
+            if browser.keepsPins {
                 bookmarkList
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.bookmarks = $0 }
                     .padding(.horizontal, 8)
@@ -368,9 +369,16 @@ struct Sidebar: View {
 
     /// Onto the tiles, a tab is pinned where it is let go; onto the bookmarks,
     /// either is kept there; a tile let go below them is unpinned there.
-    /// Anywhere else, it stays where the drag put it.
+    /// Off the window, it goes to the window it is let go on, or one of its
+    /// own (`Windows.drop`). Anywhere else, it stays where the drag put it.
     private func drop(_ id: Tab.ID, at point: CGPoint) {
         let gap = gap, landing = landing
+        if Windows.drop(id, from: browser, at: NSEvent.mouseLocation) {
+            dragged = nil
+            self.gap = nil
+            self.landing = nil
+            return
+        }
         withAnimation(.slide) {
             dragged = nil
             self.gap = nil
@@ -627,13 +635,13 @@ struct Sidebar: View {
 
     /// Below `zoneEdge`, down to just under the line.
     private func overBookmarks(_ point: CGPoint) -> Bool {
-        !browser.isPrivate && (zoneEdge...layout.bookmarks.maxY + 4).contains(point.y) && (0...width).contains(point.x)
+        browser.keepsPins && (zoneEdge...layout.bookmarks.maxY + 4).contains(point.y) && (0...width).contains(point.x)
     }
 
     /// Halfway between the tiles and the bookmarks: a drag above it is over
     /// the tiles, below it over the bookmarks, never both.
     private var zoneEdge: CGFloat {
-        browser.isPrivate ? .infinity : (layout.tiles.maxY + layout.bookmarks.minY) / 2
+        !browser.keepsPins ? .infinity : (layout.tiles.maxY + layout.bookmarks.minY) / 2
     }
 
     private func overList(_ point: CGPoint) -> Bool {
