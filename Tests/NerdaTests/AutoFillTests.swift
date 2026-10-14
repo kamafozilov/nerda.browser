@@ -195,3 +195,40 @@ import WebKit
     #expect(try await page.callAsyncJavaScript(read, contentWorld: .page) as? [String]
         == ["Jane", "Doe", "1 High Street", "London", "GB", ""])
 }
+
+/// A page with no form gets only the passwords' starter: it still answers
+/// whether the page asks for a password, and a form the page adds later
+/// and sends at once, its boxes never gone to, still has its sign-in heard.
+@MainActor @Test func theRestOfThePasswordsScriptComesWhenAFormIsUsed() async throws {
+    let browser = Browser(dataStore: .nonPersistent())
+    let tab = Nerda.Tab()
+    browser.add(tab)
+    let page = tab.webView
+    page.loadHTMLString("<p>Nothing to sign in to</p>", baseURL: URL(string: "https://shop.test/")!)
+    for _ in 0..<300 where page.isLoading || page.url == nil { try await Task.sleep(for: .milliseconds(20)) }
+    try await Task.sleep(for: .milliseconds(100))
+    func run(_ script: String) async throws -> Any? {
+        try await page.callAsyncJavaScript(script, contentWorld: Passwords.world)
+    }
+    #expect(try await run("return typeof nerdaFill") as? String == "undefined")
+    #expect(try await run("return nerdaAsksForPassword()") as? Bool == false)
+
+    _ = try await page.callAsyncJavaScript("""
+        document.body.insertAdjacentHTML('beforeend', `<form onsubmit="event.preventDefault()">
+            <input name=username value=jane><input type=password value=secret></form>`);
+        """, contentWorld: .page)
+    #expect(try await run("return nerdaAsksForPassword()") as? Bool == true)
+    #expect(try await run("return typeof nerdaFill") as? String == "undefined")
+    _ = try await page.callAsyncJavaScript("document.forms[0].requestSubmit()", contentWorld: .page)
+    for _ in 0..<100 where tab.signIn == nil { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(tab.signIn?.user == "jane" && tab.signIn?.password == "secret" && tab.signIn?.host == "shop.test")
+    #expect(try await run("return typeof nerdaFill") as? String == "function")
+
+    // A box outside any form, gone to.
+    page.loadHTMLString("<input id=box>", baseURL: URL(string: "https://shop.test/again")!)
+    for _ in 0..<300 where page.isLoading || page.url?.path() != "/again" { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(try await run("return typeof nerdaFill") as? String == "undefined")
+    _ = try await page.callAsyncJavaScript("document.getElementById('box').focus()", contentWorld: .page)
+    for _ in 0..<100 where try await run("return typeof nerdaFill") as? String != "function" { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(try await run("return typeof nerdaFill") as? String == "function")
+}

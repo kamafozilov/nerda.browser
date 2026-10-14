@@ -441,7 +441,7 @@ enum Passwords {
     static let messages = Messages()
 
     static func install(in controller: WKUserContentController, nativePasskeys: Bool = Passkeys.available) {
-        controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: false, in: world))
+        controller.addUserScript(WKUserScript(source: starter, injectionTime: .atDocumentEnd, forMainFrameOnly: false, in: world))
         controller.add(messages, contentWorld: world, name: "passwords")
         if !nativePasskeys {
             controller.addUserScript(WKUserScript(source: withoutPasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
@@ -504,12 +504,68 @@ enum Passwords {
         })();
         """#
 
+    /// What every frame gets: the rest (`source`) is sent for only once the
+    /// frame has a form or a password box, or a box is gone to or a form sent
+    /// first. Most frames (ads, widgets) never have one, and the whole script
+    /// was read and run in each of them. What happened before the rest came
+    /// is kept for it: the box gone to, and a form sent. Whether the page asks
+    /// for a password is answered here: the browser asks it of each new page,
+    /// sent for the rest or not.
+    private static let starter = #"""
+        (() => {
+            \#(boxes)
+            window.nerdaAsksForPassword = () => passwords().length > 0;
+            const early = window.nerdaPasswordsEarly = { box: null, sent: false };
+            let asked = false;
+            const load = () => {
+                if (asked) return;
+                asked = true;
+                window.webkit.messageHandlers.passwords.postMessage({ kind: 'load' });
+            };
+            const field = (box) => box instanceof HTMLInputElement || box instanceof HTMLTextAreaElement || box instanceof HTMLSelectElement;
+            const focused = (event) => {
+                if (!field(event.target)) return;
+                early.box = event.target;
+                load();
+            };
+            const sending = () => {
+                early.sent = true;
+                load();
+            };
+            const clicked = (event) => {
+                if (event.isTrusted && event.target.closest?.('button, input[type=submit], input[type=button], [role=button]')) sending();
+            };
+            addEventListener('focusin', focused, true);
+            addEventListener('submit', sending, true);
+            addEventListener('click', clicked, true);
+            early.stop = () => {
+                removeEventListener('focusin', focused, true);
+                removeEventListener('submit', sending, true);
+                removeEventListener('click', clicked, true);
+            };
+            if (document.activeElement instanceof HTMLInputElement || document.forms.length || document.querySelector('input[type=password]')) load();
+        })();
+        """#
+
+    /// What tells a password box, for both `starter` and `source`.
+    private static let boxes = #"""
+        const shown = (box) => {
+            const r = box.getBoundingClientRect();
+            return r.width > 0 && r.height > 0 && getComputedStyle(box).visibility !== 'hidden';
+        };
+        const usable = (box) => box instanceof HTMLInputElement && !box.disabled && !box.readOnly && shown(box);
+        const isPassword = (box) => box instanceof HTMLInputElement && box.type === 'password' && usable(box);
+        const passwords = (scope = document) => [...scope.querySelectorAll('input[type=password]')].filter(isPassword);
+        """#
+
     final class Messages: NSObject, WKScriptMessageHandler {
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
             let origin = message.frameInfo.securityOrigin
             guard ["http", "https"].contains(origin.protocol), !origin.host.isEmpty,
                   let page = message.webView, let body = message.body as? [String: Any],
                   let kind = body["kind"] as? String else { return }
+            // Into the frame that asked, in the world it asked from.
+            if kind == "load" { return page.evaluateJavaScript(source, in: message.frameInfo, in: world) }
             (page.uiDelegate as? Browser)?.page(page, passwords: kind, body, host: Site.key(origin.host),
                                                 clear: origin.protocol == "http", frame: message.frameInfo)
         }
@@ -528,17 +584,15 @@ enum Passwords {
         set { UserDefaults.standard.set(newValue.sorted(), forKey: "passwordsNeverSaved") }
     }
 
+    /// The rest, sent for by `starter`, once a document.
     private static let source = #"""
         (() => {
+            if (window.nerdaFill) return;
+            const early = window.nerdaPasswordsEarly;
+            early?.stop();
             const post = (message) => window.webkit.messageHandlers.passwords.postMessage(message);
-            const shown = (box) => {
-                const r = box.getBoundingClientRect();
-                return r.width > 0 && r.height > 0 && getComputedStyle(box).visibility !== 'hidden';
-            };
-            const usable = (box) => box instanceof HTMLInputElement && !box.disabled && !box.readOnly && shown(box);
-            const isPassword = (box) => box instanceof HTMLInputElement && box.type === 'password' && usable(box);
+            \#(boxes)
             const isName = (box) => box instanceof HTMLInputElement && ['text', 'email', 'tel'].includes(box.type) && usable(box);
-            const passwords = (scope = document) => [...scope.querySelectorAll('input[type=password]')].filter(isPassword);
             // The name that goes with a password box: the last one before it, in its form or else the page.
             const nameFor = (password) => {
                 let name = null;
@@ -635,8 +689,10 @@ enum Passwords {
             addEventListener('click', (event) => {
                 if (event.isTrusted && event.target === document.activeElement && !listed) arrive(event.target);
             }, true);
-            // The page put the caret in a box before this was here.
-            if (document.activeElement instanceof HTMLInputElement) arrive(document.activeElement);
+            // The page put the caret in a box before this was here, or the
+            // person did, which sent for it.
+            const active = document.activeElement;
+            if (active instanceof HTMLInputElement || (active && active === early?.box)) arrive(active);
             // Only for a move within the page: the caret leaving the page
             // altogether (a click on the list of accounts) keeps it listed.
             addEventListener('focusout', () => setTimeout(() => {
@@ -727,8 +783,6 @@ enum Passwords {
                 const end = setTimeout(stop, 45000);
             };
 
-            window.nerdaAsksForPassword = () => passwords().length > 0;
-
             // As if typed: WebKit's own setter from this world, which the page's
             // frameworks don't watch, so the input event after it reads as news.
             const put = (box, value) => {
@@ -809,6 +863,9 @@ enum Passwords {
                 }
                 return true;
             };
+
+            // A form sent before this was here: what its boxes hold is still in them.
+            if (early?.sent) sent();
         })();
         """#
 }
