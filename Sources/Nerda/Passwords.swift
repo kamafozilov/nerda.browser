@@ -899,8 +899,8 @@ extension Browser {
             Task {
                 var choices = PasswordChoices(tab: tab.id, site: host, clear: clear, spot: spot, accounts: [], frame: frame)
                 switch form {
-                case "address": choices.addresses = Array(AutoFill.shared.addresses.prefix(6))
-                case "card": choices.cards = Array(AutoFill.shared.cards.prefix(6))
+                case "address": choices.addresses = Array(profile.autofill.addresses.prefix(6))
+                case "card": choices.cards = Array(profile.autofill.cards.prefix(6))
                 default: choices.accounts = Array(await vault.accounts(for: host, clear: clear).prefix(6))
                 }
                 // Gone meanwhile: the caret moved on, or the tab did.

@@ -151,7 +151,7 @@ struct SettingsView: View {
                     case .passwords:
                         PasswordsSettings(browser: browser)
                     case .autofill:
-                        AutoFillSettings(edit: { editingContact = $0 }, editCard: { editingCard = $0 })
+                        AutoFillSettings(autofill: browser.profile.autofill, edit: { editingContact = $0 }, editCard: { editingCard = $0 })
                     case .siteSettings:
                         SitePermissionsSettings(browser: browser)
                     case .privacy:
@@ -198,10 +198,10 @@ struct SettingsView: View {
                     DeleteDataDialog(browser: browser, escapes: dropdown == nil) { deletingData = false }
                 }
                 if let contact = editingContact {
-                    ContactDialog(contact: contact, escapes: dropdown == nil) { editingContact = nil }
+                    ContactDialog(autofill: browser.profile.autofill, contact: contact, escapes: dropdown == nil) { editingContact = nil }
                 }
                 if let card = editingCard {
-                    CardDialog(card: card, escapes: dropdown == nil) { editingCard = nil }
+                    CardDialog(autofill: browser.profile.autofill, card: card, escapes: dropdown == nil) { editingCard = nil }
                 }
                 if let draft = editingProfile {
                     ProfileDialog(draft: draft, escapes: dropdown == nil, delete: { deletingProfile = $0 }) { editingProfile = nil }
@@ -570,12 +570,13 @@ private struct PasswordsSettings: View {
 /// fills them in and offers to keep them, and those kept, to add, change or
 /// remove.
 private struct AutoFillSettings: View {
+    /// Of the profile whose Settings is open.
+    let autofill: AutoFill
     let edit: (Contact) -> Void
     let editCard: (Card) -> Void
 
     @AppStorage(AutoFill.addressesKey) private var fillsAddresses = true
     @AppStorage(AutoFill.cardsKey) private var fillsCards = true
-    private let autofill = AutoFill.shared
 
     var body: some View {
         SettingsGroup {
@@ -2072,19 +2073,21 @@ private struct CustomSearchDialog: View {
 
 /// An address added or changed: what forms ask for, in the order they ask it.
 private struct ContactDialog: View {
+    let autofill: AutoFill
     let escapes: Bool
     let done: () -> Void
 
     @State private var contact: Contact
     @FocusState private var focused: String?
 
-    init(contact: Contact, escapes: Bool, done: @escaping () -> Void) {
+    init(autofill: AutoFill, contact: Contact, escapes: Bool, done: @escaping () -> Void) {
+        self.autofill = autofill
         _contact = State(initialValue: contact)
         self.escapes = escapes
         self.done = done
     }
 
-    private var isNew: Bool { !AutoFill.shared.addresses.contains { $0.id == contact.id } }
+    private var isNew: Bool { !autofill.addresses.contains { $0.id == contact.id } }
 
     var body: some View {
         SettingsDialog(width: 460, escapes: escapes, cancel: done) {
@@ -2116,7 +2119,7 @@ private struct ContactDialog: View {
             HStack(spacing: 8) {
                 if !isNew {
                     Button("Remove", role: .destructive) {
-                        AutoFill.shared.remove(contact)
+                        autofill.remove(contact)
                         done()
                     }
                     .buttonStyle(SettingsButtonStyle())
@@ -2153,7 +2156,7 @@ private struct ContactDialog: View {
             kept[keyPath: key] = kept[keyPath: key].trimmingCharacters(in: .whitespaces)
         }
         guard !kept.values.isEmpty else { return }
-        AutoFill.shared.save(kept)
+        autofill.save(kept)
         done()
     }
 }
@@ -2161,6 +2164,7 @@ private struct ContactDialog: View {
 /// A card added or changed. A kept card's number shows only as its last
 /// digits: one typed in takes its place, and left empty it stays as it is.
 private struct CardDialog: View {
+    let autofill: AutoFill
     let escapes: Bool
     let done: () -> Void
 
@@ -2170,14 +2174,15 @@ private struct CardDialog: View {
     @State private var saving = false
     @FocusState private var focused: String?
 
-    init(card: Card, escapes: Bool, done: @escaping () -> Void) {
+    init(autofill: AutoFill, card: Card, escapes: Bool, done: @escaping () -> Void) {
+        self.autofill = autofill
         _card = State(initialValue: card)
         _expiry = State(initialValue: card.month == 0 ? "" : card.expiry)
         self.escapes = escapes
         self.done = done
     }
 
-    private var isNew: Bool { !AutoFill.shared.cards.contains { $0.id == card.id } }
+    private var isNew: Bool { !autofill.cards.contains { $0.id == card.id } }
     private var digits: String? { CardNumber.digits(number) }
     private var numberWorks: Bool { number.isEmpty ? !isNew : digits.map(CardNumber.isValid) ?? false }
     private var expires: (month: Int, year: Int)? { CardNumber.expiry(expiry) }
@@ -2213,7 +2218,7 @@ private struct CardDialog: View {
             HStack(spacing: 8) {
                 if !isNew {
                     Button("Remove", role: .destructive) {
-                        AutoFill.shared.remove(card)
+                        autofill.remove(card)
                         done()
                     }
                     .buttonStyle(SettingsButtonStyle())
@@ -2257,7 +2262,7 @@ private struct CardDialog: View {
         }
         saving = true
         Task {
-            let saved = await AutoFill.shared.save(kept, number: typed)
+            let saved = await autofill.save(kept, number: typed)
             saving = false
             if saved { done() } else { Browser.tell("Couldn't save the card", "The keychain didn't take it.") }
         }
