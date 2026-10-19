@@ -456,7 +456,8 @@ extension AppMenu: NSMenuDelegate {
         while menu.items.count > 3 { menu.removeItem(at: 3) }
         if !browser.isPrivate, !browser.recentlyClosed.isEmpty {
             let closed = browser.recentlyClosed.reversed().map { closed in
-                let item = item(closed.tab.name ?? (closed.tab.title.isEmpty ? closed.tab.url?.host() ?? "Closed tab" : closed.tab.title),
+                let title = closed.tab.name ?? (closed.tab.title.isEmpty ? closed.tab.url?.host() ?? "Closed tab" : closed.tab.title)
+                let item = item(closed.window.map { "Window with \($0.tabs.count) Tabs" } ?? title,
                                 #selector(reopenTab(_:)), target: self)
                 item.representedObject = closed.id
                 return item

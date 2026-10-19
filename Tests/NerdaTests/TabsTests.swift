@@ -79,6 +79,28 @@ private func saved(_ host: String, pinned: Bool = false) -> Session.Tab {
     #expect(browser.selected == nil)
 }
 
+/// A secondary window closed is one entry in Recently Closed, which brings
+/// back all its tabs with the one it showed on screen; one tab, a tab's entry.
+@MainActor
+@Test func aClosedWindowComesBackWithAllItsTabs() throws {
+    let history = Session.Tab(url: nil, title: "History", state: nil, zoom: 1, pinned: nil, home: nil, history: true)
+    let entry = try #require(Session.ClosedTab(window: Session(tabs: [saved("a.test"), history, saved("b.test")], selected: 2)))
+    #expect(entry.tab == saved("b.test"))
+    let window = try #require(entry.window)
+    #expect(window.tabs == [saved("a.test"), saved("b.test")] && window.selected == 1)
+
+    let one = try #require(Session.ClosedTab(window: Session(tabs: [history, saved("a.test")], selected: 0)))
+    #expect(one.tab == saved("a.test") && one.window == nil)
+    #expect(Session.ClosedTab(window: Session(tabs: [history], selected: 0)) == nil)
+
+    let folder = try temporaryFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let reopened = Browser(secondary: true)
+    reopened.restore(window, from: folder.appending(path: "window.json"), loadingPins: true)
+    #expect(reopened.tabs.map(\.title) == ["a.test", "b.test"])
+    #expect(reopened.selected?.title == "b.test")
+}
+
 /// Saved off the main thread, the file is what it always was, and written
 /// only when the tabs changed; a save that waits comes after one on its way.
 @MainActor

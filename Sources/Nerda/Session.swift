@@ -38,6 +38,9 @@ nonisolated struct Session: Codable, Equatable, Sendable {
         let tab: Tab
         let index: Int
         var date = Date.now
+        /// A secondary window closed whole: one entry, its tabs coming back
+        /// together in a window of their own; `tab` is the one it showed.
+        var window: Session? = nil
     }
 
     static let file = Edition.folder.appending(path: "session.json")
@@ -47,6 +50,22 @@ nonisolated struct Session: Codable, Equatable, Sendable {
     /// until opened: nothing loads that isn't asked for.
     static let loadsPinsKey = "loadsPinnedTabsAtLaunch"
     static var loadsPins: Bool { UserDefaults.standard.object(forKey: loadsPinsKey) as? Bool ?? true }
+}
+
+nonisolated extension Session.ClosedTab {
+    /// A secondary window closing, as Recently Closed keeps it: its tabs with
+    /// an address (settings and history are the profile window's), one entry
+    /// for them all, or a tab's own for one; nil for none.
+    init?(window: Session) {
+        var gone = window
+        gone.closed = nil
+        let shown = gone.selected.map { gone.tabs[$0] }
+        gone.tabs.removeAll { $0.url == nil }
+        guard !gone.tabs.isEmpty else { return nil }
+        let selected = shown.flatMap(gone.tabs.firstIndex(of:)) ?? 0
+        gone.selected = selected
+        self.init(tab: gone.tabs[selected], index: 0, window: gone.tabs.count > 1 ? gone : nil)
+    }
 }
 
 extension Browser {

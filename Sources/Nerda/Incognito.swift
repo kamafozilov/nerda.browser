@@ -190,16 +190,15 @@ enum Windows {
     static func hasSecondary(of profile: Profile) -> Bool { secondary.contains { $0.browser.profile === profile } }
 
     /// A secondary window is closing: its tabs go to the profile's own
-    /// window's Recently Closed, for ⇧⌘T to bring back, and its file goes,
-    /// so it doesn't open again at the next launch.
+    /// window's Recently Closed as one entry, for ⇧⌘T to bring back
+    /// together, and its file goes, so it doesn't open again at the next launch.
     static func closedSecondary(_ delegate: AppDelegate) {
         let browser = delegate.browser
         let file = browser.sessionFile
         browser.pendingSave?.cancel()
         browser.sessionFile = nil
-        if let home = window(of: browser.profile, making: false)?.browser {
-            let closed = browser.tabs.compactMap(\.saved).filter { $0.url != nil }.map { Session.ClosedTab(tab: $0, index: 0) }
-            home.recentlyClosed = Array((home.recentlyClosed + closed).suffix(25))
+        if let home = window(of: browser.profile, making: false)?.browser, let closed = Session.ClosedTab(window: browser.session) {
+            home.recentlyClosed = Array((home.recentlyClosed + [closed]).suffix(25))
             home.sessionChanged()
         }
         browser.closeAll()
@@ -221,18 +220,31 @@ enum Windows {
                     Session.remove(file)
                     continue
                 }
-                let screen = session.frame.flatMap { frame in
-                    NSScreen.screens.first { $0.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) }
-                }
-                let browser = Browser(profile: profile, secondary: true)
-                browser.restore(session, from: file)
-                let window = BrowserWindow(browser: browser, screen: screen ?? NSScreen.main)
-                let delegate = AppDelegate(window: window, browser: browser)
-                window.delegate = delegate
-                secondary.append(delegate)
-                window.order(.below, relativeTo: regular.windowNumber)
+                openSecondary(session, of: profile, from: file).order(.below, relativeTo: regular.windowNumber)
             }
         }
+    }
+
+    /// A secondary window closed whole, from Recently Closed: its tabs back
+    /// in a window of their own, the one it showed loaded.
+    static func reopen(_ window: Session, of profile: Profile) {
+        let file = windowsFolder(of: profile).appending(path: "\(UUID().uuidString).json")
+        openSecondary(window, of: profile, from: file, loadingPins: true).makeKeyAndOrderFront(nil)
+    }
+
+    /// On the display `session` was on, or the main one.
+    private static func openSecondary(_ session: Session, of profile: Profile, from file: URL,
+                                      loadingPins: Bool = Session.loadsPins) -> BrowserWindow {
+        let screen = session.frame.flatMap { frame in
+            NSScreen.screens.first { $0.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) }
+        }
+        let browser = Browser(profile: profile, secondary: true)
+        browser.restore(session, from: file, loadingPins: loadingPins)
+        let window = BrowserWindow(browser: browser, screen: screen ?? NSScreen.main)
+        let delegate = AppDelegate(window: window, browser: browser)
+        window.delegate = delegate
+        secondary.append(delegate)
+        return window
     }
 
     private static func windowsFolder(of profile: Profile) -> URL { profile.folder.appending(path: "Windows") }

@@ -10,6 +10,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Changed
 
 - Cookie notices, annoyances and ads that your filter lists hide in a page are now hidden, where before only the requests they block were stopped. The lists under Annoyances in Settings › Security & Privacy now do what they say.
+- Closing a window you moved tabs to puts it in History › Recently Closed as one item, Window with N Tabs, which opens the window again with all its tabs. Before, its tabs pushed the ones you had closed earlier off the list.
 - Each profile keeps its own addresses and cards in Settings › AutoFill, so a Work profile no longer offers your Personal ones, and deleting a profile deletes them too.
 
 ### Fixed
