@@ -7,9 +7,17 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Cookie notices, annoyances and ads that your filter lists hide in a page are now hidden, where before only the requests they block were stopped. The lists under Annoyances in Settings › Security & Privacy now do what they say.
+
 ### Fixed
 
 - Tabs of chat and mail sites such as Gmail, Slack and Telegram go to sleep and close without asking about unsaved changes once your message is sent. Before, one typed message kept them awake and asking until the page was reloaded.
+
+### Security
+
+- A site on a list of dangerous sites (Phishing URL Blocklist, Online Malicious URL Blocklist, uBlock filters – Badware risks, CERT.PL's Warning List) no longer opens: the tab says which list it is on, and how to open it anyway from Site Settings. Before, these lists only blocked what such a page loaded.
 
 ## [0.0.25] - 2026-10-14
 

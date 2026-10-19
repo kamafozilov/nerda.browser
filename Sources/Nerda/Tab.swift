@@ -1282,8 +1282,19 @@ extension Tab {
         var offline = false
         /// The certificate the site gave, when it was the trouble, for Show Certificate.
         var trust: SecTrust?
+        /// The list of dangerous sites it is on, when that kept it from opening.
+        var dangerous: String?
 
         enum Certificate { case expired, notYetValid, wrongHost, selfSigned, untrusted }
+
+        /// A site on a list of dangerous sites, which list, and how to go anyway:
+        /// the site's own switch lifts Nerda's lists, that one too.
+        static func dangerous(_ url: URL, on list: String) -> Failure {
+            let anyway = SiteSettings.supportsSiteBlocking
+                ? "turn off Ads and trackers for this site in Site Settings"
+                : "turn off Block ads and trackers in Settings › Security & Privacy"
+            return Failure(url: url, message: "\(url.host(percentEncoded: false) ?? "This site") is on the \(list), a list of sites known for phishing, scams or malware, so Nerda didn't open it. To open it anyway, \(anyway), then reload.", dangerous: list)
+        }
 
         /// What went wrong, in plain words, for the errors people meet; nil
         /// for the rest, which keep WebKit's own words. `refused`: the server
@@ -1389,7 +1400,7 @@ struct PageFailure: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Text("Can't Open This Page")
+            Text(failure.dangerous == nil ? "Can't Open This Page" : "Dangerous Site")
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(Palette.ink)
             Text(failure.message)
