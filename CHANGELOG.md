@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.27] - 2026-10-19
+
 ### Fixed
 
 - Going back in a video on sites that play a file, such as asilmedia.org, plays at once from what has already loaded, where before it stopped to load it from the site again and stuttered on a slow site.
@@ -425,7 +427,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.26...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.27...HEAD
+[0.0.27]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.26...v0.0.27
 [0.0.26]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.25...v0.0.26
 [0.0.25]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.24...v0.0.25
 [0.0.24]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.23...v0.0.24
