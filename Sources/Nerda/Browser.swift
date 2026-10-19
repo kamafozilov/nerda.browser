@@ -595,6 +595,11 @@ extension Browser: WKUIDelegate {
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
         let ask = (webView as? SwipingWebView)?.takeLinkAsk()
+        // Open Video in New Window: the video's own address, not the one it is loaded by (MediaCache).
+        if let url = action.request.url, url.scheme == MediaCache.scheme {
+            withAnimation(.slide) { _ = openBehind(MediaCache.original(url)) }
+            return nil
+        }
         if ask == .incognito, let url = action.request.url {
             // Only the web: loaded from here, a page's link to a file on this
             // Mac (file:) would open where a page itself may not take you.

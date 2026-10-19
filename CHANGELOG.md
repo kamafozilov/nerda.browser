@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Going back in a video on sites that play a file, such as asilmedia.org, plays at once from what has already loaded, where before it stopped to load it from the site again and stuttered on a slow site.
+
 ## [0.0.26] - 2026-10-19
 
 ### Changed

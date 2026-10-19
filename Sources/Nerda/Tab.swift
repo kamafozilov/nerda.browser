@@ -953,6 +953,8 @@ final class Tab: Identifiable {
         """
 
     static let processPool = WKWebViewConfiguration().value(forKey: "processPool")
+    /// Whether pages hand their media files to MediaCache: only once its scheme counts as secure.
+    private static let mediaCacheOn = MediaCache.register(in: processPool)
 
     /// A tab's configuration: a copy of the one made ready, with its data
     /// store's contents. Made afresh for each tab opened or woken, it sent
@@ -1004,6 +1006,8 @@ final class Tab: Identifiable {
         controller.addUserScript(keepFocus)
         controller.addUserScript(unseenMedia)
         controller.addUserScript(LiveRate.script)
+        // Not for incognito: what it plays isn't kept on disk.
+        if dataStore.isPersistent, mediaCacheOn { controller.addUserScript(MediaCache.script) }
         controller.addUserScript(pageErrors)
         controller.add(pageErrorCounts, contentWorld: .defaultClient, name: "pageError")
         controller.add(Translator.messages, contentWorld: .defaultClient, name: "translate")
@@ -1036,6 +1040,7 @@ final class Tab: Identifiable {
         // opens (popups) are given this configuration's, script and all.
         configuration.preferences.isElementFullscreenEnabled = true
         configuration.setURLSchemeHandler(ViewSource.handler, forURLScheme: ViewSource.scheme)
+        configuration.setURLSchemeHandler(MediaCache.shared, forURLScheme: MediaCache.scheme)
         // WebKit samples the page's top edge only when asked, allowing this
         // much difference across it (as Safari does), for `recolor`.
         set(configuration, "_setSampledPageTopColorMaxDifference:", 5.0)

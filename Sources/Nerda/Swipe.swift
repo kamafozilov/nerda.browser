@@ -88,6 +88,13 @@ class SwipingWebView: WKWebView {
             original.target = self
             original.action = #selector(openBehind(_:))
         }
+        // Copy Video Address: the video's own, not the one it is loaded by (MediaCache).
+        if let item = menu.items.first(where: { $0.identifier?.rawValue == "WKMenuItemIdentifierCopyMediaLink" }),
+           let action = item.action {
+            copyMedia = (item.target, action)
+            item.target = self
+            item.action = #selector(copyMediaLink(_:))
+        }
         let added = Extensions.shared.menuItems(for: self)
         if !added.isEmpty {
             menu.addItem(.separator())
@@ -134,6 +141,23 @@ class SwipingWebView: WKWebView {
         defer { linkAsked = nil }
         guard let linkAsked, Date.now.timeIntervalSince(linkAsked.at) < 2 else { return nil }
         return linkAsked.ask
+    }
+
+    /// WebKit's own action for Copy Video Address.
+    private var copyMedia: (target: AnyObject?, action: Selector)?
+
+    @objc private func copyMediaLink(_ sender: NSMenuItem) {
+        guard let copyMedia else { return }
+        NSApp.sendAction(copyMedia.action, to: copyMedia.target, from: sender)
+        // WebKit may write it once the page has answered: looked at again after a moment.
+        let restore = {
+            let board = NSPasteboard.general
+            guard let text = board.string(forType: .string), let url = URL(string: text), url.scheme == MediaCache.scheme else { return }
+            board.clearContents()
+            board.setString(MediaCache.original(url).absoluteString, forType: .string)
+        }
+        restore()
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(300), execute: restore)
     }
 
     @objc private func copyScreenshot() { Screenshot.copy(self) }
