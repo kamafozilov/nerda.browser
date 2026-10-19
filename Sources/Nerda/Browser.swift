@@ -1063,6 +1063,16 @@ extension Browser: WKNavigationDelegate {
         guard let tab = tab(for: webView) else { return }
         let setOff = tab.loading.flatMap { $0.navigation === navigation ? $0.site : nil }
         guard let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL ?? setOff ?? webView.url ?? tab.site else { return }
+        // Refused by a content blocker: on a list of dangerous sites, said so, and which.
+        if error.domain == "WebKitErrorDomain", error.code == 104 {
+            Task {
+                let list = await Blocker.shared.dangerousList(for: url)
+                // A load set off meanwhile has its own say.
+                guard tab.page === webView, navigation == nil || tab.loading?.navigation === navigation else { return }
+                tab.failure = list.map { Tab.Failure.dangerous(url, on: $0.title) } ?? Tab.Failure(url: url, message: error.localizedDescription)
+            }
+            return
+        }
         guard error.domain == NSURLErrorDomain else {
             return tab.failure = Tab.Failure(url: url, message: error.localizedDescription)
         }

@@ -4,7 +4,8 @@ import Observation
 import WebKit
 
 /// Ads and trackers, stopped where WebKit loads things (decisions #8), so a
-/// page never spends time, memory or battery on them. The lists chosen in
+/// page never spends time, memory or battery on them, and the parts of pages
+/// lists hide (`##`) hidden by WebKit's own style sheet. The lists chosen in
 /// Settings (EasyList and EasyPrivacy until others are) are fetched, and
 /// again every few days, turned into WebKit's content rules (`ContentRules`)
 /// and compiled once per change. WebKit keeps what it compiled: a launch
@@ -20,10 +21,10 @@ final class Blocker {
     private static let retryAfter: TimeInterval = 6 * 60 * 60
     // Version the compiled artifact too: unsafe rules from an older converter
     // must never be installed while an update is pending or the Mac is offline.
-    // Compiled in parts, each under WebKit's 150,000 rules: "blocklist-v4-0", …
-    nonisolated private static let prefix = "blocklist-v4-"
-    /// What came before parts, used until they are there.
-    nonisolated private static let previous = "blocklist-v3"
+    // Compiled in parts, each under WebKit's 150,000 rules: "blocklist-v5-0", …
+    nonisolated private static let prefix = "blocklist-v5-"
+    /// The last converter's parts, used until this one's are there.
+    nonisolated private static let previous = "blocklist-v4-"
     private static let fetchedKey = "blocklist-v3-fetched"
     private static let triedKey = "blocklist-v3-tried"
     private static let chosenKey = "filterLists"
@@ -68,11 +69,7 @@ final class Blocker {
         started = true
         Task {
             let parts = await Self.compiled()
-            if !parts.isEmpty {
-                use(parts)
-            } else if let old = try? await WKContentRuleListStore.default().contentRuleList(forIdentifier: Self.previous) {
-                use([old])
-            }
+            use(parts.isEmpty ? await Self.compiled(Self.previous) : parts)
             // Only a first run waits for the lists. One that is merely due is
             // left to the schedule below, so it never competes with a launch.
             if rules.isEmpty { await refresh(fetch: true) }
@@ -146,10 +143,12 @@ final class Blocker {
     /// date says: an offline launch before 0.0.9 wrote it without one. With
     /// rules in use, a fetch that failed waits a few hours: a list that can't
     /// be had (an address gone, a list refused) otherwise had every list
-    /// fetched and compiled again, ~6 s and ~700 MB, every half hour.
+    /// fetched and compiled again, ~6 s and ~700 MB, every half hour. Rules
+    /// an older Nerda compiled are due too, so this one's replace them soon.
     private var isDue: Bool {
         if !rules.isEmpty, let tried = UserDefaults.standard.object(forKey: Self.triedKey) as? Date,
            Date.now.timeIntervalSince(tried) < Self.retryAfter { return false }
+        if rules.first?.identifier?.hasPrefix(Self.prefix) == false { return true }
         if chosen.contains(where: { !FileManager.default.fileExists(atPath: FilterList(title: "", url: $0).cached.path) }) { return true }
         guard let fetched = UserDefaults.standard.object(forKey: Self.fetchedKey) as? Date else { return true }
         return Date.now.timeIntervalSince(fetched) > Self.refreshAfter
@@ -215,15 +214,28 @@ final class Blocker {
         UserDefaults.standard.set(try? JSONEncoder().encode(added), forKey: Self.addedKey)
     }
 
-    /// The parts compiled last time, in order.
-    private static func compiled() async -> [WKContentRuleList] {
+    /// The parts compiled last time, in order: this converter's, or `family`'s.
+    private static func compiled(_ family: String = prefix) async -> [WKContentRuleList] {
         guard let store = WKContentRuleListStore.default() else { return [] }
         var parts: [WKContentRuleList] = []
         for index in 0... {
-            guard let part = try? await store.contentRuleList(forIdentifier: prefix + "\(index)") else { break }
+            guard let part = try? await store.contentRuleList(forIdentifier: family + "\(index)") else { break }
             parts.append(part)
         }
         return parts
+    }
+
+    /// The chosen list of dangerous sites that has `url`, for the page in
+    /// place of one WebKit refused (WebKitErrorDomain 104). Read from the
+    /// lists as kept, only then: nothing of them stays in Nerda's memory.
+    func dangerousList(for url: URL) async -> FilterList? {
+        await Self.list(of: FilterList.dangerous.filter(isChosen), having: url)
+    }
+
+    @concurrent nonisolated private static func list(of lists: [FilterList], having url: URL) async -> FilterList? {
+        lists.first { list in
+            (try? String(contentsOf: list.cached, encoding: .utf8)).map { ContentRules.dangerous($0, blocks: url) } ?? false
+        }
     }
 
     /// What main.swift is given to be `compileAndExit` instead of the browser,
@@ -247,23 +259,30 @@ final class Blocker {
             let session = URLSession(configuration: configuration)
             defer { session.invalidateAndCancel() }
             var text = ""
+            var dangerous = ""
             var missing = false
             for url in urls {
                 let list = await list(from: url, keptIn: FilterList(title: "", url: url).cached, fetch: fetch, session: session)
-                if let list { text += list + "\n" } else { missing = true }
+                guard let list else { missing = true; continue }
+                if FilterList.dangerous.contains(where: { $0.url == url }) { dangerous += list + "\n" } else { text += list + "\n" }
             }
             guard let store = WKContentRuleListStore.default() else { exit(1) }
             // The same lists, turned into rules by this same build, are compiled
             // already (lists unchanged, or none could be fetched): the ~6 s and
             // ~700 MB of doing it again are skipped. Removed before compiling,
             // so a compilation cut short is never taken as done.
-            let digest = compiledDigest(of: text)
+            let digest = compiledDigest(of: text + dangerous)
             if (try? Data(contentsOf: compiledDigestFile)) == digest,
                await store.availableIdentifiers()?.contains(prefix + "0") == true {
                 exit(missing ? someMissing : 0)
             }
             try? FileManager.default.removeItem(at: compiledDigestFile)
-            guard let parts = ContentRules.encode(text, partsOf: ContentRules.partLimit) else { exit(1) }
+            // Lists of dangerous sites in parts of their own, after the rest:
+            // without the exemption that lets every page you open through.
+            guard let ordinary = ContentRules.encode(text, partsOf: ContentRules.partLimit),
+                  let warnings = dangerous.isEmpty ? [] : ContentRules.encode(dangerous, partsOf: ContentRules.partLimit, dangerous: true)
+            else { exit(1) }
+            let parts = ordinary + warnings
             do {
                 // ponytail: a part failing midway leaves the new parts before it
                 // with the old after it, until the next refresh. Compile under a
@@ -271,8 +290,9 @@ final class Blocker {
                 for (index, part) in parts.enumerated() {
                     _ = try await store.compileContentRuleList(forIdentifier: prefix + "\(index)", encodedContentRuleList: part)
                 }
-                for identifier in await store.availableIdentifiers() ?? [] where identifier == previous
-                    || identifier.hasPrefix(prefix) && Int(identifier.dropFirst(prefix.count)).map({ $0 >= parts.count }) ?? false {
+                // The parts no longer there, and the last converter's.
+                let current = Set(parts.indices.map { prefix + "\($0)" })
+                for identifier in await store.availableIdentifiers() ?? [] where identifier.hasPrefix("blocklist-") && !current.contains(identifier) {
                     try? await store.removeContentRuleList(forIdentifier: identifier)
                 }
                 try? digest.write(to: compiledDigestFile)
@@ -364,6 +384,14 @@ nonisolated struct FilterList: Codable, Hashable, Identifiable, Sendable {
         return file.isEmpty || file == "/" ? url.host() ?? url.absoluteString : file
     }
 
+    /// Lists of sites known to phish, scam or spread malware. Unlike an ad
+    /// list's, their rules stop the page itself too, in lists of their own (`ContentRules`).
+    static let phishing = FilterList(title: "Phishing URL Blocklist", url: URL(string: "https://malware-filter.gitlab.io/phishing-filter/phishing-filter.txt")!)
+    static let malware = FilterList(title: "Online Malicious URL Blocklist", url: URL(string: "https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-ag-online.txt")!)
+    static let badware = FilterList(title: "uBlock filters – Badware risks", url: URL(string: "https://ublockorigin.github.io/uAssets/filters/badware.txt")!)
+    static let certPL = FilterList(title: "CERT.PL's Warning List", url: URL(string: "https://hole.cert.pl/domains/v2/domains_ublock.txt")!)
+    static let dangerous = [phishing, malware, badware, certPL]
+
     /// The lists uBlock Origin offers (its assets.json), by heading, less those
     /// Nerda can take nothing from: `$removeparam`, `!#include` or uBO-only
     /// syntax. The first two are what Nerda blocks with until others are chosen.
@@ -372,11 +400,11 @@ nonisolated struct FilterList: Codable, Hashable, Identifiable, Sendable {
             FilterList(title: "EasyList", url: URL(string: "https://easylist.to/easylist/easylist.txt")!),
             FilterList(title: "EasyPrivacy", url: URL(string: "https://easylist.to/easylist/easyprivacy.txt")!),
             FilterList(title: "uBlock filters – Ads", url: URL(string: "https://ublockorigin.github.io/uAssets/filters/filters.txt")!),
-            FilterList(title: "uBlock filters – Badware risks", url: URL(string: "https://ublockorigin.github.io/uAssets/filters/badware.txt")!),
+            badware,
             FilterList(title: "uBlock filters – Privacy", url: URL(string: "https://ublockorigin.github.io/uAssets/filters/privacy.txt")!),
             FilterList(title: "uBlock filters – Unbreak", url: URL(string: "https://ublockorigin.github.io/uAssets/filters/unbreak.txt")!),
             FilterList(title: "uBlock filters – Quick fixes", url: URL(string: "https://ublockorigin.github.io/uAssets/filters/quick-fixes.txt")!),
-            FilterList(title: "Online Malicious URL Blocklist", url: URL(string: "https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-ag-online.txt")!),
+            malware,
             FilterList(title: "Peter Lowe's Ad and tracking server list", url: URL(string: "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=1&mimetype=plaintext")!),
         ]),
         ("Ads", [
@@ -387,7 +415,7 @@ nonisolated struct FilterList: Codable, Hashable, Identifiable, Sendable {
             FilterList(title: "Block Outsider Intrusion into LAN", url: URL(string: "https://ublockorigin.github.io/uAssets/filters/lan-block.txt")!),
         ]),
         ("Security", [
-            FilterList(title: "Phishing URL Blocklist", url: URL(string: "https://malware-filter.gitlab.io/phishing-filter/phishing-filter.txt")!),
+            phishing,
         ]),
         ("Annoyances", [
             FilterList(title: "AdGuard – Cookie Notices", url: URL(string: "https://filters.adtidy.org/extension/ublock/filters/18.txt")!),
@@ -434,7 +462,7 @@ nonisolated struct FilterList: Codable, Hashable, Identifiable, Sendable {
             FilterList(title: "AdGuard Dutch", url: URL(string: "https://filters.adtidy.org/extension/ublock/filters/8.txt")!),
             FilterList(title: "Dandelion Sprouts nordiske filtre", url: URL(string: "https://raw.githubusercontent.com/DandelionSprout/adfilt/master/NorwegianList.txt")!),
             FilterList(title: "Oficjalne Polskie Filtry do uBlocka Origin", url: URL(string: "https://raw.githubusercontent.com/MajkiIT/polish-ads-filter/master/polish-adblock-filters/adblock.txt")!),
-            FilterList(title: "CERT.PL's Warning List", url: URL(string: "https://hole.cert.pl/domains/v2/domains_ublock.txt")!),
+            certPL,
             FilterList(title: "Romanian Ad (ROad) Block List Light", url: URL(string: "https://raw.githubusercontent.com/tcptomato/ROad-Block/master/road-block-filters-light.txt")!),
             FilterList(title: "RU AdList", url: URL(string: "https://easylist-downloads.adblockplus.org/advblock.txt")!),
             FilterList(title: "RU AdList: Counters", url: URL(string: "https://raw.githubusercontent.com/easylist/ruadlist/master/cntblock.txt")!),
@@ -450,13 +478,14 @@ nonisolated struct FilterList: Codable, Hashable, Identifiable, Sendable {
     ]
 }
 
-/// Filter lines in EasyList's syntax, turned into WebKit's content rules. Only
-/// what stops a load is kept: rules that hide parts of a page (`##`), and
-/// those asking for more than a block (a redirect, a rewritten header), are
-/// left out, as is any rule WebKit's rules can't say the same way.
-/// Hosts files' lines are read as the names they block. Main-frame
-/// navigation is always allowed. Generic filters apply only to third-party
-/// requests, and known sign-in challenge services are exempt.
+/// Filter lines in EasyList's syntax, turned into WebKit's content rules: what
+/// stops a load, and what hides part of a page (`##`) as `css-display-none`.
+/// Rules asking for more (a redirect, a rewritten header, uBlock's and
+/// AdGuard's own selectors and scripts) are left out, as is any rule WebKit's
+/// rules can't say the same way. Hosts files' lines are read as the names
+/// they block. Main-frame navigation is always allowed, but by lists of
+/// dangerous sites. Generic filters apply only to third-party requests, and
+/// known sign-in challenge services are exempt.
 nonisolated enum ContentRules {
     /// Challenge services can be required for sign-in or checkout. EasyPrivacy
     /// deliberately targets some of them; compatibility takes priority here.
@@ -469,31 +498,38 @@ nonisolated enum ContentRules {
         @@||hcaptcha.com^
         """
 
-    /// Rejects error pages, lists with nothing to block, and oversized
+    /// Rejects error pages, lists with nothing to block or hide, and oversized
     /// downloads, before they can replace the last working list.
     static func downloadedList(_ data: Data) -> String? {
         guard data.count <= 10_000_000, let text = String(data: data, encoding: .utf8) else { return nil }
         let head = text.prefix(512).lowercased()
         guard !head.contains("<html"), !head.contains("<!doctype"),
-              text.split(whereSeparator: \.isNewline).contains(where: { rule(String($0)) != nil }) else { return nil }
+              text.split(whereSeparator: \.isNewline).contains(where: { rule(String($0)) != nil || hiding(String($0)) != nil })
+        else { return nil }
         return text
     }
 
     /// Rules in one compiled list, under WebKit's limit of 150,000.
     static let partLimit = 145_000
 
-    /// The rules as WebKit reads them: blocks first, then the exceptions,
-    /// which undo only what comes before them.
+    /// The blocking rules as WebKit reads them, in one list: blocks first,
+    /// then the exceptions, which undo only what comes before them.
     static func encode(_ text: String) -> String? {
         encode(text, partsOf: .max)?.first
     }
 
     /// The same in parts of at most `limit` rules, for more than WebKit takes
     /// in one list. Each part has every exception, so a list's exceptions
-    /// still undo another's blocks, whichever part those are in.
-    static func encode(_ text: String, partsOf limit: Int) -> [String]? {
+    /// still undo another's blocks, whichever part those are in. The hiding
+    /// rules follow in parts of their own: in the blocks' list, the exemption
+    /// for the page itself would undo them for the whole page. `dangerous`:
+    /// lists of dangerous sites, which stop the page itself too.
+    static func encode(_ text: String, partsOf limit: Int, dangerous: Bool = false) -> [String]? {
         var blocks: [[String: Any]] = []
         var exceptions: [[String: Any]] = []
+        var hidings: [Hiding] = []
+        // Pages where nothing is hidden (`$elemhide`, `$document`).
+        var unhidden: [[String: Any]] = []
         let lines = (text + "\n" + botChecks).split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
         // badfilter disables the matching filter, even when its options are reordered.
@@ -504,27 +540,160 @@ nonisolated enum ContentRules {
         let disabled = Set(lines.filter { parts($0).1.contains("badfilter") }.map(key))
         var seen = Set<String>()
         for line in lines {
-            guard seen.insert(line).inserted, !disabled.contains(key(line)),
-                  let (rule, exception) = rule(line) else { continue }
-            if exception { exceptions.append(rule) } else { blocks.append(rule) }
+            guard seen.insert(line).inserted, !disabled.contains(key(line)) else { continue }
+            if let page = unhiding(line) { unhidden.append(page) }
+            if let (rule, exception) = rule(line, dangerous: dangerous) {
+                if exception { exceptions.append(rule) } else { blocks.append(rule) }
+            } else if let hiding = hiding(line) {
+                hidings.append(hiding)
+            }
         }
         // These final rules protect typed addresses, links, redirects and popups,
         // including filters mixing subdocument with other resource types.
-        exceptions.append(contentsOf: [
-            ["trigger": ["url-filter": ".*", "resource-type": ["document"], "load-context": ["top-frame"]],
-             "action": ["type": "ignore-previous-rules"]],
-            ["trigger": ["url-filter": ".*", "resource-type": ["popup"]],
-             "action": ["type": "ignore-previous-rules"]],
-        ])
-        let size = limit - exceptions.count
-        guard size > 0 else { return nil }
-        var encoded: [String] = []
-        for start in stride(from: 0, to: max(blocks.count, 1), by: size) {
-            guard let data = try? JSONSerialization.data(withJSONObject: Array(blocks[start..<min(start + size, blocks.count)]) + exceptions)
-            else { return nil }
-            encoded.append(String(decoding: data, as: UTF8.self))
+        if !dangerous {
+            exceptions.append(contentsOf: [
+                ["trigger": ["url-filter": ".*", "resource-type": ["document"], "load-context": ["top-frame"]],
+                 "action": ["type": "ignore-previous-rules"]],
+                ["trigger": ["url-filter": ".*", "resource-type": ["popup"]],
+                 "action": ["type": "ignore-previous-rules"]],
+            ])
         }
-        return encoded
+        func parted(_ rules: [[String: Any]], then exceptions: [[String: Any]]) -> [String]? {
+            let size = limit - exceptions.count
+            guard size > 0 else { return nil }
+            var encoded: [String] = []
+            for start in stride(from: 0, to: max(rules.count, 1), by: size) {
+                guard let data = try? JSONSerialization.data(withJSONObject: Array(rules[start..<min(start + size, rules.count)]) + exceptions)
+                else { return nil }
+                encoded.append(String(decoding: data, as: UTF8.self))
+            }
+            return encoded
+        }
+        let hidden = hide(hidings)
+        guard let encoded = parted(blocks, then: exceptions) else { return nil }
+        guard !hidden.isEmpty else { return encoded }
+        return parted(hidden, then: unhidden).map { encoded + $0 }
+    }
+
+    /// An element-hiding filter (`sites##selector`), or its exception (`#@#`).
+    /// Sites are as WebKit's conditions name them, `*` for their subdomains.
+    nonisolated struct Hiding: Equatable {
+        var selector: String
+        var sites: [String] = []
+        var unless: [String] = []
+        var exception = false
+    }
+
+    /// The filters as rules hiding what they select, less what their
+    /// exceptions show again. One rule each: WebKit skips a rule with a
+    /// selector its CSS can't read, and itself joins those it can that apply
+    /// everywhere, so one bad selector can't take others with it.
+    static func hide(_ hidings: [Hiding]) -> [[String: Any]] {
+        var shownEverywhere = Set<String>()
+        var shownOn: [String: [String]] = [:]
+        for hiding in hidings where hiding.exception {
+            // Shown everywhere, or everywhere but some sites: never hidden, rather than against a list's word.
+            if hiding.sites.isEmpty || !hiding.unless.isEmpty { shownEverywhere.insert(hiding.selector) }
+            else { shownOn[hiding.selector, default: []] += hiding.sites }
+        }
+        return hidings.compactMap { hiding in
+            guard !hiding.exception, !shownEverywhere.contains(hiding.selector) else { return nil }
+            let shown = shownOn[hiding.selector] ?? []
+            var trigger: [String: Any] = ["url-filter": ".*"]
+            if !hiding.sites.isEmpty {
+                // WebKit takes sites or exceptions, not both: left out where it is shown on some.
+                guard shown.isEmpty else { return nil }
+                trigger["if-domain"] = hiding.sites
+            } else if !(hiding.unless + shown).isEmpty {
+                trigger["unless-domain"] = hiding.unless + shown
+            }
+            return ["trigger": trigger, "action": ["type": "css-display-none", "selector": hiding.selector]]
+        }
+    }
+
+    /// One line as an element-hiding filter; nil for any other line, and for
+    /// a selector that only uBlock or AdGuard read (`#?#`, `#$#`, `+js`, `:has-text`…).
+    static func hiding(_ line: String) -> Hiding? {
+        guard let mark = line.firstIndex(of: "#") else { return nil }
+        let rest = line[mark...]
+        let exception = rest.hasPrefix("#@#")
+        guard exception || rest.hasPrefix("##") else { return nil }
+        var hiding = Hiding(selector: rest.dropFirst(exception ? 3 : 2).trimmingCharacters(in: .whitespaces), exception: exception)
+        guard plain(hiding.selector) else { return nil }
+        for site in line[..<mark].split(separator: ",") {
+            let negated = site.hasPrefix("~")
+            let host = site.dropFirst(negated ? 1 : 0).trimmingCharacters(in: .whitespaces).lowercased()
+            guard validDomain(host) else { return nil }
+            if negated { hiding.unless.append("*" + host) } else { hiding.sites.append("*" + host) }
+        }
+        // WebKit cannot mix sites and exceptions: left out rather than hidden where the list says not to.
+        guard exception || hiding.sites.isEmpty || hiding.unless.isEmpty else { return nil }
+        return hiding
+    }
+
+    /// uBlock's and AdGuard's own pseudo-classes, which no browser's CSS reads.
+    private static let procedural = [
+        ":-abp-", ":has-text(", ":contains(", ":matches-", ":style(", ":xpath(", ":upward(", ":remove",
+        ":min-text-length(", ":watch-attr(", ":others(", ":if(", ":if-not(", ":nth-ancestor(", ":properties(",
+    ]
+
+    /// A selector for WebKit's CSS as it is, closed (quotes, brackets, escapes)
+    /// so that, joined with others by commas, it can't swallow the next.
+    private static func plain(_ selector: String) -> Bool {
+        guard let first = selector.first, first != "+", first != "^", !selector.contains("/*"),
+              !procedural.contains(where: selector.contains) else { return false }
+        var open: [Character] = []
+        var quote: Character?
+        var escaped = false
+        for character in selector {
+            if escaped {
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else if let mark = quote {
+                if character == mark { quote = nil }
+            } else if character == "\"" || character == "'" {
+                quote = character
+            } else if character == "(" || character == "[" {
+                open.append(character)
+            } else if character == ")" {
+                guard open.popLast() == "(" else { return false }
+            } else if character == "]" {
+                guard open.popLast() == "[" else { return false }
+            }
+        }
+        return open.isEmpty && quote == nil && !escaped
+    }
+
+    /// `@@…$elemhide` or `$document`, and `$generichide` too: a page where
+    /// nothing is hidden, rather than guess what of it breaks the page.
+    static func unhiding(_ line: String) -> [String: Any]? {
+        guard line.hasPrefix("@@") else { return nil }
+        let (pattern, options) = parts(String(line.dropFirst(2)))
+        guard !pattern.isEmpty, pattern != "||", pattern != "|", !options.isEmpty,
+              options.allSatisfy(["document", "doc", "elemhide", "ehide", "generichide", "ghide"].contains),
+              !(pattern.count > 1 && pattern.hasPrefix("/") && pattern.hasSuffix("/")),
+              let filter = urlFilter(pattern) else { return nil }
+        return ["trigger": ["url-filter": ".*", "if-top-url": [filter]], "action": ["type": "ignore-previous-rules"]]
+    }
+
+    /// Whether a list of dangerous sites stops `url`: only lines naming its
+    /// host or a parent of it are made rules, and tried as WebKit would.
+    static func dangerous(_ text: String, blocks url: URL) -> Bool {
+        guard var address = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let host = address.host?.lowercased() else { return false }
+        // As WebKit serializes a page's address, with its slash.
+        if address.path.isEmpty { address.path = "/" }
+        let page = address.string ?? url.absoluteString
+        let labels = host.split(separator: ".")
+        let names = (0..<max(labels.count - 1, 1)).map { labels[$0...].joined(separator: ".") }
+        return text.split(whereSeparator: \.isNewline).contains { line in
+            guard names.contains(where: line.lowercased().contains),
+                  let (rule, exception) = rule(String(line), dangerous: true), !exception,
+                  let filter = (rule["trigger"] as? [String: Any])?["url-filter"] as? String,
+                  let regex = try? NSRegularExpression(pattern: filter, options: .caseInsensitive) else { return false }
+            return regex.firstMatch(in: page, range: NSRange(page.startIndex..., in: page)) != nil
+        }
     }
 
     /// Every kind of load WebKit tells apart.
@@ -541,8 +710,9 @@ nonisolated enum ContentRules {
     ]
 
     /// One filter line as a rule, and whether it is an exception; nil for a
-    /// line that isn't a rule, or one that can't be kept.
-    static func rule(_ line: String) -> ([String: Any], Bool)? {
+    /// line that isn't a rule, or one that can't be kept. `dangerous`: a line
+    /// of a list of dangerous sites, which blocks for the sites' own pages too.
+    static func rule(_ line: String, dangerous: Bool = false) -> ([String: Any], Bool)? {
         var line = line.trimmingCharacters(in: .whitespaces)
         // A hosts file's line, an address and a name to send there: the name blocked.
         let fields = line.prefix { $0 != "#" }.split(whereSeparator: \.isWhitespace)
@@ -551,6 +721,8 @@ nonisolated enum ContentRules {
             guard host.contains("."), validDomain(host) else { return nil }
             line = "||" + host + "^"
         }
+        // The Phishing URL Blocklist names a site by itself: the whole site.
+        if dangerous, line.contains("."), validDomain(line.lowercased()) { line = "||" + line.lowercased() + "^" }
         guard !line.isEmpty, !line.hasPrefix("!"), !line.hasPrefix("["), !line.hasPrefix("#"),
               !["##", "#@", "#?", "#$", "#%"].contains(where: line.contains) else { return nil }
         let exception = line.hasPrefix("@@")
@@ -583,15 +755,16 @@ nonisolated enum ContentRules {
             case "third-party", "3p": trigger["load-type"] = [negated ? "first-party" : "third-party"]
             case "first-party", "1p": trigger["load-type"] = [negated ? "third-party" : "first-party"]
             case "match-case": trigger["url-filter-is-case-sensitive"] = !negated
-            // Every kind of load: as with no kind named, pages themselves being let through anyway.
+            // Every kind of load: as with no kind named.
             case "all": continue
             // WebKit cannot preserve important's priority over exceptions.
             case "important": return nil
-            // An exception for a whole site: nothing blocked on its pages.
-            // (Blocking whole pages is left to the pages' own warnings.)
+            // An exception for a whole site: nothing blocked on its pages. A
+            // dangerous site's own page, blocked (uBlock's strict blocking);
+            // an ad list's whole-page blocks are left to the pages' own warnings.
             case "document", "doc":
-                guard exception, !negated else { return nil }
-                wholePage = true
+                guard !negated else { return nil }
+                if exception { wholePage = true } else if dangerous { included.insert("document") } else { return nil }
             default:
                 guard let type = types[name] else { return nil }
                 // WebKit's "other" includes ping. Never widen an explicit block.
@@ -609,8 +782,9 @@ nonisolated enum ContentRules {
             unlessDomains = []
         }
         // Keep generic filters away from first-party application endpoints,
-        // including LinkedIn's /sensorCollect/. Site-scoped filters keep their scope.
-        if !exception, ifDomains.isEmpty, trigger["load-type"] == nil { trigger["load-type"] = ["third-party"] }
+        // including LinkedIn's /sensorCollect/. Site-scoped filters keep their
+        // scope, and dangerous sites are blocked for their own pages too.
+        if !exception, !dangerous, ifDomains.isEmpty, trigger["load-type"] == nil { trigger["load-type"] = ["third-party"] }
         if !ifDomains.isEmpty { trigger["if-domain"] = ifDomains }
         if !unlessDomains.isEmpty { trigger["unless-domain"] = unlessDomains }
 
@@ -628,8 +802,8 @@ nonisolated enum ContentRules {
             let kinds = (included.isEmpty ? allTypes : included).subtracting(excluded)
             guard !kinds.isEmpty else { return nil }
             trigger["resource-type"] = kinds.sorted()
-            // Frames only, not the page itself.
-            if kinds == ["document"] { trigger["load-context"] = ["child-frame"] }
+            // Frames only, not the page itself, but for a dangerous site.
+            if kinds == ["document"], !dangerous { trigger["load-context"] = ["child-frame"] }
         }
         return (["trigger": trigger, "action": ["type": exception ? "ignore-previous-rules" : "block"]], exception)
     }
