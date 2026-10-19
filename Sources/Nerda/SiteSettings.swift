@@ -321,7 +321,9 @@ extension Browser {
     /// screen, as Chrome's: Allow and Block are kept for the site; put away
     /// unanswered, the page is told no this time. One question at a time.
     func askPermission(_ kinds: [SiteSettings.Kind], on page: WKWebView) async -> WKPermissionDecision {
-        guard !kinds.isEmpty, let site = page.url else { return .grant }
+        guard !kinds.isEmpty else { return .grant }
+        // No address to keep an answer for (an opaque or file origin): no.
+        guard let site = page.url else { return .deny }
         var tab: Tab?
         while true {
             guard await window(showing: page) != nil, let found = self.tab(for: page),
