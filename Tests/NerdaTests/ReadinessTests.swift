@@ -41,6 +41,13 @@ private final class ReadinessServer {
                     var headers = "Content-Type: text/html\r\nAccess-Control-Allow-Origin: *\r\n"
                     var body = Data("<input id='draft'><iframe src='/frame'></iframe>".utf8)
                     if path == "/frame" { body = Data("<input id='user' autocomplete='username'><input id='password' type='password'>".utf8) }
+                    // A chat app: sending ('!') empties its box; closing its composer removes it.
+                    if path == "/chat" { body = Data("""
+                        <textarea id='box'></textarea><div id='composer' contenteditable></div><script>
+                        box.oninput = () => { if (box.value.endsWith('!')) setTimeout(() => box.value = '') };
+                        composer.oninput = () => { if (composer.innerText.includes('!')) setTimeout(() => composer.remove()) };
+                        </script>
+                        """.utf8) }
                     // A frame that downloads by itself, from this site or another (localhost is another to 127.0.0.1).
                     if path == "/ad" { body = Data("<script>location = '/file'</script>".utf8) }
                     if path == "/same" { body = Data("<iframe src='/ad'></iframe>".utf8) }
@@ -163,6 +170,12 @@ struct ReadinessTests {
                      frame.getElementById('user').focus(); frame.execCommand('insertText', false, 'x'); })()
             """)
         try await waitFor { tab.hasUnsavedWork }
+        // A draft in the page said gone doesn't clear the frame's.
+        _ = try await tab.webView.evaluateJavaScript("document.getElementById('draft').focus(); document.execCommand('insertText', false, 'x')")
+        try await waitFor { tab.mainFrameHasDraft }
+        _ = try await tab.webView.evaluateJavaScript("document.getElementById('draft').value = ''; document.dispatchEvent(new Event('visibilitychange'))")
+        try await waitFor { !tab.mainFrameHasDraft }
+        #expect(tab.hasUnsavedWork)
         #expect(await tab.isBusy())
         browser.newTab()
         tab.sleep()
@@ -431,6 +444,38 @@ struct ReadinessTests {
 
         browser.open(try await server.url("/same"))
         try await waitFor { browser.downloads.first?.state == .finished }
+    }
+
+    @Test func draftsClearOnceThePageNoLongerHoldsThem() async throws {
+        let server = try ReadinessServer()
+        defer { server.listener.cancel() }
+        let browser = Browser(dataStore: .nonPersistent())
+        defer { browser.closeAll() }
+        let tab = browser.open(try await server.url("/chat"))
+        try await waitFor { !tab.webView.isLoading && tab.url != nil }
+        func type(_ text: String, into id: String) async throws {
+            _ = try await tab.webView.evaluateJavaScript("document.getElementById('\(id)').focus(); document.execCommand('insertText', false, '\(text)')")
+        }
+        try await type("hi", into: "box")
+        try await waitFor { tab.hasUnsavedWork }
+        // Sent: the app empties its box, and the tab may sleep and close quietly again.
+        try await type("!", into: "box")
+        try await waitFor { !tab.hasUnsavedWork }
+
+        try await type("draft", into: "box")
+        try await waitFor { tab.hasUnsavedWork }
+        _ = try await tab.webView.evaluateJavaScript("history.pushState(null, '', '/chat/other'); document.dispatchEvent(new Event('visibilitychange'))")
+        try await Task.sleep(for: .milliseconds(700))
+        #expect(tab.hasUnsavedWork)
+
+        _ = try await tab.webView.evaluateJavaScript("document.getElementById('box').value = ''; document.dispatchEvent(new Event('visibilitychange'))")
+        try await waitFor { !tab.hasUnsavedWork }
+        try await type("note", into: "composer")
+        try await waitFor { tab.hasUnsavedWork }
+        // Closed: the composer leaves the page, and its text with it.
+        try await type("!", into: "composer")
+        try await waitFor { !tab.hasUnsavedWork }
+        #expect(try await tab.webView.evaluateJavaScript("document.getElementById('composer') === null") as? Bool == true)
     }
 
     @Test func sameDocumentNavigationKeepsDrafts() {

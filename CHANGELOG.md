@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Tabs of chat and mail sites such as Gmail, Slack and Telegram go to sleep and close without asking about unsaved changes once your message is sent. Before, one typed message kept them awake and asking until the page was reloaded.
+
 ## [0.0.25] - 2026-10-14
 
 ### Fixed
