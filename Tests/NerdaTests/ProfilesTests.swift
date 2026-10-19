@@ -29,6 +29,7 @@ private func folder() -> URL {
     #expect(main.siteSettings === SiteSettings.shared)
     #expect(main.vault === Vault.shared)
     #expect(main.passwordsService == "\(Edition.name) Passwords")
+    #expect(main.cardsService == "\(Edition.name) Cards")
     #expect(main.dataStore === WKWebsiteDataStore.default())
     #expect(Browser().profile === main)
     // No file until one is made: Personal alone.
@@ -90,6 +91,31 @@ private func folder() -> URL {
     await all.remove(home)
 }
 
+/// Each profile's addresses and cards are its own: Personal reads the file
+/// where they always were, another keeps its own beside its history, and
+/// card numbers go to a keychain item of its own.
+@MainActor
+@Test func profilesKeepTheirAutoFillApart() async throws {
+    let root = folder()
+    defer { try? FileManager.default.removeItem(at: root) }
+    var home = Contact()
+    home.line1 = "1 Main St"
+    AutoFill(file: root.appending(path: "autofill.json"), numbers: CardNumbers(service: "unused")).save(home)
+    let all = profiles(in: root)
+    let personal = all.all[0], work = all.add(name: "Work", symbol: "briefcase", color: .orange)
+    #expect(personal.autofill.addresses == [home])
+    #expect(work.autofill.addresses.isEmpty)
+
+    var office = Contact()
+    office.line1 = "2 High St"
+    work.autofill.save(office)
+    #expect(await work.autofill.save(Card(number: "4242424242424242", month: 4, year: 2027), number: nil))
+    #expect(personal.autofill.addresses == [home] && personal.autofill.cards.isEmpty)
+    #expect(AutoFill(file: work.folder.appending(path: "autofill.json"), numbers: CardNumbers(service: "unused")).addresses == [office])
+    #expect(Set([personal.cardsService, work.cardsService, work.passwordsService]).count == 3)
+    await all.remove(work)
+}
+
 /// Deleting a profile takes its files and website data with it; Personal
 /// can't be deleted.
 @MainActor
@@ -100,6 +126,10 @@ private func folder() -> URL {
     let work = all.add(name: "Work", symbol: "briefcase", color: .orange)
     work.history.visit(page, title: "Example")
     work.history.save()
+    var address = Contact()
+    address.line1 = "2 High St"
+    work.autofill.save(address)
+    #expect(FileManager.default.fileExists(atPath: work.folder.appending(path: "autofill.json").path()))
     let cookie = HTTPCookie(properties: [.domain: "example.com", .path: "/", .name: "signed", .value: "in",
                                          .expires: Date.now.addingTimeInterval(3600)])!
     await work.dataStore.httpCookieStore.setCookie(cookie)
@@ -121,6 +151,8 @@ private func folder() -> URL {
     options.allowsPopups = true
     work.siteSettings.set(options, for: page)
     #expect(await !work.vault.save([(Account(host: "example.com", user: "me"), "secret")]))
+    work.autofill.save(address)
+    #expect(await !work.autofill.save(Card(number: "4242424242424242", month: 4, year: 2027), number: "4242424242424242"))
     Bookmarks.writer.sync {}
     #expect(!FileManager.default.fileExists(atPath: work.folder.path()))
 

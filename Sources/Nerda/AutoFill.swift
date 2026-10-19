@@ -233,6 +233,8 @@ actor CardNumbers {
     private var numbers: [String: String]?
     /// Asked this run, and told no: not asked again until the next.
     private var refused = false
+    /// Its profile is being deleted: the keychain is not written again.
+    private var closed = false
 
     init(service: String) {
         self.service = service
@@ -240,6 +242,10 @@ actor CardNumbers {
 
     private var item: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service]
+    }
+
+    func close() {
+        closed = true
     }
 
     private func load() -> [String: String]? {
@@ -268,7 +274,7 @@ actor CardNumbers {
     /// at once each keep theirs. All or none, and a store that couldn't be
     /// read is never written over.
     func set(_ number: String?, for card: UUID) -> Bool {
-        guard var all = load() else { return false }
+        guard !closed, var all = load() else { return false }
         all[card.uuidString] = number
         guard let data = try? JSONEncoder().encode(all) else { return false }
         var status = SecItemUpdate(item as CFDictionary, [kSecValueData as String: data] as CFDictionary)
@@ -286,12 +292,9 @@ actor CardNumbers {
 
 /// The addresses and cards kept, without the card numbers, in a file beside
 /// the passwords' names: listing them under a box, or in Settings › AutoFill,
-/// never touches the keychain.
+/// never touches the keychain. Each profile has its own (`Profile.autofill`).
 @Observable
 final class AutoFill {
-    static let shared = AutoFill(file: Edition.folder.appending(path: "autofill.json"),
-                                 numbers: CardNumbers(service: "\(Edition.name) Cards"))
-
     nonisolated struct Saved: Codable {
         var addresses: [Contact] = []
         var cards: [Card] = []
@@ -299,7 +302,8 @@ final class AutoFill {
 
     private(set) var addresses: [Contact] = []
     private(set) var cards: [Card] = []
-    @ObservationIgnored private let file: URL
+    /// Nil once its profile is being deleted: nothing is written again.
+    @ObservationIgnored private var file: URL?
     @ObservationIgnored private let numbers: CardNumbers
 
     init(file: URL, numbers: CardNumbers) {
@@ -313,6 +317,11 @@ final class AutoFill {
         }
         addresses = saved.addresses
         cards = saved.cards
+    }
+
+    func close() async {
+        file = nil
+        await numbers.close()
     }
 
     /// Whether addresses and cards are listed under a form's boxes, and
@@ -358,6 +367,7 @@ final class AutoFill {
     }
 
     private func write() {
+        guard let file else { return }
         do {
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(Saved(addresses: addresses, cards: cards)).write(to: file, options: .atomic)
@@ -449,7 +459,7 @@ extension Browser {
     /// next page loads, never in an incognito window.
     func page(_ page: WKWebView, sentForm body: [String: Any], on tab: Tab, clear: Bool, frame: WKFrameInfo?) {
         guard !isPrivate, Self.isPagesOwn(frame, on: tab) else { return }
-        let autofill = AutoFill.shared
+        let autofill = profile.autofill
         var sent = SentForm()
         if AutoFill.fillsAddresses, let address = (body["address"] as? [String: String]).flatMap(Contact.init(form:)),
            !autofill.addresses.contains(where: { $0.isSame(as: address) }) {
@@ -480,10 +490,10 @@ extension Browser {
         dropAutoFill(offer)
         switch offer.item {
         case .address(let address):
-            AutoFill.shared.save(address)
+            profile.autofill.save(address)
         case .card(let card, let number):
             Task {
-                if await !AutoFill.shared.save(card, number: number) {
+                if await !profile.autofill.save(card, number: number) {
                     Self.tell("Couldn't save the card", "The keychain didn't take it.")
                 }
             }
@@ -506,7 +516,7 @@ extension Browser {
         guard let (choices, page) = takeChoice() else { return }
         Task {
             guard await AutoFill.ownerConfirms("fill in your card details") else { return }
-            guard let number = await AutoFill.shared.number(for: card) else {
+            guard let number = await profile.autofill.number(for: card) else {
                 return Self.tell("Couldn't fill in the card", "The keychain didn't hand over its number.")
             }
             await fillForm("card", card.values(number: number), choices: choices, on: page)

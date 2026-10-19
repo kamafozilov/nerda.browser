@@ -4,12 +4,13 @@ import WebKit
 
 /// Browsing of its own on this Mac, as Safari's profiles: work kept apart from
 /// personal, each with its own cookies and site data, history, bookmarks, open
-/// tabs, site settings and saved passwords, and its own window. Personal, the
-/// first, keeps what Nerda kept before there were profiles, where it always
-/// was: the data folder, the default data store, the `Nerda Passwords`
-/// keychain item. Each other one has a folder of its own (`Profiles/<id>`),
-/// a data store of its own (`WKWebsiteDataStore(forIdentifier:)`) and a
-/// keychain item of its own, read only once its window opens.
+/// tabs, site settings, saved passwords, addresses and cards, and its own
+/// window. Personal, the first, keeps what Nerda kept before there were
+/// profiles, where it always was: the data folder, the default data store,
+/// the `Nerda Passwords` and `Nerda Cards` keychain items. Each other one has
+/// a folder of its own (`Profiles/<id>`), a data store of its own
+/// (`WKWebsiteDataStore(forIdentifier:)`) and keychain items of its own, read
+/// only once its window opens.
 @Observable
 final class Profile: Identifiable {
     nonisolated static let mainID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
@@ -58,6 +59,8 @@ final class Profile: Identifiable {
 
     /// The keychain item its passwords are kept in.
     var passwordsService: String { isMain ? "\(Edition.name) Passwords" : "\(Edition.name) Passwords \(id.uuidString)" }
+    /// And its card numbers.
+    var cardsService: String { isMain ? "\(Edition.name) Cards" : "\(Edition.name) Cards \(id.uuidString)" }
 
     // Each read the first time it is wanted: as its window opens.
     @ObservationIgnored private(set) lazy var history: History = {
@@ -76,9 +79,11 @@ final class Profile: Identifiable {
         : SiteSettings(defaults: nil, file: folder.appending(path: "site-settings.json"))
     @ObservationIgnored private(set) lazy var vault = isMain ? Vault.shared
         : Vault(service: passwordsService, names: folder.appending(path: "accounts.json"))
+    @ObservationIgnored private(set) lazy var autofill = AutoFill(file: folder.appending(path: "autofill.json"),
+                                                                  numbers: CardNumbers(service: cardsService))
 
-    /// Everything it kept, gone from this Mac: its files, its passwords, and
-    /// its cookies and site data. Its window is closed first (`Windows.forget`).
+    /// Everything it kept, gone from this Mac: its files, its passwords and
+    /// cards, and its cookies and site data. Its window is closed first (`Windows.forget`).
     func erase() async {
         guard !isMain else { return }
         // Nothing is written to the folder again, as an import finishing
@@ -87,9 +92,12 @@ final class Profile: Identifiable {
         bookmarks.close()
         siteSettings.close()
         await vault.close()
+        await autofill.close()
         Session.writer.sync {}
         try? FileManager.default.removeItem(at: folder)
-        SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: passwordsService] as CFDictionary)
+        for service in [passwordsService, cardsService] {
+            SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service] as CFDictionary)
+        }
         store = nil
         // Noted before trying, so that quitting meanwhile still leaves it for the next launch.
         Profiles.storesLeft.insert(id)
