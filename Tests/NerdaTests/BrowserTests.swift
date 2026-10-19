@@ -499,7 +499,8 @@ private let somewhere = URL(string: "https://example.com")!
     let opens = "<script>window.open('https://example.com/popup')</script>"
     tab.webView.loadHTMLString(opens, baseURL: somewhere)
     while tab.webView.isLoading { try await Task.sleep(for: .milliseconds(20)) }
-    try await Task.sleep(for: .milliseconds(200))
+    // A cold page process can take longer than any fixed wait to run the script.
+    for _ in 0..<100 where tab.blockedPopups.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
     #expect(browser.tabs.count == 1)
     #expect(tab.blockedPopups == [URL(string: "https://example.com/popup")!])
 
@@ -519,7 +520,7 @@ private let somewhere = URL(string: "https://example.com")!
     browser.siteSettings.set(options, for: somewhere)
     tab.webView.loadHTMLString(opens, baseURL: somewhere)
     while tab.webView.isLoading { try await Task.sleep(for: .milliseconds(20)) }
-    try await Task.sleep(for: .milliseconds(200))
+    for _ in 0..<100 where browser.tabs.count < 4 { try await Task.sleep(for: .milliseconds(20)) }
     #expect(browser.tabs.count == 4)
 }
 
