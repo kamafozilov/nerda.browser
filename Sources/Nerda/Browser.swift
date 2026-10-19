@@ -424,7 +424,9 @@ final class Browser: NSObject {
         guard !isPrivate, let index = id.flatMap({ wanted in recentlyClosed.firstIndex { $0.id == wanted } })
             ?? (id == nil ? recentlyClosed.indices.last : nil) else { return }
         let closed = recentlyClosed.remove(at: index)
-        if let bookmark = closed.tab.bookmark, let existing = tab(of: bookmark) {
+        if let window = closed.window {
+            Windows.reopen(window, of: profile)
+        } else if let bookmark = closed.tab.bookmark, let existing = tab(of: bookmark) {
             select(existing.id)
         } else {
             let tab = Tab(restoring: closed.tab)
