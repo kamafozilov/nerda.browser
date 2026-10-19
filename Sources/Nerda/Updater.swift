@@ -390,7 +390,7 @@ nonisolated private enum Swap {
         guard let fresh = try files.contentsOfDirectory(at: unpacked, includingPropertiesForKeys: nil)
             .first(where: { $0.pathExtension == "app" })
         else { throw Refused.archive }
-        try verify(fresh, team: team)
+        try verify(fresh, team: team, online: true)
         try? files.removeItem(at: zip)
         passed = true
         return fresh
@@ -402,7 +402,8 @@ nonisolated private enum Swap {
     static func place(_ fresh: URL) throws {
         defer { try? FileManager.default.removeItem(at: fresh.deletingLastPathComponent().deletingLastPathComponent()) }
         guard let team = teamID(of: target) else { throw Refused.unsigned }
-        try verify(fresh, team: team)
+        // Offline here: it runs as Nerda quits, and a revocation check could hold that up.
+        try verify(fresh, team: team, online: false)
         try swap(fresh)
     }
 
@@ -453,7 +454,7 @@ nonisolated private enum Swap {
     /// Trusted not for having arrived but for being this app, newer, with a
     /// signature that holds up under the strict check, everything inside it
     /// included, from a Developer ID certificate Apple gave the same team.
-    private static func verify(_ bundle: URL, team: String) throws {
+    private static func verify(_ bundle: URL, team: String, online: Bool) throws {
         guard let info = NSDictionary(contentsOf: bundle.appending(path: "Contents/Info.plist")),
               let identifier = Bundle.main.bundleIdentifier, info["CFBundleIdentifier"] as? String == identifier
         else { throw Refused.wrongApp }
@@ -461,7 +462,10 @@ nonisolated private enum Swap {
             throw Refused.notNewer
         }
         var code: SecStaticCode?
-        let strict = SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures | kSecCSCheckNestedCode)
+        // Online, revocation too: a certificate Apple has since withdrawn is no
+        // longer the team's. Offline, no network at all, so quitting can't wait on it.
+        var strict = SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures | kSecCSCheckNestedCode)
+        strict.insert(online ? .enforceRevocationChecks : .noNetworkAccess)
         guard SecStaticCodeCreateWithPath(bundle as CFURL, [], &code) == errSecSuccess, let code,
               let requirement = Updater.developerID(team: team, identifier: identifier),
               SecStaticCodeCheckValidity(code, strict, requirement) == errSecSuccess
