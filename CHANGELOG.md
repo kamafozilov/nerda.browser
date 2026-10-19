@@ -22,6 +22,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - A site on a list of dangerous sites (Phishing URL Blocklist, Online Malicious URL Blocklist, uBlock filters – Badware risks, CERT.PL's Warning List) no longer opens: the tab says which list it is on, and how to open it anyway from Site Settings. Before, these lists only blocked what such a page loaded.
 - Search suggestions and site icons are fetched without cookies, so what you type in the address bar, incognito windows' included, is no longer sent with your search engine's cookies.
+- An update is refused if Apple has revoked the certificate it was signed with.
 
 ## [0.0.25] - 2026-10-14
 
