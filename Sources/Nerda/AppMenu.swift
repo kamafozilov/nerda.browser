@@ -663,7 +663,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Every profile's window: their tabs and history.
     func save(waiting: Bool = true) {
         for browser in Windows.browsers {
-            browser.saveSession()
+            browser.saveSession(waiting: waiting)
             browser.profile.history.save(waiting: waiting)
         }
         // Written as they change: only what is on its way is waited for.

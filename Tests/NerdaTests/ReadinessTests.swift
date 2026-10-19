@@ -139,6 +139,17 @@ struct ReadinessTests {
         let restored = Browser()
         restored.restore(from: file, loadingPins: false)
         #expect(restored.recentlyClosed.count == 25)
+        #expect(restored.recentlyClosed.last?.tab.state == saved.state)
+
+        // A session from before closed tabs had a file of their own keeps them across its first save.
+        let old = file.deletingLastPathComponent().appending(path: "old.json")
+        try JSONEncoder().encode(normal.session).write(to: old)
+        let upgraded = Browser()
+        upgraded.restore(from: old, loadingPins: false)
+        upgraded.saveSession()
+        let again = Browser()
+        again.restore(from: old, loadingPins: false)
+        #expect(again.recentlyClosed == normal.recentlyClosed)
     }
 
     /// A page opens at its site's zoom, a new tab's included.
