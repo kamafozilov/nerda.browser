@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.26] - 2026-10-19
+
 ### Changed
 
 - Cookie notices, annoyances and ads that your filter lists hide in a page are now hidden, where before only the requests they block were stopped. The lists under Annoyances in Settings › Security & Privacy now do what they say.
@@ -419,7 +421,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.25...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.26...HEAD
+[0.0.26]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.25...v0.0.26
 [0.0.25]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.24...v0.0.25
 [0.0.24]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.23...v0.0.24
 [0.0.23]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.22...v0.0.23
