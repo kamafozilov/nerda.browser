@@ -203,7 +203,14 @@ final class Tab: Identifiable {
     var translating = false {
         didSet { if oldValue, !translating, reader != nil { Task { await refreshReader() } } }
     }
-    var hasUnsavedWork = false
+    /// The main frame's own answer, re-asked as its fields change (`PageActivity`);
+    /// a subframe's edit or a dropped file stays until a new document.
+    var mainFrameHasDraft = false
+    var subframeWasEdited = false
+    var hasUnsavedWork: Bool {
+        get { mainFrameHasDraft || subframeWasEdited }
+        set { mainFrameHasDraft = newValue; subframeWasEdited = newValue }
+    }
     @ObservationIgnored var departureApproved = false
     /// The page reads as an article: the address bar offers Reader (see Reader).
     var readable = false
