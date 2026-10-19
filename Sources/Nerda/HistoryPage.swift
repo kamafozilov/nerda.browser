@@ -99,7 +99,8 @@ struct HistoryPage: View {
         // Found in History's index, as the address bar's are: latest first,
         // with titles and addresses already folded to look through.
         searched = query
-        let found = browser.history.pages(containing: [query.trimmingCharacters(in: .whitespaces)])
+        // Each word anywhere, in any order, as the address bar finds them.
+        let found = browser.history.pages(containing: query.split(whereSeparator: \.isWhitespace).map(String.init))
         lines = Self.lines(of: Self.days(of: found))
         hasPages = !browser.history.visits.isEmpty
     }
