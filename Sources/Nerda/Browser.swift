@@ -212,7 +212,8 @@ final class Browser: NSObject {
         memoryPressure?.setEventHandler { [weak self] in
             MainActor.assumeIsolated {
                 let critical = self?.memoryPressure?.data.contains(.critical) == true
-                self?.sleepIdleTabs(unseenFor: 0, pinsToo: critical)
+                // No picture for the hover card: it takes memory there is none of.
+                self?.sleepIdleTabs(unseenFor: 0, pinsToo: critical, picturing: false)
             }
         }
         memoryPressure?.activate()
@@ -228,14 +229,14 @@ final class Browser: NSObject {
     /// Tabs out of sight at least this long, and not busy (playing, on a call),
     /// sleep; of those, only the ones taking more than `size`, if given.
     /// Pinned ones only with `pinsToo`: being always ready is what they are for.
-    func sleepIdleTabs(unseenFor age: TimeInterval, pinsToo: Bool = false, over size: UInt64 = 0) {
+    func sleepIdleTabs(unseenFor age: TimeInterval, pinsToo: Bool = false, over size: UInt64 = 0, picturing: Bool = true) {
         let cutoff = Date.now.addingTimeInterval(-age)
         for tab in tabs where tab.id != selectedID && (pinsToo || !tab.isPinned) && !tab.isAsleep
             && tab.lastSeen <= cutoff && (size == 0 || (tab.memory ?? 0) > size) {
             Task {
                 // Asked of the page, so it may have come on screen in the meantime.
                 guard await !tab.isBusy(), tab.id != selectedID else { return }
-                let look = await tab.snapshot()
+                let look = picturing ? await tab.snapshot() : nil
                 if tab.id != selectedID, !tab.hasUnsavedWork { tab.sleep(keeping: look) }
             }
         }

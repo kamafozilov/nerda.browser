@@ -16,8 +16,9 @@ final class History {
     /// How quickly a visit counts for less: half as much two weeks on.
     nonisolated private static let halfLife: TimeInterval = 14 * 24 * 60 * 60
     /// How long after a change it is written: whatever else changes by then
-    /// goes in the same write, and a crash loses no more than that.
-    private static let saveDelay: Duration = .seconds(5)
+    /// goes in the same write, and a crash loses no more than that. The whole
+    /// file each time, some MB at the limit, so not much more often.
+    private static let saveDelay: Duration = .seconds(30)
     /// Visits counted at most: far more than anyone makes, and room to add,
     /// so a count from a file edited by hand can't overflow and end Nerda.
     nonisolated static let mostVisits = 1_000_000_000
@@ -36,6 +37,8 @@ final class History {
     /// Changed since it was last written: switching apps with nothing new
     /// writes nothing.
     @ObservationIgnored private var dirty = false
+    /// When the icons of sites no longer in history last went (`trim`).
+    @ObservationIgnored private var iconsForgotten = Date.distantPast
     /// What the file had, while it is read off the main thread at launch,
     /// until it is taken in (`settle`).
     @ObservationIgnored private var reading: OSAllocatedUnfairLock<Loaded?>?
@@ -553,6 +556,12 @@ final class History {
         }
         index.removeSubrange(kept...)
         built = index
+        // Icons of the sites gone go too, now and then: each save drops the
+        // few pages just past the cutoff, and this lists the icons' folder.
+        if file != nil, iconsForgotten.timeIntervalSinceNow < -24 * 60 * 60 {
+            iconsForgotten = .now
+            Favicons.shared.forgetUnvisited()
+        }
     }
 
     /// Saved a moment from now, once for whatever changes meanwhile (a page

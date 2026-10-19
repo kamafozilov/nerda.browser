@@ -203,7 +203,7 @@ enum Windows {
             home.sessionChanged()
         }
         browser.closeAll()
-        if let file { Session.writer.async { try? FileManager.default.removeItem(at: file) } }
+        if let file { Session.writer.async { Session.remove(file) } }
         DispatchQueue.main.async {
             delegate.window.contentView = nil
             secondary.removeAll { $0 === delegate }
@@ -218,7 +218,7 @@ enum Windows {
             for name in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [] where name.hasSuffix(".json") {
                 let file = folder.appending(path: name)
                 guard let session = Session.read(from: file), !session.tabs.isEmpty else {
-                    try? FileManager.default.removeItem(at: file)
+                    Session.remove(file)
                     continue
                 }
                 let screen = session.frame.flatMap { frame in

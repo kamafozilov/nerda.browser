@@ -99,26 +99,25 @@ extension Browser {
     }
 
     /// Writes the session now, if it changed since it was last written, and
-    /// waits for it: for quitting, when there is no later.
-    func saveSession() {
-        saveSession(waiting: true)
-    }
-
+    /// with `waiting` waits for it: for quitting, when there is no later.
     /// Only reading the pages' state needs the main thread, and only those
-    /// that may have changed are read, but for quitting, when every one is.
+    /// that may have changed are read, but when waiting, when every one is.
     /// Whether anything changed is told from the tabs as they are, not from
     /// their encoding: a sleeping tab's state, the bulk of the file, is the
     /// same bytes each time, and encoding them all, every few seconds, took
     /// tens of ms with 100 tabs. What did change is encoded and written
     /// after, off the main thread.
-    func saveSession(waiting: Bool) {
+    func saveSession(waiting: Bool = true) {
         pendingSave?.cancel()
         guard let sessionFile else { return }
         let session = session(readingEveryPage: waiting)
         if session != savedSession {
+            // Recently closed tabs, with their pages' state most of the
+            // session's size, are written only when they change.
+            let closedToo = savedSession.map { $0.closed != session.closed } ?? true
             savedSession = session
             Session.writer.async { [weak self] in
-                if !Session.write(session, to: sessionFile) { Task { @MainActor in self?.savedSession = nil } }
+                if !Session.write(session, to: sessionFile, closedToo: closedToo) { Task { @MainActor in self?.savedSession = nil } }
             }
         }
         // Changed or not, what is on its way is on disk before this returns.
@@ -142,15 +141,26 @@ nonisolated extension Session {
     static let writer = DispatchQueue(label: "dev.nerda.session", qos: .utility)
 
     /// What `file` holds, or nil for no file, or one that can't be read: that
-    /// one is set aside, as it may be from a newer version.
+    /// one is set aside, as it may be from a newer version. One read whole is
+    /// copied beside it (`.previous`), the tabs as they were before this run
+    /// changed them, should a wrong state be saved over them.
     static func read(from file: URL) -> Session? {
         guard let data = try? Data(contentsOf: file) else { return nil }
-        guard let session = try? JSONDecoder().decode(Session.self, from: data) else {
+        guard var session = try? JSONDecoder().decode(Session.self, from: data) else {
             setAside(data, beside: file)
             return nil
         }
+        try? data.write(to: file.appendingPathExtension("previous"), options: .atomic)
+        // Closed tabs have a file of their own; a session saved before that has them inside.
+        if let closed = try? Data(contentsOf: closedFile(of: file)),
+           let tabs = try? JSONDecoder().decode([ClosedTab].self, from: closed) {
+            session.closed = tabs
+        }
         return session
     }
+
+    /// Beside the session's, and not `.json`, so no secondary window takes it for one.
+    static func closedFile(of file: URL) -> URL { file.appendingPathExtension("closed") }
 
     /// Starts reading `file` off the main thread, for launch to go on
     /// meanwhile; what it gives waits for the reading to end. The tabs'
@@ -177,18 +187,35 @@ nonisolated extension Session {
         for old in copies.dropLast(keeping) { try? FileManager.default.removeItem(at: folder.appending(path: old)) }
     }
 
-    /// False if it couldn't be written, to be tried again.
-    static func write(_ session: Session, to file: URL) -> Bool {
+    /// False if it couldn't be written, to be tried again. The closed tabs go
+    /// in a file of their own, written only `closedToo`.
+    static func write(_ session: Session, to file: URL, closedToo: Bool = true) -> Bool {
         // Keys in order, as ever, so the same tabs make the same file.
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
+        var open = session
+        open.closed = nil
         do {
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try encoder.encode(session).write(to: file, options: .atomic)
+            try encoder.encode(open).write(to: file, options: .atomic)
+            if closedToo {
+                if let closed = session.closed {
+                    try encoder.encode(closed).write(to: closedFile(of: file), options: .atomic)
+                } else {
+                    try? FileManager.default.removeItem(at: closedFile(of: file))
+                }
+            }
             return true
         } catch {
             NSLog("Nerda: couldn't save the session: \(error)")
             return false
+        }
+    }
+
+    /// A session's files, for a window gone for good.
+    static func remove(_ file: URL) {
+        for gone in [file, closedFile(of: file), file.appendingPathExtension("previous")] {
+            try? FileManager.default.removeItem(at: gone)
         }
     }
 }
