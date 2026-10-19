@@ -1421,7 +1421,7 @@ nonisolated enum Address {
     static func suggestions(for text: String) async -> [String] {
         // ["query", ["suggestion", …], …]
         guard SearchSuggestions.isOn, let request = SearchEngine.current.guesses(text),
-              let (data, _) = try? await URLSession.shared.data(from: request),
+              let (data, _) = try? await URLSession.cookieless.data(from: request),
               let reply = try? JSONSerialization.jsonObject(with: data) as? [Any],
               reply.count > 1, let suggestions = reply[1] as? [String]
         else { return [] }

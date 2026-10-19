@@ -86,7 +86,7 @@ final class AIChats {
         let file = folder.appending(path: host + ".png")
         var data = await Task.detached(priority: .userInitiated) { try? Data(contentsOf: file) }.value
         // One it has none for is a 404.
-        if data == nil, let (fetched, response) = try? await URLSession.shared.data(from: url),
+        if data == nil, let (fetched, response) = try? await URLSession.cookieless.data(from: url),
            (response as? HTTPURLResponse)?.statusCode == 200 {
             data = fetched
             await Task.detached(priority: .utility) {

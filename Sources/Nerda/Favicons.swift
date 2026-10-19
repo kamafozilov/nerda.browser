@@ -146,7 +146,7 @@ final class Favicons {
                 case nil: break
                 }
             }
-            let fetched = try? await (keep ? Self.session : Self.ephemeral).data(from: url)
+            let fetched = try? await URLSession.cookieless.data(from: url)
             if let (data, _) = fetched, let found = await Task.detached(priority: .userInitiated, operation: { Self.decode(data) }).value {
                 self.keep(found, for: site)
                 if keep, let file { await Self.write(found.smaller ?? data, to: file) }
@@ -188,16 +188,6 @@ final class Favicons {
             try? FileManager.default.removeItem(at: folder.appending(path: name))
         }
     }
-
-    /// Fetches without keeping a second copy in a URL cache: the icon is kept
-    /// here, and on disk, already.
-    private static let session = URLSession(configuration: {
-        let configuration = URLSessionConfiguration.default
-        configuration.urlCache = nil
-        return configuration
-    }())
-    /// Fetches without a cache or cookies on disk.
-    private static let ephemeral = URLSession(configuration: .ephemeral)
 
     /// How long a site found without an icon is left before it is asked again.
     nonisolated static let retryAfter: TimeInterval = 7 * 24 * 60 * 60
@@ -398,4 +388,17 @@ struct Favicon: View {
             new.map(store.show)
         }
     }
+}
+
+nonisolated extension URLSession {
+    /// Nerda's own fetches (site icons, search suggestions): no cookies sent
+    /// or kept, nothing cached, so they tie no request to you or to each
+    /// other, incognito windows' included. Icons are kept on disk here already.
+    static let cookieless: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.urlCache = nil
+        return URLSession(configuration: configuration)
+    }()
 }
