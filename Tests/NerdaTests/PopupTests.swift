@@ -60,3 +60,22 @@ private let somewhere = URL(string: "https://example.com")!
     for _ in 0..<100 where browser.tabs.count < 4 { try await Task.sleep(for: .milliseconds(20)) }
     #expect(browser.tabs.count == 4)
 }
+
+/// A window a page is kept from opening as it loads is still told of when
+/// WebKit tells of it before it tells that the page arrived; the windows of
+/// the page before it are not.
+@MainActor
+@Test func blockedPopupsBelongToThePageThatTriedThem() {
+    let browser = Browser(dataStore: .nonPersistent())
+    let tab = Tab()
+    browser.add(tab)
+    _ = browser.webView(tab.webView, createWebViewWith: WKWebViewConfiguration(),
+                        for: WKNavigationAction(), windowFeatures: WKWindowFeatures())
+    browser.webView(tab.webView, didCommit: nil)
+    #expect(tab.blockedPopups.count == 1)
+
+    // Let go somewhere else: the next page arriving drops this one's.
+    tab.blockedSinceDeparture = 0
+    browser.webView(tab.webView, didCommit: nil)
+    #expect(tab.blockedPopups.isEmpty)
+}

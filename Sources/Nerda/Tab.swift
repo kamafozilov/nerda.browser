@@ -222,6 +222,10 @@ final class Tab: Identifiable {
     /// would have gone (about:blank for one its script was to fill), for the
     /// address bar to say so; until the next page.
     var blockedPopups: [URL] = []
+    /// How many of those came since the tab's page was last let go
+    /// somewhere: the next page's own, when WebKit tells of them before it
+    /// tells that the page arrived.
+    @ObservationIgnored var blockedSinceDeparture = 0
 
     /// The page's own title; until it has one, the site's name, or for an
     /// address without one (file:, about:blank), the address itself.

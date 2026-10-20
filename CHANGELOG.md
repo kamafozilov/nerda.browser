@@ -7,6 +7,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- A page that tries to open a pop-up as it loads now always shows the blocked pop-up button in the address bar. Before, the button sometimes did not appear, and the pop-up could not be opened.
+
 ## [0.0.27] - 2026-10-19
 
 ### Fixed

@@ -616,6 +616,7 @@ extension Browser: WKUIDelegate {
         if ask == nil, opener?.madeFor == nil, !siteSettings.options(for: opener?.site).allowsPopups, !Self.clicked(action) {
             if let opener {
                 opener.blockedPopups = Array((opener.blockedPopups + [action.request.url ?? URL(string: "about:blank")!]).suffix(20))
+                opener.blockedSinceDeparture += 1
             }
             return nil
         }
@@ -782,6 +783,9 @@ extension Browser: WKNavigationDelegate {
         let policy = await policy(for: action, in: webView)
         // A departure asked about but not taken asks again next time.
         if policy != .allow, action.targetFrame?.isMainFrame == true { tab(for: webView)?.departureApproved = false }
+        // The page let through can open no window before WebKit has this
+        // answer: the windows kept back from here on are its own.
+        if policy == .allow, action.targetFrame?.isMainFrame == true { tab(for: webView)?.blockedSinceDeparture = 0 }
         return (policy, preferences)
     }
 
@@ -1015,7 +1019,11 @@ extension Browser: WKNavigationDelegate {
         }
         if HTTPSUpgrade.isOn, let url = webView.url { httpsUpgrade.committed(url) }
         tab.failure = nil
-        if !tab.blockedPopups.isEmpty { tab.blockedPopups = [] }
+        // Only the last page's: WebKit can tell of the new page's own before
+        // it tells that the page arrived.
+        if tab.blockedPopups.count > tab.blockedSinceDeparture {
+            tab.blockedPopups = Array(tab.blockedPopups.suffix(tab.blockedSinceDeparture))
+        }
         tab.recordVisit()
         hideChoices(on: tab)
         // A new document has nothing on show.
