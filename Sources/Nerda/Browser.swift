@@ -658,6 +658,7 @@ extension Browser: WKUIDelegate {
 
     func webViewDidClose(_ webView: WKWebView) {
         guard let tab = tab(for: webView) else { return }
+        socialPopupClosed(tab)
         withAnimation(.slide) { close(tab.id) }
     }
 
@@ -784,8 +785,12 @@ extension Browser: WKNavigationDelegate {
         // A departure asked about but not taken asks again next time.
         if policy != .allow, action.targetFrame?.isMainFrame == true { tab(for: webView)?.departureApproved = false }
         // The page let through can open no window before WebKit has this
-        // answer: the windows kept back from here on are its own.
-        if policy == .allow, action.targetFrame?.isMainFrame == true { tab(for: webView)?.blockedSinceDeparture = 0 }
+        // answer: the windows kept back from here on are its own. A sign-in
+        // with another service goes there and back (SocialSignIn).
+        if policy == .allow, action.targetFrame?.isMainFrame == true, let tab = tab(for: webView) {
+            tab.blockedSinceDeparture = 0
+            watchSocialSignIn(to: action.request.url, on: tab)
+        }
         return (policy, preferences)
     }
 

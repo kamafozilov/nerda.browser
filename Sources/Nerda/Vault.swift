@@ -7,6 +7,9 @@ nonisolated struct Account: Hashable, Sendable {
     /// Where it was used, as `Site.key` has it.
     let host: String
     let user: String
+    /// The service it signs in with (`SocialSignIn.Provider.id`), as Sign in
+    /// with Google does: no password of its own. Nil for a password.
+    var provider: String? = nil
 }
 
 /// Every saved sign-in. The passwords are one item in the login keychain; the
@@ -34,9 +37,16 @@ actor Vault {
         /// since it was saved. As the names have it at the last save: they
         /// keep it between saves, without the keychain.
         var used: Date?
+        /// As `Account.provider`; such a login's password is empty.
+        var provider: String?
+        /// Written in the Vault window: a recovery code, a security answer.
+        /// Only here, never in the file of names.
+        var note: String?
 
-        var account: Account { Account(host: host, user: user) }
-        var name: Name { Name(host: host, user: user, saved: saved, clear: clear, used: used) }
+        var account: Account { Account(host: host, user: user, provider: provider) }
+        var name: Name {
+            Name(host: host, user: user, saved: saved, clear: clear, used: used, provider: provider, noted: note == nil ? nil : true)
+        }
     }
 
     /// As kept in the file: a login without its password.
@@ -46,8 +56,11 @@ actor Vault {
         var saved: Date
         var clear: Bool?
         var used: Date?
+        var provider: String?
+        /// It has a note, which only the keychain holds.
+        var noted: Bool?
 
-        var account: Account { Account(host: host, user: user) }
+        var account: Account { Account(host: host, user: user, provider: provider) }
         /// Saving one is using it: it was just typed in, and it worked.
         var lastUsed: Date { max(used ?? saved, saved) }
     }
@@ -187,8 +200,31 @@ actor Vault {
     }
 
     func password(for account: Account) -> String? {
+        login(for: account)?.password
+    }
+
+    /// With its password and note, for the Vault window.
+    func login(for account: Account) -> Login? {
         guard knownNames().contains(where: { $0.account == account }) else { return nil }
-        return loadLogins()?.first { $0.account == account }?.password
+        return loadLogins()?.first { $0.account == account }
+    }
+
+    /// Every one kept, with its password and note: for the Vault window's
+    /// security check and export. Nil when the keychain won't hand them over.
+    func everything() -> [Login]? {
+        loadLogins().map(kept)
+    }
+
+    /// Whether a sign-in with this service on the site is kept already,
+    /// under this name or, for a name not known, any: those are counted as
+    /// used now. From the file, without the keychain.
+    func recall(_ account: Account) -> Bool {
+        let same = knownNames().map(\.account).filter {
+            $0.provider == account.provider && Site.of($0.host) == Site.of(account.host)
+                && (account.user.isEmpty || $0.user == account.user)
+        }
+        touch(same)
+        return !same.isEmpty
     }
 
     /// Whether this name's password for the site is kept already, and whether
@@ -197,7 +233,7 @@ actor Vault {
     /// the site at all needs no keychain to tell.
     func check(_ sent: SentSignIn) -> (known: Bool, replaces: Bool)? {
         let same = knownNames().map(\.account)
-            .filter { $0.user == sent.user && Site.of($0.host) == Site.of(sent.host) }
+            .filter { $0.provider == nil && $0.user == sent.user && Site.of($0.host) == Site.of(sent.host) }
         guard !same.isEmpty else { return (false, false) }
         guard let all = loadLogins() else { return nil }
         let known = all.filter { same.contains($0.account) && $0.password == sent.password }.map(\.account)
@@ -216,14 +252,16 @@ actor Vault {
         return (!known.isEmpty, same.contains { $0.host == sent.host })
     }
 
-    /// Adds them, or replaces those kept already; all or none. `clear`: from a
-    /// page that came over plain http.
+    /// Adds them, or replaces those kept already, keeping their notes; all or
+    /// none. `clear`: from a page that came over plain http.
     func save(_ new: [(Account, String)], clear: Bool = false) -> Bool {
         guard let loaded = loadLogins() else { return false }
         var all = kept(loaded)
         for (account, password) in new {
+            let note = all.first { $0.account == account }?.note
             all.removeAll { $0.account == account }
-            all.append(Login(host: account.host, user: account.user, password: password, saved: .now, clear: clear ? true : nil))
+            all.append(Login(host: account.host, user: account.user, password: password, saved: .now,
+                             clear: clear ? true : nil, provider: account.provider, note: note))
         }
         return store(all)
     }
@@ -232,20 +270,23 @@ actor Vault {
         closed = true
     }
 
-    /// Every saved sign-in, without its password: the Passwords window's
-    /// list, from the file, as the list under a sign-in box is.
+    /// Every saved sign-in, without its password: the Vault window's list,
+    /// from the file, as the list under a sign-in box is.
     func all() -> [Name] {
         knownNames()
     }
 
-    /// One changed in the Passwords window, its site, name or password; all
-    /// or none. It keeps whether it was last used over plain http.
-    func change(_ old: Account, to new: Account, password: String) -> Bool {
+    /// One changed in the Vault window, its site, name, password or note; all
+    /// or none. It keeps whether it was last used over plain http, and when
+    /// it was saved unless its password changed.
+    func change(_ old: Account, to new: Account, password: String, note: String?) -> Bool {
         guard let loaded = loadLogins() else { return false }
         var all = kept(loaded)
         let was = all.first { $0.account == old }
         all.removeAll { $0.account == old || $0.account == new }
-        all.append(Login(host: new.host, user: new.user, password: password, saved: .now, clear: was?.clear))
+        let saved = was.flatMap { $0.password == password ? $0.saved : nil } ?? .now
+        all.append(Login(host: new.host, user: new.user, password: password, saved: saved, clear: was?.clear,
+                         provider: new.provider, note: note?.isEmpty == false ? note : nil))
         return store(all)
     }
 

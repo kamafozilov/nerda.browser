@@ -1780,11 +1780,11 @@ func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) {
 /// A password added by hand is kept under the host of what was typed for its
 /// website, an address or a bare host, as one saved on the site would be.
 @Test func passwordsAddedByHandGoUnderTheirSite() {
-    #expect(PasswordsWindow.host(of: "https://www.GitHub.com/login") == "github.com")
-    #expect(PasswordsWindow.host(of: " accounts.google.com ") == "accounts.google.com")
-    #expect(PasswordsWindow.host(of: "127.0.0.1:8080") == "127.0.0.1")
-    #expect(PasswordsWindow.host(of: "") == nil)
-    #expect(PasswordsWindow.host(of: "not a site") == nil)
+    #expect(VaultWindow.host(of: "https://www.GitHub.com/login") == "github.com")
+    #expect(VaultWindow.host(of: " accounts.google.com ") == "accounts.google.com")
+    #expect(VaultWindow.host(of: "127.0.0.1:8080") == "127.0.0.1")
+    #expect(VaultWindow.host(of: "") == nil)
+    #expect(VaultWindow.host(of: "not a site") == nil)
 }
 
 @Test func exportedPasswordsAreReadIn() {

@@ -50,7 +50,8 @@ struct PasswordChoices: Equatable {
     var isEmpty: Bool { accounts.isEmpty && addresses.isEmpty && cards.isEmpty }
 }
 
-/// A sign-in that worked, with a password not yet kept.
+/// A sign-in that worked, not yet kept: with its password, or with a
+/// service (`account.provider`) and an empty password.
 struct PasswordOffer: Equatable {
     let tab: Tab.ID
     let account: Account
@@ -72,6 +73,7 @@ enum Passwords {
 
     static func install(in controller: WKUserContentController, nativePasskeys: Bool = Passkeys.available) {
         controller.addUserScript(WKUserScript(source: starter, injectionTime: .atDocumentEnd, forMainFrameOnly: false, in: world))
+        controller.addUserScript(WKUserScript(source: SocialSignIn.chooser, injectionTime: .atDocumentEnd, forMainFrameOnly: false, in: world))
         controller.add(messages, contentWorld: world, name: "passwords")
         if !nativePasskeys {
             controller.addUserScript(WKUserScript(source: withoutPasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
@@ -240,6 +242,7 @@ enum Passwords {
             const isField = (box) => isPassword(box) || (isName(box) && (nameAlone(box) || passwordFor(box) !== null));
 
             \#(AutoFill.classifier)
+            \#(SocialSignIn.button)
             // The boxes an address or card goes in: lists and text areas too.
             const fillable = (box) => (box instanceof HTMLInputElement ? ['text', 'email', 'tel', 'number'].includes(box.type) && !box.readOnly
                 : box instanceof HTMLTextAreaElement ? !box.readOnly : box instanceof HTMLSelectElement) && !box.disabled && shown(box);
@@ -558,8 +561,10 @@ extension Browser {
 
     /// A new page is in: if it came after a password went out, and asks for
     /// none itself, that sign-in worked. One that asks again was refused, or
-    /// is the next step of the same sign-in.
+    /// is the next step of the same sign-in. One with another service is
+    /// watched for as well (`socialLanded`).
     func signInLanded(on tab: Tab) {
+        socialLanded(on: tab)
         guard let sent = tab.signIn else { return }
         guard sent.isRecent, let page = tab.page else { return tab.signIn = nil }
         Task {
@@ -584,12 +589,15 @@ extension Browser {
         }
     }
 
-    func keepOfferedPassword() {
+    /// Kept, under the user name as the offer shows it, changed there or not.
+    func keepOfferedPassword(as user: String? = nil) {
         guard let offer = passwordOffer else { return }
         dropPasswordOffer()
+        let named = user.map { $0.trimmingCharacters(in: .whitespaces) } ?? offer.account.user
+        let account = Account(host: offer.account.host, user: named, provider: offer.account.provider)
         Task {
-            if await !vault.save([(offer.account, offer.password)], clear: offer.clear) {
-                Self.tell("Couldn't save the password", "The keychain didn't take it.")
+            if await !vault.save([(account, offer.password)], clear: offer.clear) {
+                Self.tell(account.provider == nil ? "Couldn't save the password" : "Couldn't save the sign-in", "The keychain didn't take it.")
             }
         }
     }
@@ -604,9 +612,13 @@ extension Browser {
         withAnimation(.easeOut(duration: 0.14)) { passwordOffer = nil }
     }
 
-    /// One of the accounts listed, into the page it was listed on.
+    /// One of the accounts listed, into the page it was listed on; a sign-in
+    /// with another service, by the site's button for it.
     func fill(_ account: Account) {
         guard let (choices, page) = takeChoice() else { return }
+        if let provider = SocialSignIn.provider(account.provider) {
+            return signIn(with: provider, as: account, choices, on: page)
+        }
         Task {
             // nil when the Mac was asked whether Nerda may read it, and said no.
             guard let password = await vault.password(for: account) else { return }

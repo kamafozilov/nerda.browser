@@ -392,7 +392,7 @@ private struct PageCard: View {
         }
         .overlay(alignment: .top) {
             if let offer = browser.passwordOffer, offer.tab == browser.selectedID {
-                PasswordOfferBar(browser: browser, offer: offer)
+                VaultOfferCard(browser: browser, offer: offer)
                     .padding(.top, 12)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             } else if let offer = browser.autofillOffers.first(where: { $0.tab == browser.selectedID }) {

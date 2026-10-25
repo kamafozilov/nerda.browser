@@ -13,7 +13,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .general: "General"
         case .appearance: "Appearance"
         case .tabs: "Tabs"
-        case .passwords: "Passwords"
+        case .passwords: "Vault"
         case .autofill: "AutoFill"
         case .siteSettings: "Site Settings"
         case .privacy: "Security & Privacy"
@@ -524,8 +524,8 @@ private struct PasswordsSettings: View {
 
     var body: some View {
         SettingsGroup {
-            SettingsLink(title: "Saved passwords", detail: "See, copy and change them. Opens with Touch ID or your Mac's password",
-                         icon: "key") { PasswordsWindow.show(browser.profile) }
+            SettingsLink(title: "Vault", detail: "Your passwords and sign-ins with services. Opens with Touch ID or your Mac's password",
+                         icon: "lock.shield") { VaultWindow.show(browser.profile) }
             SettingsRow(title: "Import passwords", detail: "From the file Passwords, Safari or Chrome exports", icon: "tray.and.arrow.down") {
                 Button("Import…", action: browser.importPasswords)
                     .buttonStyle(SettingsButtonStyle())
@@ -562,7 +562,7 @@ private struct PasswordsSettings: View {
 
     private var offerDetail: String {
         if let manager = Extensions.shared.passwordSavingTakenBy { return "\(manager) saves your passwords instead" }
-        return "Ask to keep a new password once you have signed in with it"
+        return "Ask to keep a new password, or a sign-in with Google, once it worked"
     }
 }
 
@@ -830,7 +830,7 @@ private struct DeleteProfileDialog: View {
         let profile = profile
         done()
         DispatchQueue.main.async {
-            PasswordsWindow.close(profile)
+            VaultWindow.close(profile)
             Windows.forget(profile)
             Task {
                 await Profiles.shared.remove(profile)
@@ -1540,7 +1540,7 @@ private struct ShortcutsSettings: View {
             ("New Incognito Window", "Browse without saving history", "⇧⌘N"),
             ("Close Window", "Close the window and its tabs", "⇧⌘W"),
             ("Show All History", "Every page you have visited", "⌘Y"),
-            ("Passwords", "See, copy and change your saved passwords", "⌥⌘L"),
+            ("Vault", "Your saved passwords and sign-ins", "⌥⌘L"),
             ("Settings", "Open Nerda's settings", "⌘,"),
             ("Minimize", "Put the window in the Dock", "⌘M"),
             ("Hide Nerda", "Hide Nerda's windows", "⌘H"),

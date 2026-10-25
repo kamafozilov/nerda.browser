@@ -86,7 +86,7 @@ struct SidebarMenu: View {
                     .onHover { if $0 { open = .history } }
                 }
 
-                MenuRow(icon: "key", title: "Passwords", shortcut: "⌥⌘L") { run { PasswordsWindow.show(browser.profile) } }
+                MenuRow(icon: "lock.shield", title: "Vault", shortcut: "⌥⌘L") { run { VaultWindow.show(browser.profile) } }
                     .onHover { if $0 { open = nil } }
                 MenuRow(icon: "gearshape", title: "Settings", shortcut: "⌘,") { run { browser.openSettings() } }
                     .onHover { if $0 { open = nil } }

@@ -33,7 +33,7 @@ extension Browser {
         if challenge.previousFailureCount > 0 {
             user = challenge.proposedCredential?.user ?? (key != nil && tried?.host == key ? tried?.user : nil) ?? ""
         } else if Passwords.fills, let key,
-                  let account = await vault.accounts(for: key, clear: clear).first(where: { $0.host == key }) {
+                  let account = await vault.accounts(for: key, clear: clear).first(where: { $0.host == key && $0.provider == nil }) {
             user = account.user
             password = await vault.password(for: account) ?? ""
         }

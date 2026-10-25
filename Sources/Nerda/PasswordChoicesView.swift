@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The accounts kept for the site, hanging from the sign-in box, or the
-/// addresses or cards kept, from a box of a form. A click puts one in;
+/// addresses or cards kept, from a box of a form. A click puts one in, or
+/// for a sign-in with another service, presses the site's button for it;
 /// right-click an account to forget it.
 // ponytail: always below the box; one at the window's bottom edge would want it above.
 struct PasswordChoicesView: View {
@@ -11,11 +12,14 @@ struct PasswordChoicesView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(choices.accounts, id: \.self) { account in
-                ChoiceRow(icon: "key.fill", title: account.user.isEmpty ? "No user name" : account.user, detail: account.host) {
+                let provider = SocialSignIn.provider(account.provider)
+                ChoiceRow(icon: "key.fill", site: provider?.icon,
+                          title: provider.map { "Continue with \($0.name)" } ?? (account.user.isEmpty ? "No user name" : account.user),
+                          detail: provider == nil || account.user.isEmpty ? account.host : account.user) {
                     browser.fill(account)
                 }
                 .contextMenu {
-                    Button("Remove Saved Password") { browser.forget(account) }
+                    Button(provider == nil ? "Remove Saved Password" : "Remove Saved Sign-In") { browser.forget(account) }
                 }
             }
             ForEach(choices.addresses) { address in
@@ -32,6 +36,8 @@ struct PasswordChoicesView: View {
 
     private struct ChoiceRow: View {
         let icon: String
+        /// Whose icon to show in its place: the service a sign-in is with.
+        var site: String? = nil
         let title: String
         let detail: String
         let pick: () -> Void
@@ -40,10 +46,12 @@ struct PasswordChoicesView: View {
         var body: some View {
             Button(action: pick) {
                 HStack(spacing: 10) {
-                    Image(systemName: icon)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.muted)
-                        .frame(width: 20)
+                    Group {
+                        if let site { SiteIcon(host: site, size: 12) } else { Image(systemName: icon) }
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
+                    .frame(width: 20)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(title)
                             .foregroundStyle(Palette.ink)

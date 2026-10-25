@@ -144,6 +144,8 @@ final class Tab: Identifiable {
     @ObservationIgnored var signIn: SentSignIn?
     /// A name sent on its own, for the password step that comes after it.
     @ObservationIgnored var nameSent: (host: String, user: String, at: Date)?
+    /// A sign-in with another service (Google, GitHub…) under way (SocialSignIn.swift).
+    @ObservationIgnored var social: SocialSignIn.Pending?
     /// An address or card the page just sent in a form, until the next page shows it went through.
     @ObservationIgnored var formSent: SentForm?
     /// The address of the document in the page, from when it came in: the

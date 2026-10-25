@@ -77,7 +77,7 @@ Nerda is a browser that stays out of the way. It is a native Mac app written in 
 - **Ads and trackers blocked** with EasyList and EasyPrivacy. Pick more lists from uBlock Origin's catalogue (AdGuard, malware, cookie notices, regional lists) or add your own in Settings › Security & Privacy.
 - **Incognito windows** (⇧⌘N) keep no history and forget their cookies once the last one closes. They lock when the Mac sleeps or after a minute away, and open again with Touch ID.
 - **Delete browsing data** from the last 15 minutes to all time, choosing what goes: history, cache, downloads, cookies, site storage.
-- **Passwords** are offered for saving and filled in from the login keychain. File › Import Passwords… reads the CSV from Passwords, Safari or Chrome.
+- **The Vault** (⌥⌘L) keeps your passwords, and the sites you sign in to with Google or another service, in the login keychain: offered for saving after a sign-in, filled in from there, and checked for weak and reused passwords. File › Import Passwords… reads the CSV from Passwords, Safari or Chrome.
 - **Site settings** beside the address controls ads, camera, microphone and location for that site's scheme, host and port. Reload to apply an ad-blocking change; macOS permissions still apply.
 - A page can't open tabs on its own, only after a click or a key.
 
