@@ -59,6 +59,12 @@ struct BrowserView: View {
     /// Where the card's left edge is: past the open sidebar, or the margin.
     /// It slides as the sidebar does.
     private var inset: CGFloat { max(browser.sidebarOpen && docks ? sidebarWidth : 0, margin) }
+    /// Where the address bar starts: as the card, but with the sidebar put
+    /// away, past the window's buttons, which come up there with the pointer
+    /// at the top (`TrafficLights`) and would otherwise sit over its own.
+    private var barInset: CGFloat { horizontal ? inset : max(inset, Self.trafficLightsWidth) }
+    /// The window's three buttons, from its left edge, and a gap after them.
+    static let trafficLightsWidth: CGFloat = 84
     /// Where the page is laid out from: as `inset`, but changed in one step,
     /// as the sidebar starts to go and once it has fully come.
     private var laidOut: CGFloat { max(docked && docks ? sidebarWidth : 0, margin) }
@@ -81,7 +87,7 @@ struct BrowserView: View {
             if !pageFullscreen {
                 // Beside the sidebar, and under it while it is out over the page.
                 AddressBar(browser: browser, horizontal: horizontal)
-                    .padding(.leading, inset)
+                    .padding(.leading, barInset)
                     .padding(.trailing, margin)
                     .padding(.top, top)
                     .frame(maxHeight: .infinity, alignment: .top)
