@@ -1000,8 +1000,10 @@ private struct ListedTab: View {
                 mute: { browser.toggleMute(id) },
                 // A new tab, or the settings, keeps the name it has.
                 rename: tab.hasPage ? { name in
+                    if browser.renaming == id { browser.renaming = nil }
                     if let name { browser.rename(id, to: name) }
                 } : nil,
+                renameNow: browser.renaming == id,
                 press: { browser.select(id) }
             ) {
                 browser.select(id)

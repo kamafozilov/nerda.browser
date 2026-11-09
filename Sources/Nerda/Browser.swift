@@ -99,6 +99,9 @@ final class Browser: NSObject {
     static let findWholeWordsKey = "findWholeWords"
     /// Counts ⌘Fs, so one with the bar already open still puts the keyboard in it.
     var findRequests = 0
+    /// A tab's name made editable in place, as a double-click does (its
+    /// menu's Rename), until the row is done with it.
+    var renaming: Tab.ID?
     /// Counts Window › Downloads (⌥⌘L), each showing the downloads list or putting it away.
     var downloadsRequests = 0
     /// The saved accounts listed under the sign-in box the caret is in, and a
@@ -467,6 +470,40 @@ final class Browser: NSObject {
 
     /// The sidebar's list: the tabs not pinned, nor a bookmark's.
     static let listed: (Tab) -> Bool = { !$0.isPinned && $0.bookmark == nil }
+
+    /// Close Other Tabs: the list's tabs but this one. Pinned sites and
+    /// bookmarks' tabs stay, as they have places of their own.
+    func others(than id: Tab.ID) -> [Tab] { tabs.filter { Self.listed($0) && $0.id != id } }
+
+    /// Close Tabs Below (to the Right, across the top): the list's tabs after
+    /// this one; a pinned site has none, the list being apart from it.
+    func below(_ id: Tab.ID) -> [Tab] {
+        guard tabs.first(where: { $0.id == id })?.isPinned == false else { return [] }
+        return Array(tabs.filter(Self.listed).drop { $0.id != id }.dropFirst())
+    }
+
+    /// Closes `closing`, and keeps `id`, on screen if the one there was among them.
+    func close(_ closing: [Tab], keeping id: Tab.ID) {
+        if closing.contains(where: { $0.id == selectedID }) { select(id) }
+        withAnimation(.slide) { closing.forEach { close($0.id) } }
+    }
+
+    /// Duplicate Tab: the same page, with its history back and forward, in a
+    /// new tab right after it, on screen. A pinned site's or a bookmark's
+    /// copy is a tab of the list, where a new tab goes.
+    func duplicate(_ id: Tab.ID) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].hasPage,
+              let saved = tabs[index].saved, let url = saved.url else { return }
+        let copy = Tab(restoring: Session.Tab(url: url, title: saved.title, state: saved.state, zoom: saved.zoom,
+                                              pinned: nil, home: nil, name: saved.name))
+        guard Self.listed(tabs[index]) else { return withAnimation(.slide) { add(copy) } }
+        copy.dataStore = dataStore
+        copy.delegate = self
+        withAnimation(.slide) {
+            tabs.insert(copy, at: index + 1)
+            selectedID = copy.id
+        }
+    }
 
     /// The tabs in the order they are shown: down the side, the pinned, the
     /// bookmarks' open ones, then the list; across the top, as they are.

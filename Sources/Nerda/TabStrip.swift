@@ -419,8 +419,10 @@ private struct TabLook: View {
                 mute: { browser.toggleMute(id) },
                 // A new tab, or the settings, keeps the name it has.
                 rename: tab.hasPage ? { name in
+                    if browser.renaming == id { browser.renaming = nil }
                     if let name { browser.rename(id, to: name) }
                 } : nil,
+                renameNow: browser.renaming == id,
                 press: { browser.select(id) }
             ) {
                 browser.select(id)
@@ -449,6 +451,8 @@ private struct StripTab: View {
     var muted: Bool?
     var mute: () -> Void = {}
     var rename: ((String?) -> Void)?
+    /// The title made editable now, as a double-click would.
+    var renameNow = false
     var press: (() -> Void)?
     let action: () -> Void
 
@@ -497,6 +501,7 @@ private struct StripTab: View {
         .buttonStyle(.plain)
         .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in press?() })
         .simultaneousGesture(TapGesture(count: 2).onEnded { if rename != nil { renaming = true } })
+        .onChange(of: renameNow, initial: true) { if renameNow, rename != nil { renaming = true } }
         // Before the overlays: the close button and the speaker say what they do.
         .help(title)
         .accessibilityLabel(title)
