@@ -504,7 +504,8 @@ private struct StripTab: View {
         .onChange(of: renameNow, initial: true) { if renameNow, rename != nil { renaming = true } }
         // Before the overlays: the close button and the speaker say what they do.
         .help(title)
-        .accessibilityLabel(title)
+        .tabAccessibility(title, selected: selected, close: close, muted: muted, mute: mute,
+                          rename: rename == nil ? nil : { renaming = true })
         // Over the tab rather than inside it, so a click on it closes the tab
         // without also selecting it.
         .overlay(alignment: .trailing) {
@@ -611,7 +612,8 @@ private struct PinnedTab: View {
             let id = tab.id
             PinnedIcon(site: tab.site, loading: tab.isLoading, title: tab.title,
                        selected: selected, asleep: tab.isAsleep,
-                       muted: tab.speaker, mute: { browser.toggleMute(id) }, press: { browser.select(id) }) {
+                       muted: tab.speaker, mute: { browser.toggleMute(id) }, press: { browser.select(id) },
+                       home: tab.home == nil ? nil : { browser.tabs.first { $0.id == id }?.goHome() }) {
                 browser.select(id)
             }
         }
@@ -631,6 +633,8 @@ private struct PinnedIcon: View {
     var muted: Bool?
     var mute: () -> Void = {}
     var press: (() -> Void)?
+    /// As a tile's (see there).
+    var home: (() -> Void)?
     let action: () -> Void
 
     @State private var hovering = false
@@ -651,7 +655,7 @@ private struct PinnedIcon: View {
         .buttonStyle(.plain)
         .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in press?() })
         .help(title)
-        .accessibilityLabel(title)
+        .tabAccessibility(title, selected: selected, muted: muted, mute: mute, home: home)
         // On the icon's own corner: the tile is too small for one of its own.
         .speaker(muted, over: $overSpeaker, corner: 0, action: mute)
         .onHover { hovering = $0 }
