@@ -5,12 +5,6 @@ import Testing
 import WebKit
 @testable import Nerda
 
-@MainActor
-private func waitFor(_ condition: () -> Bool) async throws {
-    for _ in 0..<300 where !condition() { try await Task.sleep(for: .milliseconds(20)) }
-    try #require(condition(), "Timed out waiting for WebKit")
-}
-
 private func readinessFolder() throws -> URL {
     let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -434,6 +428,8 @@ struct ReadinessTests {
         try #require(cancelled.canResume)
         browser.resume(cancelled)
         cancelled.cancel()
+        try await waitFor { cancelled.state == .cancelled }
+        // And stays so once the resumed task is made.
         try await Task.sleep(for: .milliseconds(200))
         #expect(cancelled.state == .cancelled)
     }

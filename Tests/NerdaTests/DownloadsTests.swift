@@ -36,7 +36,7 @@ import WebKit
     browser.downloadFolder = folder
 
     browser.saveData(WKWebView(), data: Data("%PDF".utf8), suggestedFilename: "../paper.pdf", mimeType: "application/pdf", originatingURL: nil)
-    while browser.downloads.first?.state != .finished { try await Task.sleep(for: .milliseconds(10)) }
+    try await waitFor { browser.downloads.first?.state == .finished }
     let item = try #require(browser.downloads.first)
     #expect(item.file == folder.appending(path: "paper (1).pdf"))
     #expect(try Data(contentsOf: folder.appending(path: "paper (1).pdf")) == Data("%PDF".utf8))

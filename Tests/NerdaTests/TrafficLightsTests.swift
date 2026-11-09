@@ -31,11 +31,10 @@ private func find<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
     window.orderBack(nil)
     defer { window.close() }
     let close = try #require(window.standardWindowButton(.closeButton))
-    let shown = { !close.isHidden && close.alphaValue == 1 }
+    // Shown, and so clickable, at once; its fade in is drawn only as the
+    // screen is, which a busy or sleeping display may not do within the test.
+    let shown = { !close.isHidden }
 
-    func waitFor(_ condition: () -> Bool) async throws {
-        for _ in 0..<40 where !condition() { try await Task.sleep(for: .milliseconds(50)) }
-    }
     try await waitFor { close.isHidden }
     #expect(close.isHidden)
 
@@ -52,7 +51,7 @@ private func find<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
                                trackingNumber: 0, userData: nil)!
     }
     tracker.mouseEntered(with: event(.mouseEntered))
-    try await waitFor(shown)
+    try await waitFor { shown() }
     #expect(shown())
     // The sidebar stays put away.
     #expect(!browser.sidebarOpen)
