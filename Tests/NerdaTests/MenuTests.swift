@@ -75,3 +75,19 @@ private func items(of menu: NSMenu) -> [NSMenuItem] {
     let vault = keyed.first { $0.title == "Vault" }
     #expect(vault?.keyEquivalent == "p" && vault?.keyEquivalentModifierMask == [.command, .option])
 }
+
+/// ⌃Tab, ⌘⇧] and ⌥⌘→ go a tab on, their ⇧ or mirror a tab back, by the
+/// key's place; the arrows stay with a field being typed in.
+@Test func tabKeysStepThroughTheTabs() {
+    let arrow: NSEvent.ModifierFlags = [.command, .option, .function, .numericPad]
+    #expect(AppMenu.tabStep(key: 48, modifiers: .control, editingText: false) == 1)
+    #expect(AppMenu.tabStep(key: 48, modifiers: [.control, .shift], editingText: true) == -1)
+    #expect(AppMenu.tabStep(key: 30, modifiers: [.command, .shift], editingText: false) == 1)
+    #expect(AppMenu.tabStep(key: 33, modifiers: [.command, .shift], editingText: true) == -1)
+    #expect(AppMenu.tabStep(key: 124, modifiers: arrow, editingText: false) == 1)
+    #expect(AppMenu.tabStep(key: 123, modifiers: arrow, editingText: false) == -1)
+    #expect(AppMenu.tabStep(key: 123, modifiers: arrow, editingText: true) == nil)
+    // ⌘] is Forward, ⌘→ the end of a line.
+    #expect(AppMenu.tabStep(key: 30, modifiers: .command, editingText: false) == nil)
+    #expect(AppMenu.tabStep(key: 124, modifiers: [.command, .function, .numericPad], editingText: false) == nil)
+}

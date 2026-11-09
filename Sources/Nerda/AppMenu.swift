@@ -229,8 +229,8 @@ final class AppMenu: NSObject {
 
     private func monitorKeys() {
 
-        // A focused page takes ⌃Tab as a key of its own, so it would never
-        // reach the menu: it is caught on its way in instead. So are the keys
+        // A focused page takes ⌃Tab (and ⌘⇧], ⌥⌘→) as a key of its own, so it
+        // would never reach the menu: it is caught on its way in instead. So are the keys
         // that are the browser's whatever the page does with them, as in
         // Chrome: a page that took ⌘W or ⌘T for itself would keep you in it.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
@@ -238,8 +238,10 @@ final class AppMenu: NSObject {
             // Only in a browser's window: in the Vault ⌃Tab is its own, and
             // the tabs of a window behind it are out of sight.
             let browser = MainActor.assumeIsolated { (event.window as? BrowserWindow)?.browser }
-            if let browser, event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift] {
-                MainActor.assumeIsolated { if !browser.locked { browser.selectTab(after: modifiers.contains(.shift) ? -1 : 1) } }
+            let editing = MainActor.assumeIsolated { event.window?.firstResponder is NSTextView }
+            if let browser, let step = Self.tabStep(key: event.keyCode, modifiers: modifiers, editingText: editing),
+               event.window?.attachedSheet == nil, NSApp.modalWindow == nil {
+                MainActor.assumeIsolated { if !browser.locked { browser.selectTab(after: step) } }
                 return nil
             }
             // ⌘1 to ⌘9 by the key, not the character it types: on AZERTY that
@@ -255,6 +257,24 @@ final class AppMenu: NSObject {
                 return nil
             }
             return MainActor.assumeIsolated { Self.browserKey(event) } ? nil : event
+        }
+    }
+
+    /// The tab a key goes to, one on or one back: ⌃Tab and ⌃⇧Tab, and as in
+    /// Safari and Chrome ⌘⇧] and ⌘⇧[, and ⌥⌘→ and ⌥⌘←. By the key's place,
+    /// so a layout that types no brackets there (Russian) has them too. The
+    /// arrows are left to a field of Nerda's being typed in (the address,
+    /// a tab's name), where they move the caret.
+    nonisolated static func tabStep(key: UInt16, modifiers: NSEvent.ModifierFlags, editingText: Bool) -> Int? {
+        let modifiers = modifiers.intersection([.command, .shift, .option, .control])
+        switch (key, modifiers) {
+        case (48, .control): return 1
+        case (48, [.control, .shift]): return -1
+        case (30, [.command, .shift]): return 1
+        case (33, [.command, .shift]): return -1
+        case (124, [.command, .option]) where !editingText: return 1
+        case (123, [.command, .option]) where !editingText: return -1
+        default: return nil
         }
     }
 

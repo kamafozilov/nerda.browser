@@ -9,6 +9,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Added
 
+- ⇧⌘] and ⇧⌘[, and ⌥⌘→ and ⌥⌘←, go to the next and the previous tab, as in Safari and Chrome, besides ⌃Tab and ⌃⇧Tab. They work while a page has the keyboard and on any keyboard layout.
 - Window › Downloads (⌥⌘L) shows the list of your downloads, as the downloads button does, and puts it away again, as in Safari and Chrome. A collapsed sidebar slides out for it.
 - After you sign in to a site with Google, Apple, GitHub, Microsoft, Telegram or another service, Nerda offers to save that sign-in, with the account you picked, as it offers to save a password. The site's sign-in box then lists it as Continue with Google, and picking it presses the site's own button for you.
 - File › New Window (⌘N) brings your profile's window to the front on a new tab, opening it again if you closed it, so ⌘N does what you expect from other browsers. With profiles, it goes to the profile of the window in front, or the one you used last.
