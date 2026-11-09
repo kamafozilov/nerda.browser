@@ -1166,12 +1166,7 @@ extension Browser: WKNavigationDelegate {
         let socket = error.userInfo[NSUnderlyingErrorKey] as? NSError
         let refused = socket?.domain == NSPOSIXErrorDomain && socket?.code == Int(ECONNREFUSED)
         let offline = error.code == NSURLErrorNotConnectedToInternet
-        if offline {
-            Task {
-                await Online.back()
-                if tab.failure?.offline == true, tab.failure?.url == url, tab.page === webView { tab.reload() }
-            }
-        }
+        if offline { tab.reopenOnceOnline(url, in: webView) }
         // The secure connection failing, or the server's certificate (-1200 to -1204).
         let certificate = (NSURLErrorServerCertificateNotYetValid...NSURLErrorSecureConnectionFailed).contains(error.code)
         guard certificate, let trust = Self.trust(of: error, host: host) else {

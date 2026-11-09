@@ -132,6 +132,9 @@ final class Tab: Identifiable {
     /// The page's top edge, as last sampled (`recolor`): by WebKit, or here.
     @ObservationIgnored private var topColor: NSColor?
     @ObservationIgnored private var recoloring: Task<Void, Never>?
+    /// Waiting for the Mac to be back online, to open the address that
+    /// failed for want of a network (`reopenOnceOnline`): one at a time.
+    @ObservationIgnored private var reconnecting: Task<Void, Never>?
     /// The address last put in history, so a page is counted once per visit,
     /// not again when it wakes or reloads.
     @ObservationIgnored private var recorded: URL?
@@ -317,6 +320,7 @@ final class Tab: Identifiable {
 
     /// Takes the tab to `url`, a new one included.
     func go(to url: URL) {
+        stopReconnecting()
         // An address typed, a bookmark: the browser leaving the page asks.
         if let page, hasUnsavedWork, !departureApproved, let browser = delegate as? Browser {
             Task {
@@ -675,6 +679,7 @@ final class Tab: Identifiable {
     func sleep(keeping look: NSImage? = nil, discarding: Bool = false) {
         guard discarding || !hasUnsavedWork else { return }
         guard let page else { return }
+        stopReconnecting()
         hasUnsavedWork = false
         departureApproved = false
         recoloring?.cancel()
@@ -777,6 +782,27 @@ final class Tab: Identifiable {
     /// Its window's profile's; Personal's for a tab in no window (tests).
     private var history: History { (delegate as? Browser)?.profile.history ?? .shared }
 
+    /// `url` failed for want of a network: opened again in `page` once the
+    /// Mac is back online, if the tab is still open and still says why.
+    /// Holds neither the tab nor its page while it waits, and stops when the
+    /// tab closes, sleeps or goes elsewhere, so a closed tab goes at once.
+    func reopenOnceOnline(_ url: URL, in page: WKWebView) {
+        reconnecting?.cancel()
+        reconnecting = Task { [weak self, weak page] in
+            await Online.back()
+            guard !Task.isCancelled, let self, let page, self.page === page,
+                  failure?.offline == true, failure?.url == url,
+                  let browser = delegate as? Browser, browser.tabs.contains(where: { $0 === self }) else { return }
+            reconnecting = nil
+            reload()
+        }
+    }
+
+    private func stopReconnecting() {
+        reconnecting?.cancel()
+        reconnecting = nil
+    }
+
     /// Go Back from a page that couldn't be opened: to the page still under
     /// it, when a link from there failed, or else back in its history.
     var canLeaveFailure: Bool { failure != nil && (failedOverPage || canGoBack) }
@@ -794,6 +820,7 @@ final class Tab: Identifiable {
     /// From origin, the page and what it loads are fetched anew, not taken
     /// from the cache.
     func reload(fromOrigin: Bool = false) {
+        stopReconnecting()
         if let failure {
             webView.load(.page(failure.url, cachePolicy: fromOrigin ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy))
         } else if fromOrigin {
@@ -828,6 +855,7 @@ final class Tab: Identifiable {
     /// A pinned tab back where it was pinned.
     func goHome() {
         guard let home else { return }
+        stopReconnecting()
         webView.load(.page(home))
     }
 
@@ -877,6 +905,7 @@ final class Tab: Identifiable {
     /// For a closed tab: no more sound or video, and the camera and microphone off,
     /// for good. Suspended rather than paused, so the page can't start them again.
     func silence() {
+        stopReconnecting()
         guard let page else { return }
         recoloring?.cancel()
         recoloring = nil
