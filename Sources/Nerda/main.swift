@@ -193,25 +193,14 @@ struct BrowserView: View {
         .overlay {
             if browser.locked { IncognitoLock() }
         }
+        // Behind it all, where it takes no clicks.
+        .background { TrafficLights(window: window, withTabs: tabsShown || browser.locked, atTop: !pageFullscreen) }
         .ignoresSafeArea()
         // Where the Mac asks to download a language, the first time a page is
         // translated into it; asked again for each pair the tab on screen is
         // translated between.
         .translationTask(browser.translationConfiguration) { session in
             await browser.translator.run(session, in: browser)
-        }
-        // The traffic lights belong to the sidebar: they go as soon as it starts
-        // to, and come once it has all but arrived, so that nothing sits on the
-        // page on its own and the sidebar's toggle never slides across them.
-        // Across the top, they are the tabs'. Locked, they stay, to close the
-        // window without unlocking it.
-        .task(id: tabsShown || browser.locked) {
-            let shown = tabsShown || browser.locked
-            if shown {
-                try? await Task.sleep(for: .milliseconds(180))
-                if Task.isCancelled { return }
-            }
-            window.showTrafficLights(shown)
         }
         .onChange(of: browser.sidebarOpen) { _, open in
             // Pinning it puts the floating one away (it stays where it is, now pinned).
@@ -283,6 +272,84 @@ struct BrowserView: View {
         } else if !pageFullscreen, fullScreenForPage, windowFullScreen {
             window.toggleFullScreen(nil)
         }
+    }
+}
+
+/// The traffic lights belong to the sidebar: they go as soon as it starts to,
+/// and come once it has all but arrived, so that nothing sits on the page on
+/// its own and the sidebar's toggle never slides across them. Across the top,
+/// they are the tabs'. Locked, they stay, to close the window without
+/// unlocking it. With the sidebar put away, they come too while the pointer
+/// is up in the title bar, where they would be, as they do in a window in
+/// full screen, and go once it leaves, without the sidebar coming out.
+///
+/// A view of its own, so the pointer coming and going there works out only
+/// this again, not the whole window's view.
+private struct TrafficLights: View {
+    let window: NSWindow
+    /// The sidebar, or the tabs across the top, are on screen, or the window is locked.
+    let withTabs: Bool
+    /// The pointer in the title bar brings them (not while a page is in full screen).
+    let atTop: Bool
+    @State private var pointerAtTop = false
+
+    var body: some View {
+        TitleBarHover { pointerAtTop = $0 }
+            .task(id: [withTabs, atTop && pointerAtTop]) {
+                let hovered = atTop && pointerAtTop
+                if withTabs, !hovered {
+                    try? await Task.sleep(for: .milliseconds(180))
+                    if Task.isCancelled { return }
+                }
+                window.showTrafficLights(withTabs || hovered)
+            }
+    }
+}
+
+/// Tells when the pointer comes into the window's title bar, all along its
+/// top, and when it leaves: a tracking area only, which takes no clicks, so
+/// the address bar under it and the lights over it work as ever.
+struct TitleBarHover: NSViewRepresentable {
+    let hover: (Bool) -> Void
+
+    func makeNSView(context: Context) -> Tracker { Tracker(hover: hover) }
+    func updateNSView(_ view: Tracker, context: Context) { view.hover = hover }
+
+    final class Tracker: NSView {
+        var hover: (Bool) -> Void
+        private var area: NSTrackingArea?
+
+        init(hover: @escaping (Bool) -> Void) {
+            self.hover = hover
+            super.init(frame: .zero)
+        }
+        required init?(coder: NSCoder) { nil }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        /// The top of the window, as tall as its title bar (the toolbar's
+        /// included), where the lights sit.
+        var titleBar: NSRect {
+            guard let window else { return .zero }
+            let height = min(max(window.frame.height - window.contentLayoutRect.height, 0), bounds.height)
+            return NSRect(x: 0, y: isFlipped ? 0 : bounds.height - height, width: bounds.width, height: height)
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let area { removeTrackingArea(area) }
+            let added = NSTrackingArea(rect: titleBar, options: [.mouseEnteredAndExited, .activeAlways], owner: self)
+            addTrackingArea(added)
+            area = added
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            updateTrackingAreas()
+        }
+
+        override func mouseEntered(with event: NSEvent) { hover(true) }
+        override func mouseExited(with event: NSEvent) { hover(false) }
     }
 }
 
@@ -573,9 +640,16 @@ extension NSWindow {
     }
 
     /// Faded rather than switched, and hidden once faded, so an invisible
-    /// close button can't be clicked on the page.
+    /// close button can't be clicked on the page. Switched in a window out of
+    /// sight, where a fade may never be drawn, and so never end.
     func showTrafficLights(_ shown: Bool) {
         let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap(standardWindowButton)
+        guard occlusionState.contains(.visible) else {
+            return buttons.forEach {
+                $0.alphaValue = shown ? 1 : 0
+                $0.isHidden = !shown
+            }
+        }
         if shown { buttons.forEach { $0.isHidden = false } }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = shown ? 0.15 : 0.1

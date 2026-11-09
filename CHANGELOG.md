@@ -15,6 +15,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Changed
 
 - The window opens where and at the size you left it, where before it filled the screen each time Nerda opened. The first time, or when it was left on a display that is no longer there, it fills the screen; a window you leave in full screen opens at the size it had before. Incognito windows open where the regular window was left.
+- With the sidebar hidden, the window's close, minimise and zoom buttons show while the pointer is at the top of the window, and go when it leaves, without the sidebar coming out. Before, they showed only with the sidebar.
 - Offering to save a password shows a card with the site's icon, the user name, to correct before you save, and the password, hidden until you click the eye. It warns when the password is easy to guess.
 - File › Import Bookmarks… no longer stops you with a dialog once it has worked: the bookmarks come in as the Imported folder at the end of your bookmarks, and the sidebar opens to show it. After File › Import Passwords…, the reminder to delete the file shows on the window you are in, rather than holding up all of Nerda.
 
