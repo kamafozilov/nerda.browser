@@ -509,7 +509,10 @@ final class History {
             dirty = false
             trim()
             let visits = visits
-            Self.writer.async { Self.write(Array(visits.values), to: file) }
+            // Not written (a full disk): still to write, at the next save.
+            Self.writer.async { [weak self] in
+                if !Self.write(Array(visits.values), to: file) { Task { @MainActor in self?.dirty = true } }
+            }
         }
         if waiting { Self.writer.sync {} }
     }
@@ -517,12 +520,16 @@ final class History {
     /// Reads and saves one at a time, in the order asked, off the main thread.
     nonisolated private static let writer = DispatchQueue(label: "dev.nerda.history", qos: .utility)
 
-    nonisolated private static func write(_ visits: [Visit], to file: URL) {
+    /// Whether it was written.
+    @discardableResult
+    nonisolated private static func write(_ visits: [Visit], to file: URL) -> Bool {
         do {
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(visits).write(to: file, options: .atomic)
+            return true
         } catch {
             NSLog("Nerda: couldn't save history: \(error)")
+            return false
         }
     }
 
