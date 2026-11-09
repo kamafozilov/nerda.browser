@@ -35,7 +35,7 @@ private let somewhere = URL(string: "https://example.com")!
     browser.add(tab)
     let opens = "<script>window.open('https://example.com/popup')</script>"
     tab.webView.loadHTMLString(opens, baseURL: somewhere)
-    while tab.webView.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor { !tab.webView.isLoading }
     // A cold page process can take longer than any fixed wait to run the script.
     for _ in 0..<100 where tab.blockedPopups.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
     #expect(browser.tabs.count == 1)
@@ -56,7 +56,7 @@ private let somewhere = URL(string: "https://example.com")!
     options.allowsPopups = true
     browser.siteSettings.set(options, for: somewhere)
     tab.webView.loadHTMLString(opens, baseURL: somewhere)
-    while tab.webView.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor { !tab.webView.isLoading }
     for _ in 0..<100 where browser.tabs.count < 4 { try await Task.sleep(for: .milliseconds(20)) }
     #expect(browser.tabs.count == 4)
 }

@@ -48,8 +48,12 @@ import WebKit
     #expect(try await page.run("return document.body.innerText.includes('let x') && document.body.innerText.includes('Texte')") as? Bool == true)
 
     _ = try await page.run("document.body.insertAdjacentHTML('beforeend', '<p id=late>Encore</p>'); line.firstChild.data = 'Salut '")
-    try await Task.sleep(for: .milliseconds(50))
-    #expect(Set(try await next(10)) == ["Encore", "Salut ⟦1⟧le monde⟦/1⟧"])
+    // Taken up as the page's changes are seen, maybe over more than one batch.
+    var late: Set<String> = []
+    try await waitFor {
+        late.formUnion(try await next(10))
+        return late == ["Encore", "Salut ⟦1⟧le monde⟦/1⟧"]
+    }
 
     _ = try await page.run("nerdaTranslate.restore()")
     #expect(try await page.run("return line.innerHTML") as? String == "Salut <b>le monde</b> ")
@@ -88,7 +92,7 @@ import WebKit
 private func translatable(_ html: String) async throws -> WKWebView {
     let page = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
     page.loadHTMLString(html, baseURL: URL(string: "https://example.com"))
-    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor { !page.isLoading }
     _ = try await page.run(Translator.script)
     return page
 }

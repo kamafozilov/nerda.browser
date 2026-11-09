@@ -584,7 +584,7 @@ func httpIsTriedOverHTTPSWhereItCanBe(address: String, tried: Bool) {
         browser.add(tab)
         let page = tab.webView
         page.loadHTMLString("<p>Staff only</p>", baseURL: URL(string: "https://staff.example/")!)
-        while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+        try await waitFor { !page.isLoading }
         var gone = false
         let watch = Task {
             await browser.left(page)
@@ -884,7 +884,7 @@ func iconsAreKeptPerOrigin(url: String, origin: String?) {
     page.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
     let html = #"<div style="height: 3000px"></div><div style="transform: scale(1)"><div id="box" style="width: 20px">x</div></div><div style="height: 3000px"></div>"#
     page.loadHTMLString(html, baseURL: somewhere)
-    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor { !page.isLoading }
     func run(_ script: String) async throws -> Any? { try await page.callAsyncJavaScript(script, contentWorld: .page) }
 
     let fills = "const r = box.getBoundingClientRect(); return r.width === innerWidth && r.height === innerHeight"
@@ -906,7 +906,7 @@ func iconsAreKeptPerOrigin(url: String, origin: String?) {
     browser.add(tab)
     let page = tab.webView
     page.loadHTMLString("<p>needle in a haystack</p>", baseURL: somewhere)
-    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor { !page.isLoading }
     func selected() async throws -> String? {
         try await page.callAsyncJavaScript("return getSelection().toString()", contentWorld: .page) as? String
     }
@@ -963,7 +963,7 @@ private func found(in browser: Browser, by look: () -> Void) async throws -> Fin
     let page = tab.webView
     page.loadHTMLString(#"<p>Needle</p><p>a needle <b>ne</b>edle</p><div style="display: none">needle</div>"#
         + #"<p style="visibility: hidden">needle</p><p>needles</p>"#, baseURL: somewhere)
-    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor { !page.isLoading }
     browser.findQuery = "needle"
 
     #expect(try await found(in: browser) { browser.find() } == .init(index: 1, count: 4, more: false))
@@ -1012,7 +1012,7 @@ private func found(in browser: Browser, by look: () -> Void) async throws -> Fin
     browser.add(tab)
     let page = tab.webView
     page.loadHTMLString(#"<p>needle, needle and needle</p><iframe srcdoc="<p>needle</p>"></iframe>"#, baseURL: somewhere)
-    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor { !page.isLoading }
     func lit() async throws -> [Int]? {
         try await page.callAsyncJavaScript("return ['nerda-find', 'nerda-find-current'].map(name => CSS.highlights.get(name)?.size ?? 0)",
                                            contentWorld: .page) as? [Int]
@@ -1033,7 +1033,7 @@ private func found(in browser: Browser, by look: () -> Void) async throws -> Fin
 @Test func pagesDontSeeTheBrowser() async throws {
     let page = Tab().webView
     page.loadHTMLString("<p>x</p>", baseURL: somewhere)
-    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor { !page.isLoading }
     #expect(try await page.callAsyncJavaScript("return typeof window.webkit", contentWorld: .page) as? String == "undefined")
 }
 
@@ -1047,7 +1047,7 @@ private func found(in browser: Browser, by look: () -> Void) async throws -> Fin
     browser.add(Tab())
     let page = tab.webView
     page.loadHTMLString(#"<div id="box">x</div>"#, baseURL: somewhere)
-    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor { !page.isLoading }
     func shown() async throws -> Bool {
         try await page.callAsyncJavaScript("return document.fullscreenElement !== null", contentWorld: .page) as? Bool == true
     }
@@ -2508,7 +2508,7 @@ func errorsAreCountedOnThisMacOnly(address: String, counted: Int) async throws {
     browser.add(tab)
     tab.webView.loadHTMLString("<script>setTimeout(() => { throw new Error('boom') }); Promise.reject(new Error('nope'))</script>",
                                baseURL: URL(string: address)!)
-    while tab.webView.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor { !tab.webView.isLoading }
     try await Task.sleep(for: .milliseconds(300))
     #expect(tab.errors == counted)
 }
@@ -2521,7 +2521,7 @@ func errorsAreCountedOnThisMacOnly(address: String, counted: Int) async throws {
     browser.add(tab)
     let page = tab.webView
     page.loadHTMLString("<video></video>", baseURL: somewhere)
-    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor { !page.isLoading }
     let result = try await page.callAsyncJavaScript("""
         const video = document.querySelector('video');
         let settled = false;

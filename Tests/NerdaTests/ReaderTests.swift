@@ -61,7 +61,7 @@ private let notArticles = [
 private func loaded(_ html: String) async throws -> WKWebView {
     let page = WKWebView()
     page.loadHTMLString(html, baseURL: address)
-    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor { !page.isLoading }
     return page
 }
 
@@ -148,7 +148,7 @@ func readerIsNotOfferedForOtherPages(_ html: String) async throws {
     _ = try await page.callAsyncJavaScript("window.still = true", contentWorld: .page)
     await tab.toggleReader()
     let reader = try #require(tab.reader)
-    while reader.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor { !reader.isLoading }
     #expect(try await reader.callAsyncJavaScript("return document.querySelector('h1').textContent",
                                                 contentWorld: .defaultClient) as? String == "A Long Walk")
     await tab.toggleReader()
