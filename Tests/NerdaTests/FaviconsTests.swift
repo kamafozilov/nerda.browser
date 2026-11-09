@@ -184,3 +184,27 @@ private func pixels(_ image: NSImage?) -> [Int] {
     let names = try FileManager.default.contentsOfDirectory(atPath: icons.folder!.path(percentEncoded: false))
     #expect(names.map { $0.removingPercentEncoding } == ["https://kept.invalid"])
 }
+
+/// Rows asking for a site's icon while another fetch of it is under way
+/// wait for it and use what it found: the icon a page names is fetched once,
+/// though several rows wait on its /favicon.ico failing first.
+@MainActor
+@Test func eachIconIsFetchedOnce() async throws {
+    let icons = Favicons()
+    let site = "https://once.invalid"
+    let named = URL(string: "https://once.invalid/icon.png")!
+    var fetched: [URL] = []
+    icons.fetch = { url in
+        fetched.append(url)
+        try await Task.sleep(for: .milliseconds(50))
+        guard url == named else { throw URLError(.fileDoesNotExist) }
+        return (png(16), URLResponse())
+    }
+    let first = Task { await icons.load(site) }
+    for _ in 0..<100 where fetched.isEmpty { await Task.yield() }
+    let rows = (0..<3).map { _ in Task { await icons.load(site, icon: named) } }
+    await first.value
+    for row in rows { await row.value }
+    #expect(icons.icon(site).image != nil)
+    #expect(fetched == [URL(string: "https://once.invalid/favicon.ico")!, named])
+}
