@@ -2,7 +2,7 @@ import AppKit
 import LocalAuthentication
 import SwiftUI
 
-/// The Vault (the sidebar's menu, Window, ⌥⌘L): every saved sign-in, the
+/// The Vault (the sidebar's menu, Window, ⌥⌘P): every saved sign-in, the
 /// passwords and those with another service (Sign in with Google), by kind
 /// down the left with the passwords to look at again under Security, the
 /// list of the kind picked, to search, and the one picked, to see, copy,

@@ -99,6 +99,8 @@ final class Browser: NSObject {
     static let findWholeWordsKey = "findWholeWords"
     /// Counts ⌘Fs, so one with the bar already open still puts the keyboard in it.
     var findRequests = 0
+    /// Counts Window › Downloads (⌥⌘L), each showing the downloads list or putting it away.
+    var downloadsRequests = 0
     /// The saved accounts listed under the sign-in box the caret is in, and a
     /// sign-in's password offered to keep (see Passwords).
     var passwordChoices: PasswordChoices?

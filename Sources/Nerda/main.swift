@@ -211,6 +211,17 @@ struct BrowserView: View {
             transaction.addAnimationCompletion { docked = browser.sidebarOpen }
         }
         .onChange(of: browser.commandBarOpen) { if browser.commandBarOpen { peeking = false } }
+        .onChange(of: browser.downloadsRequests) {
+            if downloadsShown || pageFullscreen { return downloadsShown = false }
+            guard !horizontal, !sidebarShown else { return downloadsShown = true }
+            // A collapsed sidebar comes out first, as it does under the pointer,
+            // and the list opens from its button once it is there.
+            withAnimation(.slide) { peeking = true }
+            Task {
+                try? await Task.sleep(for: .milliseconds(250))
+                downloadsShown = true
+            }
+        }
         .onChange(of: tabsShown) { if !tabsShown { menuShown = false } }
         .onChange(of: tabStyle) {
             menuShown = false
@@ -785,6 +796,9 @@ extension Browser {
         focusPage()
         if selected?.isBlank == true { newTabRequests += 1 }
     }
+
+    /// Window › Downloads (⌥⌘L): the list the downloads button shows, as Safari's and Chrome's key.
+    func toggleDownloads() { downloadsRequests += 1 }
 
     func showFindBar() {
         withAnimation(.easeOut(duration: 0.14)) { findBarOpen = true }
