@@ -57,6 +57,9 @@ struct Sidebar: View {
     /// The tab the pointer is on, and the one whose card shows (`TabPeek`).
     @State private var hovered = Hovered()
     @State private var peeked: Peek?
+    /// The tab in the list with the keyboard, reached with Tab under Full
+    /// Keyboard Access, for the arrows to go on from.
+    @FocusState private var focusedTab: Tab.ID?
     @AppStorage(AIChatsButton.key) private var showsAIChats = true
 
     /// A tab, tile or bookmark being dragged.
@@ -156,6 +159,7 @@ struct Sidebar: View {
                         ForEach(rest) { tab in
                             let id = tab.id
                             ListedTab(browser: browser, tab: tab, selected: id == browser.selectedID)
+                            .focused($focusedTab, equals: id)
                             // Its place stays empty while it is dragged: where it will land.
                             // Off the list, its place closes up.
                             .opacity(dragged?.id == id ? 0 : 1)
@@ -177,6 +181,34 @@ struct Sidebar: View {
                                 removal: .opacity
                             ))
                         }
+                    }
+                    // With the keyboard on a tab: ↑ and ↓ put the one above or
+                    // below on screen and keep the keyboard here for the next,
+                    // Return takes it to the page, Delete closes the tab.
+                    // Only while a row has it: a rename's field and the
+                    // address bar take their own keys first.
+                    .onMoveCommand { direction in
+                        guard let id = focusedTab,
+                              let next = Self.tab(after: id, in: rest.map(\.id),
+                                                  by: direction == .up ? -1 : direction == .down ? 1 : 0) else { return }
+                        browser.select(keepingKeyboard: next)
+                        focusedTab = next
+                        list.scrollTo(next)
+                    }
+                    .onKeyPress(.return) {
+                        guard let id = focusedTab else { return .ignored }
+                        if browser.selectedID == id { browser.focusPage() } else { browser.select(id) }
+                        return .handled
+                    }
+                    .onDeleteCommand {
+                        guard let id = focusedTab else { return }
+                        let ids = rest.map(\.id)
+                        let neighbour = Self.tab(after: id, in: ids, by: 1) ?? Self.tab(after: id, in: ids, by: -1)
+                        withAnimation(.slide) { browser.close(id) }
+                        // Asked first about unsaved work, it is still there.
+                        guard !browser.tabs.contains(where: { $0.id == id }) else { return }
+                        if let selected = browser.selectedID { browser.keepsKeyboard = selected }
+                        focusedTab = neighbour
                     }
                     .padding(.bottom, incoming != nil && incoming == rest.count ? Self.rowHeight + Self.rowGap : 0)
                     .overlay(alignment: .bottom) { if incoming != nil && incoming == rest.count { incomingRow } }
@@ -295,6 +327,12 @@ struct Sidebar: View {
         // In and out, faded; from one tab's card to the next, at once.
         .animation(.easeOut(duration: 0.12), value: peeked == nil)
         .background { PeekWatch(browser: browser, hovered: hovered, peeked: $peeked) }
+    }
+
+    /// The tab `step` places on from `id` among `ids`: none past either end.
+    static func tab(after id: Tab.ID, in ids: [Tab.ID], by step: Int) -> Tab.ID? {
+        guard step != 0, let index = ids.firstIndex(of: id), ids.indices.contains(index + step) else { return nil }
+        return ids[index + step]
     }
 
     private var pins: [Tab] { Array(browser.tabs.prefix { $0.isPinned }) }

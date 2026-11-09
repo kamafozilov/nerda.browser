@@ -1222,6 +1222,10 @@ struct PageView: NSViewRepresentable {
         // that page hides: a page hidden with the keyboard has AppKit look
         // through every view in the window for the next to take it.
         let window = view.window
+        // Put on screen from the sidebar's list by the keyboard: it stays there.
+        let browser = selected?.delegate as? Browser
+        let keepsKeyboard = browser?.keepsKeyboard != nil && browser?.keepsKeyboard == selected?.id
+        browser?.keepsKeyboard = nil
         let focused = (window?.firstResponder as? NSView).flatMap { responder in
             pages.first { responder === $0 || responder.isDescendant(of: $0) }
         }
@@ -1243,7 +1247,7 @@ struct PageView: NSViewRepresentable {
             slot.stage.resized = { [weak selected] in selected?.resize(width: $0.width, height: $0.height) }
             if slot.isHidden { slot.isHidden = false }
             if page.isHidden { page.isHidden = false }
-            guard arriving, takesFocus else { continue }
+            guard arriving, takesFocus, !keepsKeyboard else { continue }
             if let window, focused != nil {
                 window.makeFirstResponder(page)
             } else {
