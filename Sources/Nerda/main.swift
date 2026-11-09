@@ -800,6 +800,20 @@ extension Browser {
     /// Window › Downloads (⌥⌘L): the list the downloads button shows, as Safari's and Chrome's key.
     func toggleDownloads() { downloadsRequests += 1 }
 
+    /// Edit › Find › Use Selection for Find (⌘E), as Safari's: the text
+    /// selected on the page is what Find looks for, in the bar, lit, for ⌘G
+    /// to go through. The keyboard stays on the page, as the selection does.
+    func useSelectionForFind() async {
+        guard let page = selected?.shown,
+              let text = try? await page.callAsyncJavaScript("return getSelection().toString()", contentWorld: .defaultClient) as? String
+        else { return }
+        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, selected?.shown === page else { return }
+        findQuery = query
+        if !findBarOpen { withAnimation(.easeOut(duration: 0.14)) { findBarOpen = true } }
+        findTyped()
+    }
+
     func showFindBar() {
         withAnimation(.easeOut(duration: 0.14)) { findBarOpen = true }
         findRequests += 1
