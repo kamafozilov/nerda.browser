@@ -1530,6 +1530,7 @@ private struct ShortcutsSettings: View {
             ("Find", "Search for text on the page", "⌘F"),
             ("Find Next", "Go to the next match", "⌘G"),
             ("Find Previous", "Go to the match before", "⇧⌘G"),
+            ("Use Selection for Find", "Look for the text you selected on the page", "⌘E"),
             ("Bookmark This Tab", "Keep the page in your bookmarks, or take it out", "⌘D"),
             ("Print", "Print the page, or save it as a PDF from the print sheet", "⌘P"),
             ("Zoom In", "Make the page bigger", "⌘+"),

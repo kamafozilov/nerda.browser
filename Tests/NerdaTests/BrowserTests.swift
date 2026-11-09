@@ -886,6 +886,24 @@ func iconsAreKeptPerOrigin(url: String, origin: String?) {
     #expect(try await selected() == "")
 }
 
+/// Use Selection for Find (⌘E) looks for the text selected on the page, with
+/// the bar open on it; with nothing selected, the query stays.
+@MainActor
+@Test func useSelectionForFind() async throws {
+    let browser = Browser()
+    let tab = Tab()
+    browser.add(tab)
+    let page = tab.webView
+    page.loadHTMLString("<p>needle in a <b id=pick>haystack</b></p>", baseURL: somewhere)
+    while page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    browser.findQuery = "needle"
+    await browser.useSelectionForFind()
+    #expect(browser.findQuery == "needle" && !browser.findBarOpen)
+    _ = try await page.callAsyncJavaScript("getSelection().selectAllChildren(document.getElementById('pick'))", contentWorld: .page)
+    await browser.useSelectionForFind()
+    #expect(browser.findQuery == "haystack" && browser.findBarOpen)
+}
+
 /// What the find bar shows once the look `look` starts comes back.
 @MainActor
 private func found(in browser: Browser, by look: () -> Void) async throws -> Find.Matches? {

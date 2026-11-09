@@ -59,7 +59,7 @@ final class AppMenu: NSObject {
         #selector(toggleResponsive), #selector(toggleJavaScript), #selector(viewSource), #selector(nextTab),
         #selector(previousTab), #selector(selectTab(_:)), #selector(moveTabToNewWindow), #selector(toggleBookmark),
         #selector(toggleSidebar), #selector(togglePin), #selector(duplicateTab), #selector(closeOtherTabs),
-        #selector(closeTabsBelow),
+        #selector(closeTabsBelow), #selector(useSelectionForFind),
     ]
 
     init(browser: Browser) {
@@ -180,6 +180,7 @@ final class AppMenu: NSObject {
                     item("Find…", #selector(showFind), "f", target: self),
                     item("Find Next", #selector(findNext), "g", target: self),
                     item("Find Previous", #selector(findPrevious), "g", [.command, .shift], target: self),
+                    item("Use Selection for Find", #selector(useSelectionForFind), "e", target: self),
                 ]),
             ]),
             // macOS adds Enter Full Screen here by itself.
@@ -500,6 +501,10 @@ final class AppMenu: NSObject {
     @objc private func showFind() { browser.showFindBar() }
     @objc private func findNext() { browser.find() }
     @objc private func findPrevious() { browser.find(backwards: true) }
+    @objc private func useSelectionForFind() {
+        let browser = browser
+        Task { await browser.useSelectionForFind() }
+    }
 
     private func hidden(_ item: NSMenuItem) -> NSMenuItem {
         item.isHidden = true
@@ -589,7 +594,7 @@ extension AppMenu: NSMenuItemValidation {
         case #selector(toggleMute):
             item.title = browser.selected?.isMuted == true ? "Unmute Tab" : "Mute Tab"
             return browser.selected?.hasPage == true
-        case #selector(showFind), #selector(inspect(_:)), #selector(clearSiteData), #selector(printPage), #selector(exportPDF):
+        case #selector(showFind), #selector(useSelectionForFind), #selector(inspect(_:)), #selector(clearSiteData), #selector(printPage), #selector(exportPDF):
             return browser.selected?.hasPage == true
         case #selector(toggleReader):
             item.title = browser.selected?.reader != nil ? "Hide Reader" : "Show Reader"
