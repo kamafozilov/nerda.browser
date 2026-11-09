@@ -685,7 +685,7 @@ extension Browser {
             guard await vault.save(logins) else {
                 return Self.tell("Couldn't import the passwords", "The keychain didn't take them.")
             }
-            Self.tell(
+            Self.note(
                 logins.count == 1 ? "1 password imported" : "\(logins.count) passwords imported",
                 "The file holds your passwords as plain text: delete it now that they are in the keychain."
             )
@@ -697,6 +697,19 @@ extension Browser {
         alert.messageText = title
         alert.informativeText = message
         alert.runModal()
+    }
+
+    /// Something that went as asked, still worth saying: on the window in
+    /// use, which it holds up alone, rather than on all of Nerda.
+    static func note(_ title: String, _ message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else {
+            alert.runModal()
+            return
+        }
+        alert.beginSheetModal(for: window)
     }
 
     /// Where the box is, from the page's CSS pixels to points.

@@ -371,7 +371,8 @@ extension Browser {
     }
 
     /// File › Import Bookmarks: a file Chrome, Safari, Firefox or Arc
-    /// exported, in a folder of its own at the end.
+    /// exported, in a folder of its own at the end. Done, it says nothing:
+    /// the folder is there in the sidebar, which opens to show it.
     func importBookmarks() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.html]
@@ -386,9 +387,10 @@ extension Browser {
         guard count > 0 else {
             return Self.tell("No bookmarks in the file", "It isn't a bookmarks file exported from a browser.")
         }
-        withAnimation(.slide) { bookmarks.add(Bookmarks.Item(title: "Imported", children: found)) }
-        Self.tell(count == 1 ? "1 bookmark imported" : "\(count) bookmarks imported",
-                  "They are in the Imported folder, at the end of your bookmarks.")
+        withAnimation(.slide) {
+            bookmarks.add(Bookmarks.Item(title: "Imported", children: found))
+            sidebarOpen = true
+        }
     }
 
     func exportBookmarks() {
