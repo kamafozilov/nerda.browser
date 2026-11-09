@@ -21,6 +21,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Fixed
 
+- Close Tab (⌘W) with Task Manager, the Vault or About in front closes that window, as in Safari, where before it closed a tab in the browser window behind it and left the window open. The other tab commands, such as ⌘1 to ⌘9 and ⌃Tab, leave the tabs behind it alone too.
 - A page that tries to open a pop-up as it loads now always shows the blocked pop-up button in the address bar. Before, the button sometimes did not appear, and the pop-up could not be opened.
 
 ## [0.0.27] - 2026-10-19
