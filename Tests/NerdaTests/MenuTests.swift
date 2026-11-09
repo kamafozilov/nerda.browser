@@ -51,3 +51,27 @@ private func ownWindow() -> NSWindow {
     #expect(AppMenu.newWindowProfile(front: nil, lastUsed: nil).isMain)
     #expect(AppMenu.newWindowProfile(front: personal, lastUsed: workBrowser).isMain)
 }
+
+/// Every item of the menu bar, in its submenus too.
+@MainActor
+private func items(of menu: NSMenu) -> [NSMenuItem] {
+    menu.items.flatMap { [$0] + ($0.submenu.map(items) ?? []) }
+}
+
+/// No two of the menu bar's items answer to the same key, and Downloads and
+/// the Vault have the keys Safari and Chrome give Downloads.
+@MainActor
+@Test func menuKeysAreEachTheirOwn() {
+    let menu = AppMenu(browser: Browser()).bar()
+    let keyed = items(of: menu).filter { !$0.keyEquivalent.isEmpty }
+    var seen: [String: String] = [:]
+    for item in keyed {
+        let key = "\(item.keyEquivalentModifierMask.rawValue) \(item.keyEquivalent)"
+        #expect(seen[key] == nil, "\(item.title) has the key of \(seen[key] ?? "")")
+        seen[key] = item.title
+    }
+    let downloads = keyed.first { $0.title == "Downloads" }
+    #expect(downloads?.keyEquivalent == "l" && downloads?.keyEquivalentModifierMask == [.command, .option])
+    let vault = keyed.first { $0.title == "Vault" }
+    #expect(vault?.keyEquivalent == "p" && vault?.keyEquivalentModifierMask == [.command, .option])
+}

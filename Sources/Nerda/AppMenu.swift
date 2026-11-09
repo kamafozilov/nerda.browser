@@ -66,6 +66,16 @@ final class AppMenu: NSObject {
     }
 
     func install() {
+        let bar = self.bar()
+        NSApp.mainMenu = bar
+        NSApp.windowsMenu = bar.item(withTitle: "Window")?.submenu
+        NSApp.servicesMenu = bar.item(withTitle: "Nerda")?.submenu?.item(withTitle: "Services")?.submenu
+        NSApp.helpMenu = bar.item(withTitle: "Help")?.submenu
+        monitorKeys()
+    }
+
+    /// The menus, each item with its key.
+    func bar() -> NSMenu {
         let windowMenu = submenu("Window", [
             item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
             item("Zoom", #selector(NSWindow.performZoom(_:))),
@@ -76,7 +86,9 @@ final class AppMenu: NSObject {
             item("Merge All Windows", #selector(mergeAllWindows), target: self),
             .separator(),
             item("Task Manager", #selector(openTaskManager), target: self),
-            item("Vault", #selector(openVault), "l", [.command, .option], target: self),
+            // ⌥⌘L, as Safari's and Chrome's; the Vault has ⌥⌘P, P for passwords.
+            item("Downloads", #selector(toggleDownloads), "l", [.command, .option], target: self),
+            item("Vault", #selector(openVault), "p", [.command, .option], target: self),
             .separator(),
             item("Bring All to Front", #selector(NSApplication.arrangeInFront(_:))),
         ] + (1...9).map { number in
@@ -212,10 +224,10 @@ final class AppMenu: NSObject {
         fileMenu.submenu?.delegate = self
         historyMenu.submenu?.delegate = self
         bookmarksMenu.submenu?.delegate = self
-        NSApp.mainMenu = bar
-        NSApp.windowsMenu = windowMenu.submenu
-        NSApp.servicesMenu = servicesMenu.submenu
-        NSApp.helpMenu = helpMenu.submenu
+        return bar
+    }
+
+    private func monitorKeys() {
 
         // A focused page takes ⌃Tab as a key of its own, so it would never
         // reach the menu: it is caught on its way in instead. So are the keys
@@ -251,9 +263,9 @@ final class AppMenu: NSObject {
     /// ⌘T and the rest by their place, as on a US keyboard, for a layout that
     /// types no Latin letters (Russian, Uzbek Cyrillic): there ⌘T types "е".
     private static let latinKeys: [UInt16: String] = [17: "t", 13: "w", 37: "l", 12: "q", 43: ",", 0: "a", 45: "n", 2: "d",
-                                                      34: "i", 38: "j", 8: "c", 15: "r", 32: "u", 31: "o"]
+                                                      34: "i", 38: "j", 8: "c", 15: "r", 32: "u", 31: "o", 35: "p"]
 
-    /// ⌘T, ⌘N, ⌘W, ⌘L, ⌘O, ⌘Q, ⌘D and ⌘, ⌘⇧W, ⌘⇧A and ⌘⇧N, ⌃⌘R, and Developer's ⌥⌘ keys, straight to the menu while
+    /// ⌘T, ⌘N, ⌘W, ⌘L, ⌘O, ⌘Q, ⌘D and ⌘, ⌘⇧W, ⌘⇧A and ⌘⇧N, ⌃⌘R, Downloads' ⌥⌘L, the Vault's ⌥⌘P and Developer's ⌥⌘ keys, straight to the menu while
     /// a page has the keyboard (and no sheet or dialog is up).
     private static func browserKey(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
@@ -262,7 +274,7 @@ final class AppMenu: NSObject {
         let key = typed.allSatisfy(\.isASCII) ? typed : latinKeys[event.keyCode] ?? typed
         let reserved = modifiers == .command && ["t", "n", "w", "l", "o", "q", "d", ","].contains(key)
             || modifiers == [.command, .shift] && ["t", "w", "a", "n"].contains(key)
-            || modifiers == [.command, .option] && ["i", "j", "c", "r", "u"].contains(key)
+            || modifiers == [.command, .option] && ["i", "j", "c", "r", "u", "l", "p"].contains(key)
             || modifiers == [.command, .control] && key == "r"
         return reserved && NSApp.mainMenu?.performKeyEquivalent(with: event) == true
     }
@@ -311,6 +323,7 @@ final class AppMenu: NSObject {
     @objc private func openSettings() { shown.openSettings() }
     @objc private func openHistory() { shown.openHistory() }
     @objc private func openTaskManager() { TaskManager.show() }
+    @objc private func toggleDownloads() { shown.toggleDownloads() }
     @objc private func openVault() { VaultWindow.show(browser.profile) }
     @objc private func searchTabs() { shown.showCommandBar() }
     @objc private func openLocation() { shown.editAddress() }
