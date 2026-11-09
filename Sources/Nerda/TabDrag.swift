@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// A tab dragged off its list, as Safari and Chrome tear one off: its place
 /// there closes up (a pinned site's tile stays, faded, as only its page goes),
@@ -163,3 +164,52 @@ struct IncomingWatch: View {
     }
 }
 
+
+/// Links and files dropped on the tabs, from a page, another app or the
+/// Finder, as Chrome takes them on its tab strip: while over the tabs, a gap
+/// opens where they would land (`index`, the one a tab from another window
+/// opens, `locate` finding it from the point in the view's own space); let
+/// go, each opens in a new tab there (`open`). Only what File › Open File…
+/// opens, or a web address (`ExternalNavigation.accepts`).
+struct LinkDrop: DropDelegate {
+    static let types: [UTType] = [.fileURL, .url]
+
+    @Binding var index: Int?
+    let locate: (CGPoint) -> Int?
+    let open: ([URL], Int) -> Void
+
+    func validateDrop(info: DropInfo) -> Bool { info.hasItemsConforming(to: Self.types) }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        let found = locate(info.location)
+        if found != index { index = found }
+        return DropProposal(operation: found == nil ? .forbidden : .copy)
+    }
+
+    func dropExited(info: DropInfo) { index = nil }
+
+    func performDrop(info: DropInfo) -> Bool {
+        index = nil
+        guard let at = locate(info.location) else { return false }
+        let providers = info.itemProviders(for: Self.types)
+        let open = open
+        Task {
+            var urls: [URL] = []
+            for provider in providers {
+                if let url = await Self.url(from: provider) { urls.append(url) }
+            }
+            open(urls.filter(ExternalNavigation.accepts), at)
+        }
+        return true
+    }
+
+    /// The address dragged, a file's by its path: the Finder hands over a
+    /// reference (`file:///.file/id=…`), which has no extension to tell its kind by.
+    static func url(from provider: NSItemProvider) async -> URL? {
+        let url = await withCheckedContinuation { (done: CheckedContinuation<URL?, Never>) in
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in done.resume(returning: url) }
+        }
+        guard let url, url.isFileURL else { return url }
+        return (url as NSURL).filePathURL ?? url
+    }
+}

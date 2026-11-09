@@ -484,6 +484,13 @@ private struct DownloadRow: View {
             }
         }
         .onHover { hovering = $0 }
+        // Done, the file itself is dragged out: to the Finder, Mail, a page's upload.
+        .onDrag {
+            guard download.state == .finished, let file = download.file,
+                  let item = NSItemProvider(contentsOf: file) else { return NSItemProvider() }
+            item.suggestedName = file.lastPathComponent
+            return item
+        }
         // Opens the file, as a double-click on it anywhere else does.
         .onTapGesture(count: 2) {
             if download.state == .finished, let file = download.file { NSWorkspace.shared.open(file) }

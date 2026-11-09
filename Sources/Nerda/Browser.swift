@@ -264,6 +264,18 @@ final class Browser: NSObject {
         return tab
     }
 
+    /// Links or files dropped on the tabs (`LinkDrop`): each in a new tab, in
+    /// their order, from `position` among the tabs that are `among` them,
+    /// the first on screen, as Chrome opens a link dropped on its tabs.
+    @discardableResult
+    func open(_ urls: [URL], at position: Int, among: (Tab) -> Bool = { _ in true }) -> [Tab] {
+        urls.enumerated().map { n, url in
+            let tab = open(url, inBackground: n > 0)
+            move(tab.id, pinned: false, to: position + n, among: among)
+            return tab
+        }
+    }
+
     /// Settings › Tabs › Load background tabs when shown. Off, as in Safari
     /// and Chrome, which load them at once.
     static let waitsKey = "backgroundTabsWait"

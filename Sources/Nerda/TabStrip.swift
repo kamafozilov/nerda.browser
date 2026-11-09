@@ -95,6 +95,12 @@ struct TabStrip: View {
         .frame(height: Self.height)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { [layout] in layout.frame = $0 }
         .background { IncomingWatch(browser: browser, index: $incoming, locate: locateIncoming) }
+        // A link or file dropped on the tabs opens there (see the sidebar's).
+        .onDrop(of: LinkDrop.types, delegate: LinkDrop(index: $incoming, locate: { [layout] point in
+            locateIncoming(CGPoint(x: layout.frame.minX + point.x, y: layout.frame.minY + point.y))
+        }, open: { [browser] urls, index in
+            withAnimation(.slide) { browser.open(urls, at: index) }
+        }))
         .coordinateSpace(.named(Self.space))
         // Moves the window, as the title bar under it would. Off the tabs,
         // right-clicked, the menu for them all: their own show on them.
