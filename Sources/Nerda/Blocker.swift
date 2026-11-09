@@ -309,7 +309,7 @@ final class Blocker {
 
     /// A list as fetched now (`fetch`, or when there is no copy yet), or as
     /// kept in `cached` when it is unchanged or can't be had.
-    nonisolated static func list(from url: URL, keptIn cached: URL, fetch: Bool, session: URLSession) async -> String? {
+    @concurrent nonisolated static func list(from url: URL, keptIn cached: URL, fetch: Bool, session: URLSession) async -> String? {
         // What the server called this copy, sent back so that a list
         // unchanged since is answered in a few bytes (304), not sent again.
         let validators = cached.appendingPathExtension("validators")

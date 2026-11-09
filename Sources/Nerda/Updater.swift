@@ -279,7 +279,7 @@ final class Updater {
         }
     }
 
-    nonisolated private static func latest() async throws -> Release {
+    @concurrent nonisolated private static func latest() async throws -> Release {
         let request = URLRequest(url: feed, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw Swap.Refused.feed }
