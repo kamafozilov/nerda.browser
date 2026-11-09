@@ -900,6 +900,7 @@ NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
 #endif
 
 let delegate = AppDelegate(window: window, browser: browser)
+delegate.dockMenu = menu.dock
 app.delegate = delegate
 window.delegate = delegate
 // SIGTERM (`kill`, and watch.sh putting in a new build) would end the app on

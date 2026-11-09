@@ -42,3 +42,25 @@ import WebKit
     #expect(try Data(contentsOf: folder.appending(path: "paper (1).pdf")) == Data("%PDF".utf8))
     #expect(item.fraction == 1)
 }
+
+/// The Dock icon shows how many downloads are under way, and nothing once
+/// none is; a paused, finished or cancelled one isn't counted.
+@MainActor
+@Test func theDockCountsDownloadsUnderWay() {
+    let file = URL(filePath: "/tmp/nerda-dock-badge-test")
+    let first = Download(saving: file, size: 10), second = Download(saving: file, size: 10)
+    #expect(DockBadge.label(of: []) == nil)
+    #expect(DockBadge.label(of: [first, second]) == "2")
+    second.finish()
+    #expect(DockBadge.label(of: [first, second]) == "1")
+    first.cancel()
+    #expect(DockBadge.label(of: [first, second]) == nil)
+}
+
+/// The Dock icon's menu opens a tab, and an incognito window.
+@MainActor
+@Test func theDockMenuOpensTabsAndWindows() {
+    let titles = AppMenu(browser: Browser()).dock().items.map(\.title)
+    #expect(titles.first == "New Tab")
+    #expect(titles.last == "New Incognito Window")
+}
