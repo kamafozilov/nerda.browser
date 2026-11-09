@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 /// Pages kept to come back to, in folders, and folders in those: down the
 /// sidebar between the pinned sites and New Tab, and in the Bookmarks menu.
@@ -72,7 +73,7 @@ final class Bookmarks {
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(items).write(to: file, options: .atomic)
         } catch {
-            NSLog("Nerda: couldn't save bookmarks: \(error)")
+            Logger.bookmarks.error("couldn't save bookmarks: \(String(describing: error), privacy: .private)")
         }
     }
 

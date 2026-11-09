@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import Observation
 import WebKit
+import os
 
 /// Ads and trackers, stopped where WebKit loads things (decisions #8), so a
 /// page never spends time, memory or battery on them, and the parts of pages
@@ -298,7 +299,7 @@ final class Blocker {
                 try? digest.write(to: compiledDigestFile)
                 exit(missing ? someMissing : 0)
             } catch {
-                NSLog("Nerda: couldn't compile the block list: \(error)")
+                Logger.blocker.error("couldn't compile the block list: \(String(describing: error), privacy: .private)")
                 exit(1)
             }
         }
@@ -324,7 +325,7 @@ final class Blocker {
         if let kept, (response as? HTTPURLResponse)?.statusCode == 304 { return kept }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200,
               let fetched = ContentRules.downloadedList(data) else {
-            NSLog("Nerda: couldn't fetch a valid block list from %@", url.absoluteString)
+            Logger.blocker.error("couldn't fetch a valid block list from \(url.absoluteString, privacy: .private)")
             return kept
         }
         try? FileManager.default.createDirectory(at: cached.deletingLastPathComponent(), withIntermediateDirectories: true)

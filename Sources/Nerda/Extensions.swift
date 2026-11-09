@@ -2,6 +2,7 @@ import AppKit
 import IOKit.pwr_mgt
 import SwiftUI
 import WebKit
+import os
 
 // Chrome extensions, on WebKit.
 //
@@ -275,7 +276,7 @@ final class Extensions: NSObject {
     }
 
     func noteError(_ text: String, for id: String) {
-        NSLog("Nerda: extension %@: %@", id, text)
+        Logger.extensions.error("extension \(id, privacy: .public): \(text, privacy: .private)")
         errors[id] = Array(((errors[id] ?? []) + [text]).suffix(40))
     }
 
@@ -473,7 +474,7 @@ final class Extensions: NSObject {
             actionsChanged += 1
             return true
         } catch {
-            NSLog("Nerda: couldn't load extension %@: %@", item.id, error.localizedDescription)
+            Logger.extensions.error("couldn't load extension \(item.id, privacy: .public): \(error.localizedDescription, privacy: .private)")
             noteError("couldn't start: \(error.localizedDescription)", for: item.id)
             return false
         }
@@ -871,7 +872,7 @@ final class Extensions: NSObject {
                 if installed[index].enabled { await load(installed[index]) }
             }
         } catch {
-            NSLog("Nerda: update of extension %@ failed: %@", item.id, error.localizedDescription)
+            Logger.extensions.error("update of extension \(item.id, privacy: .public) failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 

@@ -1,6 +1,7 @@
 import AppKit
 import Security
 import WebKit
+import os
 
 /// Browsing of its own on this Mac, as Safari's profiles: work kept apart from
 /// personal, each with its own cookies and site data, history, bookmarks, open
@@ -113,7 +114,7 @@ final class Profile: Identifiable {
                 try await WKWebsiteDataStore.remove(forIdentifier: id)
                 return true
             } catch {
-                NSLog("Nerda: couldn't remove a profile's website data yet: \(error)")
+                Logger.profiles.error("couldn't remove a profile's website data yet: \(String(describing: error), privacy: .private)")
             }
         }
         return false
@@ -190,7 +191,7 @@ final class Profiles {
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(saved).write(to: file, options: .atomic)
         } catch {
-            NSLog("Nerda: couldn't save profiles: \(error)")
+            Logger.profiles.error("couldn't save profiles: \(String(describing: error), privacy: .private)")
         }
     }
 

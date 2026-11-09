@@ -532,7 +532,7 @@ final class History {
             try JSONEncoder().encode(visits).write(to: file, options: .atomic)
             return true
         } catch {
-            NSLog("Nerda: couldn't save history: \(error)")
+            Logger.history.error("couldn't save history: \(String(describing: error), privacy: .private)")
             return false
         }
     }
