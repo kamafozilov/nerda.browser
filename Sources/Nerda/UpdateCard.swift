@@ -43,7 +43,7 @@ struct UpdateCard: View {
                     .frame(width: 26, height: 26)
                     .background(accent.gradient, in: Circle())
                     .contentTransition(.symbolEffect(.replace))
-                    .symbolEffect(.bounce, value: hovering && !downloading)
+                    .symbolEffect(.bounce, value: hovering && !downloading && !Motion.reduced)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
                         .font(.system(size: 12, weight: .semibold))

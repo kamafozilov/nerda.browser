@@ -35,7 +35,7 @@ final class Feedback: NSObject, MXMetricManagerSubscriber {
         let report = Self.describe(last)
         Task { @MainActor in
             UserDefaults.standard.set(report, forKey: Self.crashKey)
-            withAnimation(.spring(duration: 0.5, bounce: 0.3)) { Feedback.shared.crash = report }
+            withAnimation(Motion.moving(.spring(duration: 0.5, bounce: 0.3))) { Feedback.shared.crash = report }
         }
     }
 
@@ -87,7 +87,7 @@ final class Feedback: NSObject, MXMetricManagerSubscriber {
 
     func dismissCrash() {
         UserDefaults.standard.removeObject(forKey: Self.crashKey)
-        withAnimation(.spring(duration: 0.4)) { crash = nil }
+        withAnimation(Motion.moving(.spring(duration: 0.4))) { crash = nil }
     }
 
     /// In the regular window, where you may be signed in to GitHub, once

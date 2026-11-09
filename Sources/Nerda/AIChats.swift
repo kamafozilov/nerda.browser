@@ -168,7 +168,7 @@ private struct AIChatsList: View {
             LazyVGrid(columns: Array(repeating: GridItem(.fixed(AIChatIcon.tileWidth), spacing: 4), count: 3), spacing: 4) {
                 ForEach(chats.list) { chat in
                     AIChatTile(title: chat.name, action: { open(chat) }) { AIChatIcon(chat: chat) }
-                        .contextMenu { Button("Remove") { withAnimation { chats.remove(chat) } } }
+                        .contextMenu { Button("Remove") { withAnimation(Motion.moving(.default)) { chats.remove(chat) } } }
                 }
                 AIChatTile(title: "Add", action: { adding = true }) {
                     RoundedRectangle(cornerRadius: AIChatIcon.radius, style: .continuous)

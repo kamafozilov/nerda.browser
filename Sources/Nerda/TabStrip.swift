@@ -211,7 +211,7 @@ struct TabStrip: View {
                     // Back to where it was pinned, from wherever it has been since.
                     .simultaneousGesture(TapGesture(count: 2).onEnded { browser.tabs.first { $0.id == id }?.goHome() })
                     .contextMenu { TabMenu(browser: browser, id: id) }
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+                    .transition(Motion.moving(.scale(scale: 0.8).combined(with: .opacity)))
                 } else {
                     Color.clear.frame(width: Self.icon, height: 26)
                 }
@@ -221,7 +221,7 @@ struct TabStrip: View {
         .padding(2)
         .background(Color.primary.opacity(0.08), in: shape)
         .overlay(shape.strokeBorder(Color.primary.opacity(0.1)))
-        .animation(.snappy(duration: 0.2), value: landing)
+        .animation(Motion.moving(.snappy(duration: 0.2)), value: landing)
     }
 
     /// The tabs in `room`, each an even share of it, with the + button after
@@ -252,9 +252,9 @@ struct TabStrip: View {
                 }
             }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.tabs = $0 }
-            .animation(.snappy(duration: 0.2), value: landing)
-            .animation(.snappy(duration: 0.2), value: incoming)
-            .animation(.snappy(duration: 0.2), value: detached)
+            .animation(Motion.moving(.snappy(duration: 0.2)), value: landing)
+            .animation(Motion.moving(.snappy(duration: 0.2)), value: incoming)
+            .animation(Motion.moving(.snappy(duration: 0.2)), value: detached)
             // ponytail: past ~60 tabs the last are cut off here; ⌘⇧A and ⌃Tab still reach them.
             .frame(width: min(CGFloat(shown) * width, room), alignment: .leading)
             .clipShape(Rectangle().inset(by: -Self.flare))
@@ -337,7 +337,7 @@ struct TabStrip: View {
         } else {
             let index = tab.isPinned ? Self.index(at: middle, from: layout.pins.minX, width: icon)
                 : Self.index(at: middle, from: layout.tabs.minX, width: tabWidth)
-            withAnimation(.snappy(duration: 0.2)) { browser.move(id, pinned: tab.isPinned, to: index) }
+            withAnimation(Motion.moving(.snappy(duration: 0.2))) { browser.move(id, pinned: tab.isPinned, to: index) }
         }
         if over != landing { landing = over }
     }
@@ -353,7 +353,7 @@ struct TabStrip: View {
             return
         }
         if landing == nil, let drag = dragged, let middle = middle(of: id) {
-            withAnimation(.snappy(duration: 0.18)) {
+            withAnimation(Motion.moving(.snappy(duration: 0.18))) {
                 pointer.at.x = middle + drag.grab
             } completion: {
                 // Unless another drag has begun since.

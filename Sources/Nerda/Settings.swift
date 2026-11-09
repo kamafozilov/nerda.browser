@@ -1946,7 +1946,7 @@ private struct LanguagesDialog: View {
                 .contentShape(Rectangle())
                 .gesture(DragGesture(coordinateSpace: .global)
                     .onChanged { move(language, by: $0.translation.height) }
-                    .onEnded { _ in withAnimation(.snappy(duration: 0.2)) { drag = nil } })
+                    .onEnded { _ in withAnimation(Motion.moving(.snappy(duration: 0.2))) { drag = nil } })
             Text("\(index + 1)")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Palette.muted)
@@ -1980,7 +1980,7 @@ private struct LanguagesDialog: View {
         var taken = drag?.language == language ? drag!.taken : 0
         let target = min(max(index + Int(((offset - taken) / Self.rowHeight).rounded()), 0), languages.count - 1)
         if target != index {
-            withAnimation(.snappy(duration: 0.2)) {
+            withAnimation(Motion.moving(.snappy(duration: 0.2))) {
                 languages.move(fromOffsets: [index], toOffset: target > index ? target + 1 : target)
             }
             taken += CGFloat(target - index) * Self.rowHeight

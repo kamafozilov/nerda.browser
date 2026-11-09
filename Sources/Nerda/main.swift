@@ -111,8 +111,10 @@ struct BrowserView: View {
                     // Only out over the page does it matter: pinned, the pointer
                     // coming and going would have the whole window worked out again.
                     .onHover { over in if peeking || overPeek { overPeek = over } }
-                    // Far enough that its shadow goes too.
-                    .offset(x: sidebarShown ? 0 : -(sidebarWidth + 32))
+                    // Far enough that its shadow goes too. With Reduce Motion
+                    // it fades in and out where it is instead.
+                    .offset(x: sidebarShown || Motion.reduced ? 0 : -(sidebarWidth + 32))
+                    .animation(Motion.fade) { $0.opacity(sidebarShown || !Motion.reduced ? 1 : 0) }
                     .allowsHitTesting(sidebarShown)
                     .accessibilityHidden(!sidebarShown)
 
@@ -137,7 +139,7 @@ struct BrowserView: View {
                         // or just under it, at the tabs' far end.
                         .padding(horizontal ? .trailing : .leading, 8)
                         .padding(horizontal ? .top : .bottom, horizontal ? TabStrip.height : 46)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: horizontal ? .topTrailing : .bottomLeading)))
+                        .transition(Motion.moving(.opacity.combined(with: .scale(scale: 0.96, anchor: horizontal ? .topTrailing : .bottomLeading))))
                 }
             }
         }
@@ -179,13 +181,13 @@ struct BrowserView: View {
                     // Across the middle of the window.
                     .frame(width: window.size.width)
                 }
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                .transition(Motion.moving(.opacity.combined(with: .scale(scale: 0.98))))
             }
         }
         .overlay {
             if let releases = Updater.shared.news {
                 WhatsNew(releases: releases) { withAnimation(.easeOut(duration: 0.2)) { Updater.shared.news = nil } }
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    .transition(Motion.moving(.opacity.combined(with: .scale(scale: 0.98))))
             }
         }
         // What is under the lock (tab titles) is hidden from accessibility too.
@@ -476,18 +478,18 @@ private struct PageCard: View {
             if browser.findBarOpen, browser.selected?.hasPage == true {
                 FindBar(browser: browser)
                     .padding(12)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(Motion.moving(.opacity.combined(with: .move(edge: .top))))
             }
         }
         .overlay(alignment: .top) {
             if let offer = browser.passwordOffer, offer.tab == browser.selectedID {
                 VaultOfferCard(browser: browser, offer: offer)
                     .padding(.top, 12)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(Motion.moving(.opacity.combined(with: .move(edge: .top))))
             } else if let offer = browser.autofillOffers.first(where: { $0.tab == browser.selectedID }) {
                 AutoFillOfferBar(browser: browser, offer: offer)
                     .padding(.top, 12)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(Motion.moving(.opacity.combined(with: .move(edge: .top))))
             }
         }
         .overlay(alignment: .topLeading) {

@@ -9,7 +9,7 @@ struct WallpaperPicker: View {
     @State private var open = false
     @State private var hovering = false
 
-    private static let motion = Animation.spring(duration: 0.3, bounce: 0.12)
+    private static var motion: Animation { Motion.fading(.spring(duration: 0.3, bounce: 0.12)) }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -22,7 +22,7 @@ struct WallpaperPicker: View {
                 if open {
                     WallpaperStrip(backdrop: backdrop)
                         .padding(.horizontal, 16)
-                        .transition(.scale(scale: 0.94, anchor: .bottom).combined(with: .opacity))
+                        .transition(Motion.moving(.scale(scale: 0.94, anchor: .bottom).combined(with: .opacity)))
                 }
                 Button {
                     withAnimation(Self.motion) { open.toggle() }
@@ -165,7 +165,7 @@ struct WallpaperStrip: View {
         guard let now = scrolled.geometry else { return }
         let overflow = now.contentSize.width - now.containerSize.width
         let x = min(max(0, now.contentOffset.x + pages * now.containerSize.width * 0.8), overflow)
-        withAnimation(.spring(duration: 0.35, bounce: 0)) { position.scrollTo(x: x) }
+        withAnimation(Motion.moving(.spring(duration: 0.35, bounce: 0))) { position.scrollTo(x: x) }
     }
 
     private func removeButton(_ name: String) -> some View {
@@ -240,10 +240,10 @@ private struct WallpaperTile: View {
                     .symbolRenderingMode(.palette)
                     .foregroundStyle(.black, .white)
                     .padding(5)
-                    .transition(.scale.combined(with: .opacity))
+                    .transition(Motion.moving(.scale.combined(with: .opacity)))
             }
         }
-        .scaleEffect(hovering && !selected ? 1.03 : 1)
+        .scaleEffect(hovering && !selected && !Motion.reduced ? 1.03 : 1)
         .animation(.easeOut(duration: 0.12), value: hovering)
         .contentShape(shape)
         .onHover { hovering = $0 }

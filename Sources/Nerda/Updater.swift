@@ -154,7 +154,7 @@ final class Updater {
                 return
             }
             if Version.isNewer(found.version, than: Self.current) {
-                withAnimation(.spring(duration: 0.5, bounce: 0.3)) { self.found = found }
+                withAnimation(Motion.moving(.spring(duration: 0.5, bounce: 0.3))) { self.found = found }
                 state = .available(found.version)
             } else {
                 state = .upToDate
