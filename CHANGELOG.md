@@ -9,6 +9,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Added
 
+- Drop a link from a page, or an HTML or PDF file from the Finder, on the tabs in the sidebar or across the top, and it opens in a new tab where you let it go, as in Chrome. A finished download in the Downloads list can be dragged out to the Finder, Mail or another app.
 - Duplicate Tab, in Window and a tab's right-click menu, opens the same page in a new tab right after it, with its Back and Forward history. Window › Pin Tab and File › Close Other Tabs and Close Tabs Below do from the menu bar what a tab's right-click menu does, and that menu now also has Rename and Copy Link.
 - ⇧⌘] and ⇧⌘[, and ⌥⌘→ and ⌥⌘←, go to the next and the previous tab, as in Safari and Chrome, besides ⌃Tab and ⌃⇧Tab. They work while a page has the keyboard and on any keyboard layout.
 - The sidebar's menu works from the keyboard, as a system menu does: ↑ and ↓ move from row to row, → or Return opens History or Developer, ← or Esc closes it again, and Return picks the row. VoiceOver reads its rows as buttons, with whether each is ticked or opens a submenu.

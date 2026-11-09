@@ -113,3 +113,38 @@ private func withAccessibility(_ body: () async throws -> Void) async rethrows {
     for _ in 0..<50 where !pageHasKeyboard(b) { try await Task.sleep(for: .milliseconds(20)) }
     #expect(pageHasKeyboard(b))
 }
+
+/// Links dropped on the tabs open in new tabs where they are let go, in
+/// their order, the first on screen.
+@MainActor
+@Test func droppedLinksOpenWhereTheyAreLetGo() {
+    let browser = Browser()
+    browser.add([Nerda.Tab(restoring: saved("Home", pinned: true)), Nerda.Tab(restoring: saved("One")),
+                 Nerda.Tab(restoring: saved("Two")), Nerda.Tab(restoring: saved("Three"))])
+    let first = URL(string: "https://first.example/")!, second = URL(string: "https://second.example/")!
+    let opened = browser.open([first, second], at: 1, among: Browser.listed)
+    #expect(browser.tabs.map(\.title) == ["Home", "One", opened[0].title, opened[1].title, "Two", "Three"])
+    #expect(opened.map(\.site) == [first, second])
+    #expect(browser.selectedID == opened[0].id)
+}
+
+/// What is dragged comes as its address, a file's by its path, and only
+/// what File › Open File… opens is taken.
+@MainActor
+@Test func aDroppedFileIsTakenByItsPath() async throws {
+    let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let page = folder.appending(path: "page.html"), archive = folder.appending(path: "files.zip")
+    try "<p>Here</p>".write(to: page, atomically: true, encoding: .utf8)
+    try Data([0]).write(to: archive)
+
+    let link = await LinkDrop.url(from: NSItemProvider(object: URL(string: "https://dropped.example/")! as NSURL))
+    #expect(link == URL(string: "https://dropped.example/"))
+    // As the Finder hands one over: by reference.
+    let reference = try #require((page as NSURL).fileReferenceURL())
+    let file = await LinkDrop.url(from: NSItemProvider(object: reference as NSURL))
+    #expect(file?.standardizedFileURL == page.standardizedFileURL)
+    #expect(ExternalNavigation.accepts(file!))
+    #expect(!ExternalNavigation.accepts(archive))
+}

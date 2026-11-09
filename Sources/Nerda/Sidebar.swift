@@ -274,6 +274,13 @@ struct Sidebar: View {
         .frame(width: width)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { [layout] in layout.frame = $0 }
         .background { IncomingWatch(browser: browser, index: $incoming, locate: locateIncoming) }
+        // A link or file dropped on the tabs opens there, in the gap a tab
+        // from another window would open.
+        .onDrop(of: LinkDrop.types, delegate: LinkDrop(index: $incoming, locate: { [layout] point in
+            locateIncoming(CGPoint(x: layout.frame.minX + point.x, y: layout.frame.minY + point.y))
+        }, open: { [browser] urls, index in
+            withAnimation(.slide) { browser.open(urls, at: index, among: Browser.listed) }
+        }))
         .coordinateSpace(.named(Self.space))
         // Off the tabs: their own menus are the ones that show on them.
         .contextMenu { TabsMenu(browser: browser) }
