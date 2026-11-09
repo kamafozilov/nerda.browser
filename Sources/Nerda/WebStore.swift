@@ -25,11 +25,10 @@ enum WebStore {
     static func extensionID(on url: URL?) -> String? {
         guard let url, isStorePage(url) else { return nil }
         let pattern = url.host()?.lowercased() == "chromewebstore.google.com"
-            ? #"^/detail/(?:[^/]+/)?([a-p]{32})(?:/.*)?$"#
-            : #"^/webstore/detail/(?:[^/]+/)?([a-p]{32})(?:/.*)?$"#
-        let path = url.path()
-        guard let match = path.firstMatch(of: try! Regex(pattern)), let id = match.output[1].substring else { return nil }
-        return String(id)
+            ? #/^/detail/(?:[^/]+/)?([a-p]{32})(?:/.*)?$/#
+            : #/^/webstore/detail/(?:[^/]+/)?([a-p]{32})(?:/.*)?$/#
+        guard let match = url.path().firstMatch(of: pattern) else { return nil }
+        return String(match.output.1)
     }
 
     static func install(in configuration: WKUserContentController) {

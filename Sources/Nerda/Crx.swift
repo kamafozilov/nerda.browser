@@ -40,13 +40,15 @@ nonisolated enum Crx {
     /// Thirty-two letters from a to p, wherever they are — a bare id, a store
     /// link, an old chrome.google.com/webstore link.
     static func id(in text: String) -> String? {
-        let pattern = try! NSRegularExpression(pattern: "(?<![a-z])([a-p]{32})(?![a-z])")
         let range = NSRange(text.startIndex..., in: text)
-        guard let match = pattern.firstMatch(in: text.lowercased(), range: range),
+        guard let match = idPattern.firstMatch(in: text.lowercased(), range: range),
               let found = Range(match.range(at: 1), in: text)
         else { return nil }
         return text[found].lowercased()
     }
+
+    // An NSRegularExpression, not a Swift regex: Swift's has no lookbehind.
+    private static let idPattern = try! NSRegularExpression(pattern: "(?<![a-z])([a-p]{32})(?![a-z])")
 
     static func downloadURL(for id: String) -> URL {
         var parts = URLComponents(string: "https://clients2.google.com/service/update2/crx")!

@@ -179,7 +179,6 @@ enum ExtensionShims {
     /// nothing (tabs.onUpdated, several times a page load).
     nonisolated static func shim(for folder: URL) -> String {
         var found = Set<String>()
-        let pattern = try! NSRegularExpression(pattern: #"\.([a-zA-Z]+)\.(on[A-Z][A-Za-z]+)\b"#)
         let manifest = (try? JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("manifest.json")))) as? [String: Any]
         let everyScript = { () -> [URL] in
             let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: nil)
@@ -189,7 +188,7 @@ enum ExtensionShims {
             guard url.lastPathComponent != file, url.lastPathComponent != contentFile,
                   let text = source(of: url) else { continue }
             let range = NSRange(text.startIndex..., in: text)
-            for match in pattern.matches(in: text, range: range) {
+            for match in Pattern.event.matches(in: text, range: range) {
                 guard let a = Range(match.range(at: 1), in: text), let b = Range(match.range(at: 2), in: text) else { continue }
                 found.insert("\(text[a]).\(text[b])")
             }
@@ -250,7 +249,6 @@ enum ExtensionShims {
     /// counts, as one of them may be it.
     nonisolated static func backgroundScripts(of folder: URL, manifest: [String: Any]) -> [URL]? {
         guard let background = manifest["background"] as? [String: Any] else { return [] }
-        func regex(_ pattern: String) -> NSRegularExpression { try! NSRegularExpression(pattern: pattern) }
         func strings(_ pattern: NSRegularExpression, in text: String) -> [String] {
             pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { Range($0.range(at: 1), in: text).map { String(text[$0]) } }
         }
@@ -271,29 +269,21 @@ enum ExtensionShims {
         }
         if let page = background["page"] as? String {
             guard let url = resolve(page, from: "/"), let html = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-            for name in strings(regex(#"<script[^>]*\ssrc\s*=\s*["']([^"']+)["']"#), in: html) {
+            for name in strings(Pattern.scriptTag, in: html) {
                 guard let script = resolve(name, from: directory(of: url)) else { return nil }
                 queue.append(script)
             }
         }
-        // A worker's importScripts, of names written out and nothing else;
-        // a module's imports, static and written out.
-        let quoted = #"\s*(?:"[^"\n]*"|'[^'\n]*')\s*"#
-        let imports = regex(#"\bimportScripts\b(?!\s*\((?:"# + quoted + #",)*(?:"# + quoted + #",?)?\))"#)
-        let dynamic = regex(#"\bimport\s*\((?!"# + quoted + #"\))"#)
-        let listed = regex(#"\bimportScripts\s*\(([^)]*)\)"#)
-        let literal = regex(#"["']([^"'\n]+)["']"#)
-        let modules = regex(#"(?:\bfrom|\bimport)\s*["']([^"'\n]+)["']|\bimport\s*\(\s*["']([^"'\n]+)["']\s*\)"#)
         let worker = queue.first
         var seen = Set<URL>()
         while let url = queue.popLast() {
             guard seen.insert(url).inserted, url.lastPathComponent != file else { continue }
             guard let text = source(of: url) else { return nil }
             let whole = NSRange(text.startIndex..., in: text)
-            if imports.firstMatch(in: text, range: whole) != nil || dynamic.firstMatch(in: text, range: whole) != nil { return nil }
+            if Pattern.imports.firstMatch(in: text, range: whole) != nil || Pattern.dynamic.firstMatch(in: text, range: whole) != nil { return nil }
             // importScripts goes from the worker's own address, whoever calls it.
-            let named = strings(listed, in: text).flatMap { strings(literal, in: $0) }.map { (name: $0, base: directory(of: worker ?? url)) }
-                + modules.matches(in: text, range: whole).compactMap { match in
+            let named = strings(Pattern.listed, in: text).flatMap { strings(Pattern.literal, in: $0) }.map { (name: $0, base: directory(of: worker ?? url)) }
+                + Pattern.modules.matches(in: text, range: whole).compactMap { match in
                     (Range(match.range(at: 1), in: text) ?? Range(match.range(at: 2), in: text)).map { (name: String(text[$0]), base: directory(of: url)) }
                 }
             for (name, base) in named {
@@ -302,6 +292,24 @@ enum ExtensionShims {
             }
         }
         return Array(seen)
+    }
+
+    /// The patterns `shim` and `backgroundScripts` look for, compiled once
+    /// rather than for each extension loaded.
+    nonisolated private enum Pattern {
+        /// An event an extension mentions: `chrome.tabs.onUpdated`.
+        static let event = compiled(#"\.([a-zA-Z]+)\.(on[A-Z][A-Za-z]+)\b"#)
+        static let scriptTag = compiled(#"<script[^>]*\ssrc\s*=\s*["']([^"']+)["']"#)
+        // A worker's importScripts, of names written out and nothing else;
+        // a module's imports, static and written out.
+        private static let quoted = #"\s*(?:"[^"\n]*"|'[^'\n]*')\s*"#
+        static let imports = compiled(#"\bimportScripts\b(?!\s*\((?:"# + quoted + #",)*(?:"# + quoted + #",?)?\))"#)
+        static let dynamic = compiled(#"\bimport\s*\((?!"# + quoted + #"\))"#)
+        static let listed = compiled(#"\bimportScripts\s*\(([^)]*)\)"#)
+        static let literal = compiled(#"["']([^"'\n]+)["']"#)
+        static let modules = compiled(#"(?:\bfrom|\bimport)\s*["']([^"'\n]+)["']|\bimport\s*\(\s*["']([^"'\n]+)["']\s*\)"#)
+
+        private static func compiled(_ pattern: String) -> NSRegularExpression { try! NSRegularExpression(pattern: pattern) }
     }
 
     /// Defines only what is missing, so the day WebKit implements an API,
