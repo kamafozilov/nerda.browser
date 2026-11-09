@@ -75,7 +75,9 @@ final class Browser: NSObject {
     /// window, as it asked to. Always the one on screen.
     private(set) var fullscreenTab: Tab.ID?
     /// This session's downloads, newest first.
-    private(set) var downloads: [Download] = []
+    private(set) var downloads: [Download] = [] {
+        didSet { DockBadge.update() }
+    }
     /// Where this window's downloads go instead of `Downloads.folder` (tests).
     @ObservationIgnored var downloadFolder: URL?
     var recentlyClosed: [Session.ClosedTab] = []

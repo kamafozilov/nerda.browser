@@ -11,6 +11,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - Duplicate Tab, in Window and a tab's right-click menu, opens the same page in a new tab right after it, with its Back and Forward history. Window › Pin Tab and File › Close Other Tabs and Close Tabs Below do from the menu bar what a tab's right-click menu does, and that menu now also has Rename and Copy Link.
 - ⇧⌘] and ⇧⌘[, and ⌥⌘→ and ⌥⌘←, go to the next and the previous tab, as in Safari and Chrome, besides ⌃Tab and ⌃⇧Tab. They work while a page has the keyboard and on any keyboard layout.
+- Right-click Nerda's Dock icon for New Tab and New Incognito Window, and a New Window for each profile once you have several. While files download, the Dock icon shows how many, as in Safari.
 - Window › Downloads (⌥⌘L) shows the list of your downloads, as the downloads button does, and puts it away again, as in Safari and Chrome. A collapsed sidebar slides out for it.
 - After you sign in to a site with Google, Apple, GitHub, Microsoft, Telegram or another service, Nerda offers to save that sign-in, with the account you picked, as it offers to save a password. The site's sign-in box then lists it as Continue with Google, and picking it presses the site's own button for you.
 - File › New Window (⌘N) brings your profile's window to the front on a new tab, opening it again if you closed it, so ⌘N does what you expect from other browsers. With profiles, it goes to the profile of the window in front, or the one you used last.

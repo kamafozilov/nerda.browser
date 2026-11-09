@@ -339,6 +339,37 @@ final class AppMenu: NSObject {
         if browser.selected?.isBlank != true { browser.newTab() }
     }
 
+    /// The Dock icon's menu: what opens a window or a tab, as Safari's has.
+    func dock() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(item("New Tab", #selector(dockNewTab), target: self))
+        if Profiles.shared.many {
+            for profile in Profiles.shared.all {
+                let item = item("New \(profile.name) Window", #selector(dockProfileWindow(_:)), target: self)
+                item.representedObject = profile.id
+                item.image = Self.image(of: profile)
+                menu.addItem(item)
+            }
+        }
+        menu.addItem(item("New Incognito Window", #selector(dockIncognitoWindow), target: self))
+        return menu
+    }
+
+    // From the Dock, Nerda may be behind another app: it comes forward too.
+    // With no window of its in front, a new tab goes to the profile used last.
+    @objc private func dockNewTab() {
+        NSApp.activate()
+        openTab(in: Self.newWindowProfile(front: nil, lastUsed: Windows.lastUsed?.browser))
+    }
+    @objc private func dockProfileWindow(_ sender: NSMenuItem) {
+        NSApp.activate()
+        openProfileWindow(sender)
+    }
+    @objc private func dockIncognitoWindow() {
+        NSApp.activate()
+        newIncognitoWindow()
+    }
+
     /// The profile of the window in front, or else of the one used last:
     /// incognito has none of its own, so it goes by the one used last too.
     static func newWindowProfile(front: Browser?, lastUsed: Browser?) -> Profile {
@@ -510,6 +541,7 @@ extension AppMenu: NSMenuItemValidation {
         // regular window, or unlocks first (a new incognito window), is not.
         if browser.locked {
             return [#selector(openSettings), #selector(openHistory), #selector(newIncognitoWindow), #selector(newWindow), #selector(openProfileWindow(_:)),
+                    #selector(dockNewTab), #selector(dockProfileWindow(_:)), #selector(dockIncognitoWindow),
                     #selector(checkForUpdates), #selector(importFromBrowser), #selector(importPasswords), #selector(importBookmarks), #selector(exportBookmarks), #selector(openBookmark(_:)),
                     #selector(choosePicture), #selector(useOwnPictures)].contains(item.action)
         }
@@ -710,6 +742,8 @@ extension AppMenu: NSMenuDelegate {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let window: NSWindow
     let browser: Browser
+    /// The Dock icon's menu (`AppMenu.dock`), for the app's own delegate.
+    var dockMenu: (() -> NSMenu)?
     /// The page whose video went into picture in picture as Nerda was left.
     private weak var floating: WKWebView?
 
@@ -791,6 +825,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) { save() }
+
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? { dockMenu?() }
 
     /// Going to another app is a good moment: nothing is happening here. Not
     /// waited for, as quitting does: the switch isn't held up by it.

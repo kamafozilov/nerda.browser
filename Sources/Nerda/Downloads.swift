@@ -22,7 +22,9 @@ final class Download: Identifiable {
     var needsSession: Bool { state == .running || state == .paused || canResume }
     /// Where it is being saved; nil until WebKit asks.
     var file: URL?
-    private(set) var state = State.running
+    private(set) var state = State.running {
+        didSet { if state != oldValue { DockBadge.update() } }
+    }
     private(set) var received: Int64 = 0
     /// Negative while the server hasn't said.
     private(set) var total: Int64 = -1
@@ -124,6 +126,27 @@ final class Download: Identifiable {
         let file = file
         if wasRunning, let task { task.cancel { _ in if let file { try? FileManager.default.removeItem(at: file) } } }
         else if let file { try? FileManager.default.removeItem(at: file) }
+    }
+}
+
+/// The number of downloads under way, on the Dock icon, as Safari shows
+/// it; none, no badge. Counted again only as a download starts, stops or
+/// leaves a list, never with its progress.
+enum DockBadge {
+    private static var shown: String?
+
+    static func update() {
+        let downloads = NSApplication.shared.windows.flatMap { ($0 as? BrowserWindow)?.browser.downloads ?? [] }
+        let label = label(of: downloads)
+        guard label != shown else { return }
+        shown = label
+        NSApplication.shared.dockTile.badgeLabel = label
+    }
+
+    /// What it shows for these downloads, every window's.
+    static func label(of downloads: [Download]) -> String? {
+        let running = downloads.count { $0.state == .running }
+        return running > 0 ? "\(running)" : nil
     }
 }
 
