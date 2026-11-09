@@ -142,7 +142,7 @@ private func saved(_ host: String, pinned: Bool = false) -> Session.Tab {
         return true
     }
     let pixels = try #require(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
-    let packed = try #require(Nerda.Tab.png(pixels))
+    let packed = try #require(await Nerda.Tab.png(pixels))
     let back = try #require(NSBitmapImageRep(data: packed))
     let original = NSBitmapImageRep(cgImage: pixels)
     #expect(back.pixelsWide == original.pixelsWide && back.pixelsHigh == original.pixelsHigh)

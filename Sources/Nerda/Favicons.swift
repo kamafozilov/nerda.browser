@@ -149,14 +149,14 @@ final class Favicons {
             defer { if inFlight[site]?.id == id { inFlight[site] = nil } }
             let file = folder.map { Self.file(for: site, in: $0) }
             if named == nil, let file {
-                switch await Task.detached(priority: .userInitiated, operation: { Self.read(file) }).value {
+                switch await Self.reading(file) {
                 case .icon(let found): self.keep(found, for: site); return
                 case .failed: icon.failed = true; return
                 case nil: break
                 }
             }
             let fetched = try? await fetch(url)
-            if let (data, _) = fetched, let found = await Task.detached(priority: .userInitiated, operation: { Self.decode(data) }).value {
+            if let (data, _) = fetched, let found = await Self.decoding(data) {
                 self.keep(found, for: site)
                 if keep, let file { await Self.write(found.smaller ?? data, to: file) }
             } else {
@@ -204,12 +204,14 @@ final class Favicons {
         folder.appending(path: site.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? site)
     }
 
-    nonisolated private static func write(_ data: Data, to file: URL) async {
-        await Task.detached(priority: .utility) {
-            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? data.write(to: file, options: .atomic)
-        }.value
+    @concurrent nonisolated private static func write(_ data: Data, to file: URL) async {
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: file, options: .atomic)
     }
+
+    /// `read` and `decode`, off the main thread, for a fetch that waits on them.
+    @concurrent nonisolated private static func reading(_ file: URL) async -> Kept? { read(file) }
+    @concurrent nonisolated private static func decoding(_ data: Data) async -> Found? { decode(data) }
 
     nonisolated private enum Kept { case icon(Found), failed }
 

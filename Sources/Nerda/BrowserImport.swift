@@ -359,10 +359,7 @@ private struct ImportSheet: View {
         let since = Date.now.addingTimeInterval(-HistoryKeep.current.interval)
         result = nil
         task = Task {
-            let read = await Task.detached(priority: .userInitiated) {
-                (history ? BrowserImport.history(of: profile, since: since, limit: History.limit) : [],
-                 bookmarks ? BrowserImport.bookmarks(of: profile) : [])
-            }.value
+            let read = await Self.read(profile, history: history, bookmarks: bookmarks, since: since)
             guard !Task.isCancelled else { return }
             let pages = if let visits = read.0, !visits.isEmpty { await browser.profile.history.add(visits) } else { 0 }
             let marks = read.1.map(Bookmarks.pages) ?? 0
@@ -377,5 +374,14 @@ private struct ImportSheet: View {
             task = nil
             AccessibilityNotification.Announcement(said).post()
         }
+    }
+
+    /// The history and bookmarks asked for, nil for those that couldn't be
+    /// read, and empty for those not asked for.
+    @concurrent nonisolated private static func read(
+        _ profile: BrowserImport.Profile, history: Bool, bookmarks: Bool, since: Date
+    ) async -> ([History.Visit]?, [Bookmarks.Item]?) {
+        (history ? BrowserImport.history(of: profile, since: since, limit: History.limit) : [],
+         bookmarks ? BrowserImport.bookmarks(of: profile) : [])
     }
 }

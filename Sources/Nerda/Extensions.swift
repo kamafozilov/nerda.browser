@@ -401,6 +401,18 @@ final class Extensions: NSObject {
 
     // MARK: - loading
 
+    @concurrent nonisolated private static func prepare(_ folder: URL) async throws {
+        try ExtensionShims.prepare(folder)
+    }
+
+    /// A package from the store, checked and unpacked into `folder` with
+    /// this build's shim.
+    @concurrent nonisolated private static func unpack(_ crx: Data, id: String, into folder: URL) async throws {
+        let zip = try Crx.verifiedZip(crx, id: id)
+        try Crx.unpack(zip, into: folder)
+        try ExtensionShims.prepare(folder, fresh: true)
+    }
+
     @discardableResult
     private func load(_ item: InstalledExtension) async -> Bool {
         guard Self.enabledAtLaunch else { return false }
@@ -408,7 +420,7 @@ final class Extensions: NSObject {
         // installed it carried: away from the main thread, as the first
         // launch after an update reads and rewrites every script and page.
         let folder = Self.folder(for: item.id)
-        try? await Task.detached(priority: .userInitiated) { try ExtensionShims.prepare(folder) }.value
+        try? await Self.prepare(folder)
         do {
             let found = try await WKWebExtension(resourceBaseURL: folder)
             let context = WKWebExtensionContext(for: found)
@@ -512,11 +524,7 @@ final class Extensions: NSObject {
                 defer { try? FileManager.default.removeItem(at: staged) }
                 // Checked where it is unpacked, off the main thread: the
                 // check copies and hashes the whole package.
-                try await Task.detached(priority: .userInitiated) {
-                    let zip = try Crx.verifiedZip(crx, id: id)
-                    try Crx.unpack(zip, into: staged)
-                    try ExtensionShims.prepare(staged, fresh: true)
-                }.value
+                try await Self.unpack(crx, id: id, into: staged)
                 try await admit(staged, as: id, fromStore: true)
             } catch {
                 fail(error.localizedDescription)
@@ -845,11 +853,7 @@ final class Extensions: NSObject {
             let crx = try await Crx.fetch(item.id)
             let staged = Self.staging(for: item.id)
             defer { try? FileManager.default.removeItem(at: staged) }
-            try await Task.detached(priority: .utility) {
-                let zip = try Crx.verifiedZip(crx, id: item.id)
-                try Crx.unpack(zip, into: staged)
-                try ExtensionShims.prepare(staged, fresh: true)
-            }.value
+            try await Self.unpack(crx, id: item.id, into: staged)
             let found = try await WKWebExtension(resourceBaseURL: staged)
             // All it could do, sites included, against what it was allowed
             // when it was added or last asked about.
