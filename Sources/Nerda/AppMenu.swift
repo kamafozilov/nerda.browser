@@ -13,7 +13,53 @@ final class AppMenu: NSObject {
 
     /// What the menu works on: the browser of the window in front, an
     /// incognito one's included.
-    private var browser: Browser { (NSApp.mainWindow as? BrowserWindow)?.browser ?? regular }
+    private var browser: Browser {
+        if case .browser(let browser) = front { return browser }
+        return regular
+    }
+
+    /// Another of Nerda's windows in front (the Vault, Task Manager, About):
+    /// what acts on a tab leaves the browser behind it alone, and ⌘W closes
+    /// it, as Safari's closes its Settings window.
+    private var other: NSWindow? {
+        if case .other(let window) = front { return window }
+        return nil
+    }
+
+    private var front: Front { Self.front(main: NSApp.mainWindow, key: NSApp.keyWindow) }
+
+    /// What is in front, for the menu to act on.
+    enum Front {
+        case browser(Browser)
+        case other(NSWindow)
+        case none
+    }
+
+    /// The key window decides, as it is the one typed into: About is key
+    /// without ever being the main window. A sheet, a pop-over or a
+    /// borderless panel (an extension's pop-up, the quit question) belongs
+    /// to the window under it, so then the main window decides.
+    static func front(main: NSWindow?, key: NSWindow?) -> Front {
+        for window in [key, main].compactMap(\.self) {
+            if let window = window as? BrowserWindow { return .browser(window.browser) }
+            if window.styleMask.isSuperset(of: [.titled, .closable]), window.sheetParent == nil, window.parent == nil {
+                return .other(window)
+            }
+        }
+        return .none
+    }
+
+    /// What works on the tab on screen, or on the window's tabs: off while
+    /// another window is in front, rather than reach a window behind it.
+    private static let tabActions: Set<Selector> = [
+        #selector(closeTab), #selector(reload), #selector(hardReload), #selector(zoom(_:)), #selector(goBack),
+        #selector(goForward), #selector(toggleMute), #selector(translatePage), #selector(showOriginal),
+        #selector(showFind), #selector(findNext), #selector(findPrevious), #selector(inspect(_:)),
+        #selector(clearSiteData), #selector(printPage), #selector(exportPDF), #selector(toggleReader),
+        #selector(toggleResponsive), #selector(toggleJavaScript), #selector(viewSource), #selector(nextTab),
+        #selector(previousTab), #selector(selectTab(_:)), #selector(moveTabToNewWindow), #selector(toggleBookmark),
+        #selector(toggleSidebar),
+    ]
 
     init(browser: Browser) {
         regular = browser
@@ -175,13 +221,16 @@ final class AppMenu: NSObject {
         // Chrome: a page that took ⌘W or ⌘T for itself would keep you in it.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            if event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift] {
+            // Only in a browser's window: in the Vault ⌃Tab is its own, and
+            // the tabs of a window behind it are out of sight.
+            let browser = MainActor.assumeIsolated { (event.window as? BrowserWindow)?.browser }
+            if let browser, event.keyCode == 48, modifiers == .control || modifiers == [.control, .shift] {
                 MainActor.assumeIsolated { if !browser.locked { browser.selectTab(after: modifiers.contains(.shift) ? -1 : 1) } }
                 return nil
             }
             // ⌘1 to ⌘9 by the key, not the character it types: on AZERTY that
             // is & é " ' and the rest, which no menu item has.
-            if modifiers == .command, let index = Self.digitKeys.firstIndex(of: event.keyCode),
+            if let browser, modifiers == .command, let index = Self.digitKeys.firstIndex(of: event.keyCode),
                event.window?.attachedSheet == nil, NSApp.modalWindow == nil {
                 MainActor.assumeIsolated { if !browser.locked { browser.selectTab(number: index + 1) } }
                 return nil
@@ -257,7 +306,10 @@ final class AppMenu: NSObject {
             for url in panel.urls where ExternalNavigation.accepts(url) { browser.go(to: url) }
         }
     }
-    @objc private func closeTab() { browser.closeSelectedTab() }
+    @objc private func closeTab() {
+        if let other { return other.performClose(nil) }
+        browser.closeSelectedTab()
+    }
     @objc private func reopenClosedTab() { shown.reopenClosedTab() }
     @objc private func reopenTab(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? Session.ClosedTab.ID else { return }
@@ -376,6 +428,11 @@ final class AppMenu: NSObject {
 extension AppMenu: NSMenuItemValidation {
     /// Asked each time a menu opens or a shortcut is pressed.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if other != nil, let action = item.action, Self.tabActions.contains(action) {
+            guard action == #selector(closeTab) else { return false }
+            item.title = "Close Window"
+            return true
+        }
         // A locked incognito window's tabs are out of reach; what goes to the
         // regular window, or unlocks first (a new incognito window), is not.
         if browser.locked {
@@ -389,6 +446,7 @@ extension AppMenu: NSMenuItemValidation {
             // Tabs across the top have no sidebar to collapse.
             return TabStyle.current == .vertical
         case #selector(closeTab):
+            item.title = "Close Tab"
             return browser.commandBarOpen || browser.selectedID != nil
         case #selector(reopenClosedTab):
             return !browser.isPrivate && !browser.recentlyClosed.isEmpty
@@ -491,7 +549,7 @@ extension AppMenu: NSMenuDelegate {
             }
         }
         guard let index = menu.items.firstIndex(where: { $0.identifier == Self.shareID }) else { return }
-        sharing = (browser.locked ? nil : browser.selected?.shareable).map { NSSharingServicePicker(items: [$0]) }
+        sharing = (browser.locked || other != nil ? nil : browser.selected?.shareable).map { NSSharingServicePicker(items: [$0]) }
         let item = sharing?.standardShareMenuItem ?? Self.noShare
         item.identifier = Self.shareID
         menu.removeItem(at: index)
