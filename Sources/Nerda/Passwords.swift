@@ -147,7 +147,7 @@ enum Passwords {
         (() => {
             \#(boxes)
             window.nerdaAsksForPassword = () => passwords().length > 0;
-            const early = window.nerdaPasswordsEarly = { box: null, sent: false };
+            const early = window.nerdaPasswordsEarly = { box: null, sent: false, edited: false };
             let asked = false;
             const load = () => {
                 if (asked) return;
@@ -167,6 +167,16 @@ enum Passwords {
             const clicked = (event) => {
                 if (event.isTrusted && event.target.closest?.('button, input[type=submit], input[type=button], [role=button]')) sending();
             };
+            // Whether anything was typed, picked or filled in since the page
+            // loaded: until then a click sends nothing worth looking through
+            // the boxes for. Kept on after the rest has come, which reads it.
+            const edited = () => {
+                early.edited = true;
+                removeEventListener('input', edited, true);
+                removeEventListener('change', edited, true);
+            };
+            addEventListener('input', edited, true);
+            addEventListener('change', edited, true);
             addEventListener('focusin', focused, true);
             addEventListener('submit', sending, true);
             addEventListener('click', clicked, true);
@@ -387,8 +397,11 @@ enum Passwords {
                 if (event.key === 'Escape') unlist('typing');
                 if (event.key === 'Enter' && event.isTrusted && event.target instanceof HTMLInputElement) sent();
             }, true);
-            // Plenty of sign-in buttons are in no form, and never send one.
+            // Plenty of sign-in buttons are in no form, and never send one. Most
+            // clicks are on pages where nothing was filled in: their boxes, in
+            // the page and every frame, aren't looked through for each.
             addEventListener('click', (event) => {
+                if (early?.edited === false) return;
                 if (event.isTrusted && event.target.closest?.('button, input[type=submit], input[type=button], [role=button]')) sent();
             }, true);
 
