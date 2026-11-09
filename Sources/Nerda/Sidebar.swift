@@ -48,7 +48,7 @@ struct Sidebar: View {
     /// Where what is dragged over the bookmarks would go, while it is.
     @State private var landing: Landing?
     /// A bookmark or folder whose name is being typed: one just made, or Rename.
-    @State private var renaming: Bookmarks.Item.ID?
+    @State private var renaming = Renaming()
     /// How tall the bookmarks are, for them to take no more room than that.
     @State private var bookmarksHeight: CGFloat = 0
     @State private var layout = Layout()
@@ -469,10 +469,13 @@ struct Sidebar: View {
         return VStack(spacing: 0) {
             if !items.isEmpty {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
+                    // Made as they come into sight, as the tabs' rows: made all
+                    // at once, 400 bookmarks took 76 ms a tab switch. One height
+                    // each, so `markFrame` places those out of sight all the same.
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(items, id: \.self) { id in
                             if let id, let row = byID[id] {
-                                bookmarkRow(row, open: open)
+                                bookmarkRow(row, open: open, selected: browser.selectedID)
                             } else {
                                 Color.clear.frame(height: Self.rowHeight + Self.rowGap)
                             }
@@ -520,50 +523,22 @@ struct Sidebar: View {
         return rows.filter { !gone.contains($0.id) }
     }
 
-    /// A bookmark, its site's icon and its own name, open or not: on screen
-    /// once clicked, closed by its button, and then only kept. A folder,
-    /// opened by a click, and named by Rename, not by a double-click, which
-    /// opens and closes it.
-    private func bookmarkRow(_ row: Bookmarks.Row, open: OpenBookmarks) -> some View {
+    /// A bookmark's row, and what is done to it from the sidebar: dragged,
+    /// folded while it is, and its menu. What it shows is `BookmarkRow`'s.
+    private func bookmarkRow(_ row: Bookmarks.Row, open: OpenBookmarks, selected: Tab.ID?) -> some View {
         // By their ids alone, as the tabs' rows.
         let id = row.id, item = row.item
         let tab = open.tabs[id]
-        let tabID = tab?.id
-        let folderOpen = item.isFolder && open.folders.contains(id)
-        return SidebarRow(
-            icon: item.isFolder ? "folder" : "globe",
-            site: item.isFolder ? nil : tab?.site ?? item.url,
-            loading: tab?.isLoading ?? false,
-            title: item.title,
-            selected: tabID != nil && tabID == browser.selectedID,
-            dev: tab?.isOnThisMac ?? false,
-            close: folderOpen ? { withAnimation(.slide) { browser.closeTabs(in: id) } }
-                : tabID.map { tabID in { withAnimation(.slide) { browser.close(tabID) } } },
-            closeShown: tabID != nil || folderOpen,
-            closesFolder: item.isFolder,
-            muted: tab?.speaker,
-            mute: { if let tabID { browser.toggleMute(tabID) } },
-            rename: { name in
-                renaming = nil
-                if let name { browser.bookmarks.rename(id, to: name) }
-            },
-            renameNow: renaming == id,
-            doubleClickRenames: !item.isFolder,
-            press: tabID.map { tabID in { browser.select(tabID) } }
-        ) {
-            if item.isFolder {
-                withAnimation(.snappy(duration: 0.2)) { browser.bookmarks.toggle(id) }
-            } else {
-                browser.open(bookmark: id)
-            }
-        }
-        .padding(.leading, CGFloat(row.depth) * Self.indent)
-        .padding(.bottom, Self.rowGap)
-        // Folded away while dragged, the gap where it goes open instead.
-        .frame(height: dragged?.id == id ? 0 : nil, alignment: .top)
-        .opacity(dragged?.id == id ? 0 : 1)
-        .simultaneousGesture(bookmarkDrag(id))
-        .contextMenu { bookmarkMenu(row, open: open) }
+        return BookmarkRow(browser: browser, item: item, tab: tab,
+                           selected: tab != nil && tab?.id == selected,
+                           folderOpen: item.isFolder && open.folders.contains(id), renaming: renaming)
+            .padding(.leading, CGFloat(row.depth) * Self.indent)
+            .padding(.bottom, Self.rowGap)
+            // Folded away while dragged, the gap where it goes open instead.
+            .frame(height: dragged?.id == id ? 0 : nil, alignment: .top)
+            .opacity(dragged?.id == id ? 0 : 1)
+            .simultaneousGesture(bookmarkDrag(id))
+            .contextMenu { bookmarkMenu(row, open: open) }
     }
 
     @ViewBuilder
@@ -571,7 +546,7 @@ struct Sidebar: View {
         let id = row.id
         if row.item.isFolder {
             Button("New Folder") { newFolder(in: id) }
-            Button("Rename") { renaming = id }
+            Button("Rename") { renaming.id = id }
             if open.folders.contains(id) {
                 Button("Close Tabs in Folder") { withAnimation(.slide) { browser.closeTabs(in: id) } }
             }
@@ -587,7 +562,7 @@ struct Sidebar: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(url.absoluteString, forType: .string)
             }
-            Button("Rename") { renaming = id }
+            Button("Rename") { renaming.id = id }
             Button("New Folder") { newFolder(in: row.folder, at: row.index + 1) }
             Divider()
             Button("Remove Bookmark") { withAnimation(.slide) { browser.removeBookmark(id) } }
@@ -601,7 +576,7 @@ struct Sidebar: View {
             if let folder { browser.bookmarks.open(folder) }
             browser.bookmarks.add(item, to: folder, at: index)
         }
-        renaming = item.id
+        renaming.id = item.id
     }
 
     /// The folder it would go into, lit.
@@ -1010,6 +985,63 @@ private struct ListedTab: View {
             }
         }
     }
+}
+
+/// A bookmark, its site's icon and its own name, open or not: on screen
+/// once clicked, closed by its button, and then only kept. A folder,
+/// opened by a click, and named by Rename, not by a double-click, which
+/// opens and closes it. Made in a body of its own, as `ListedTab`, from
+/// plain values: switching tabs makes again only the two rows it changes,
+/// and a page loading or playing in a bookmark's tab, only that one.
+private struct BookmarkRow: View {
+    let browser: Browser
+    let item: Bookmarks.Item
+    /// Its tab, while open; held weakly, as `ListedTab`'s.
+    weak var tab: Tab?
+    let selected: Bool
+    /// A folder with some of its bookmarks open.
+    let folderOpen: Bool
+    let renaming: Renaming
+
+    var body: some View {
+        let id = item.id
+        let tabID = tab?.id
+        SidebarRow(
+            icon: item.isFolder ? "folder" : "globe",
+            site: item.isFolder ? nil : tab?.site ?? item.url,
+            loading: tab?.isLoading ?? false,
+            title: item.title,
+            selected: selected,
+            dev: tab?.isOnThisMac ?? false,
+            close: folderOpen ? { withAnimation(.slide) { browser.closeTabs(in: id) } }
+                : tabID.map { tabID in { withAnimation(.slide) { browser.close(tabID) } } },
+            closeShown: tabID != nil || folderOpen,
+            closesFolder: item.isFolder,
+            muted: tab?.speaker,
+            mute: { if let tabID { browser.toggleMute(tabID) } },
+            rename: { name in
+                renaming.id = nil
+                if let name { browser.bookmarks.rename(id, to: name) }
+            },
+            renameNow: renaming.id == id,
+            doubleClickRenames: !item.isFolder,
+            press: tabID.map { tabID in { browser.select(tabID) } }
+        ) {
+            if item.isFolder {
+                withAnimation(.snappy(duration: 0.2)) { browser.bookmarks.toggle(id) }
+            } else {
+                browser.open(bookmark: id)
+            }
+        }
+    }
+}
+
+/// The bookmark or folder whose name is being typed, out of the sidebar's
+/// own state: only the rows read it, so starting a rename redraws them, not
+/// the whole sidebar.
+@Observable
+final class Renaming {
+    var id: Bookmarks.Item.ID?
 }
 
 /// A pinned tab's tile, made from the tab in a body of its own, as `ListedTab`.

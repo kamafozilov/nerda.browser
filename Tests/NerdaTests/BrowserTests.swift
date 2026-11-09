@@ -373,6 +373,40 @@ private let somewhere = URL(string: "https://example.com")!
     #expect(medians[1] < medians[0] * 3)
 }
 
+/// …and with hundreds of bookmarks above the tabs: only those in sight are
+/// made, each again only when what it shows changes. Made all at once, 400
+/// took fifteen times as long as ten, 76 ms a switch.
+@MainActor
+@Test func switchingTabsDoesNotSlowWithManyBookmarks() async throws {
+    var medians: [Double] = []
+    for count in [10, 400] {
+        let browser = Browser()
+        browser.bookmarks = Bookmarks()
+        for n in 0..<count {
+            browser.bookmarks.add(Bookmarks.Item(title: "Kept \(n)", url: URL(string: "https://kept\(n).example")!))
+        }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: BrowserView(browser: browser, window: window))
+        window.orderBack(nil)
+        defer { window.close() }
+        let a = browser.open(URL(string: "data:text/html,a")!), b = browser.open(URL(string: "data:text/html,b")!)
+        try await Task.sleep(for: .seconds(1))
+        var times: [Double] = []
+        for n in 0..<40 {
+            let start = Date.now
+            browser.select(n.isMultiple(of: 2) ? a.id : b.id)
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            times.append(Date.now.timeIntervalSince(start))
+            await Task.yield()
+        }
+        medians.append(times.sorted()[times.count / 2])
+    }
+    #expect(medians[1] < medians[0] * 3)
+}
+
 /// A closed tab's page goes quiet at once, even while something still holds it.
 @MainActor
 @Test func closedTabsStopPlaying() async throws {
