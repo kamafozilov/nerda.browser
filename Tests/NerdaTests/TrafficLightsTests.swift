@@ -61,6 +61,17 @@ private func find<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
     #expect(close.isHidden)
 }
 
+/// With the sidebar put away, the address bar starts past where the window's
+/// buttons come up, so they never sit over its own.
+@MainActor
+@Test func theAddressBarLeavesRoomForTheWindowButtons() throws {
+    let window = BrowserWindow(browser: Browser(dataStore: .nonPersistent()))
+    defer { window.close() }
+    let zoom = try #require(window.standardWindowButton(.zoomButton))
+    let right = zoom.convert(zoom.bounds, to: nil).maxX
+    #expect(right > 0)
+    #expect(right + 4 <= BrowserView.trafficLightsWidth)
+}
 
 /// Opened with nothing to type into (a settings page), the window keeps the
 /// keyboard to itself rather than ring its first button, as though Tab had
