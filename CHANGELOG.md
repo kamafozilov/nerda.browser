@@ -30,6 +30,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Fixed
 
+- With Keyboard navigation on (System Settings › Keyboard), a window no longer opens with a blue ring round the button that collapses the tabs, as though you had pressed Tab. Tab still takes you through the buttons.
 - Close Tab (⌘W) with Task Manager, the Vault or About in front closes that window, as in Safari, where before it closed a tab in the browser window behind it and left the window open. The other tab commands, such as ⌘1 to ⌘9 and ⌃Tab, leave the tabs behind it alone too.
 - A page that tries to open a pop-up as it loads now always shows the blocked pop-up button in the address bar. Before, the button sometimes did not appear, and the pop-up could not be opened.
 - With Reduce Motion on (System Settings › Accessibility › Display), nothing in Nerda slides, scales or bounces: the sidebar fades in and out where it is, tabs and bookmarks are in their new place at once, and the menu, the command bar and What's New fade in. Before, only a download's icon flying to the downloads button kept still.

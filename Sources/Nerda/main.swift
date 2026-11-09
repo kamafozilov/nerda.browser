@@ -582,8 +582,17 @@ final class BrowserWindow: NSWindow {
                 NotificationCenter.default.addObserver(self, selector: #selector(remember), name: name, object: self)
             }
         }
-        contentView = NSHostingView(rootView: BrowserView(browser: browser, window: self)
+        let content = NSHostingView(rootView: BrowserView(browser: browser, window: self)
             .environment(\.incognito, browser.isPrivate))
+        contentView = content
+        // The keyboard starts here, not on the first button: with Keyboard
+        // navigation on, AppKit would hand it to the window's content, and
+        // SwiftUI on to its first control, the sidebar's button, ringed in
+        // blue as though Tab had been pressed. A page coming on screen takes
+        // it from here (`PageView`); Tab goes on into the controls.
+        let rest = KeyboardRest()
+        content.addSubview(rest)
+        initialFirstResponder = rest
         browser.window = self
     }
 
@@ -935,3 +944,15 @@ Bench.start(browser, window)
 // Not activated here: macOS brings Nerda forward when it is opened, and leaves
 // it behind when asked to (`open -g`, watch.sh).
 app.run()
+
+/// Where a window's keyboard rests when nothing in it has asked for it:
+/// takes it without showing it, and isn't among the controls Tab goes
+/// through, but Tab from here goes on into them.
+final class KeyboardRest: NSView {
+    override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { false }
+    override var nextKeyView: NSView? {
+        get { superview }
+        set {}
+    }
+}
