@@ -193,15 +193,10 @@ struct BrowserView: View {
         .overlay {
             if browser.locked { IncognitoLock() }
         }
-        // Behind it all, where it takes no clicks.
+        // Behind it all, where they take no clicks.
         .background { TrafficLights(window: window, withTabs: tabsShown || browser.locked, atTop: !pageFullscreen) }
+        .background { TranslationTask(browser: browser) }
         .ignoresSafeArea()
-        // Where the Mac asks to download a language, the first time a page is
-        // translated into it; asked again for each pair the tab on screen is
-        // translated between.
-        .translationTask(browser.translationConfiguration) { session in
-            await browser.translator.run(session, in: browser)
-        }
         .onChange(of: browser.sidebarOpen) { _, open in
             // Pinning it puts the floating one away (it stays where it is, now pinned).
             peeking = false
@@ -302,6 +297,22 @@ private struct TrafficLights: View {
                     if Task.isCancelled { return }
                 }
                 window.showTrafficLights(withTabs || hovered)
+            }
+    }
+}
+
+/// Where the Mac asks to download a language, the first time a page is
+/// translated into it; asked again for each pair the tab on screen is
+/// translated between. A view of its own, as it reads the tab on screen and
+/// its page's language: on the whole window's view, each tab switch and each
+/// page the tab on screen loads would work all of that out again.
+private struct TranslationTask: View {
+    let browser: Browser
+
+    var body: some View {
+        Color.clear
+            .translationTask(browser.translationConfiguration) { session in
+                await browser.translator.run(session, in: browser)
             }
     }
 }
