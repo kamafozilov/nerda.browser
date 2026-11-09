@@ -1057,7 +1057,8 @@ private struct PinnedTab: View {
             PinnedTile(site: tab.site, loading: tab.isLoading, title: tab.title,
                        selected: selected, asleep: tab.isAsleep,
                        muted: tab.speaker, mute: { browser.toggleMute(id) },
-                       press: { browser.select(id) }) {
+                       press: { browser.select(id) },
+                       home: tab.home == nil ? nil : { browser.tabs.first { $0.id == id }?.goHome() }) {
                 browser.select(id)
             }
         }
@@ -1147,6 +1148,9 @@ private struct SidebarRow: View {
             .contentShape(shape)
         }
         .buttonStyle(.plain)
+        // Before the overlays: the close button and the speaker say what they do.
+        .tabAccessibility(title, selected: selected, close: close, closeName: closesFolder ? "Close Tabs in Folder" : "Close Tab",
+                          muted: muted, mute: mute, rename: rename == nil ? nil : { renaming = true })
         .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in press?() })
         // The first click has selected the tab, as a single one does.
         .simultaneousGesture(TapGesture(count: 2).onEnded { if rename != nil, doubleClickRenames { renaming = true } })
@@ -1277,6 +1281,8 @@ private struct PinnedTile: View {
     var mute: () -> Void = {}
     /// As a tab row's: on the way down.
     var press: (() -> Void)?
+    /// Back to where it was pinned, as a double-click on it is.
+    var home: (() -> Void)?
     let action: () -> Void
 
     @State private var hovering = false
@@ -1335,7 +1341,7 @@ private struct PinnedTile: View {
         .buttonStyle(.plain)
         .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in press?() })
         .help(title)
-        .accessibilityLabel(title)
+        .tabAccessibility(title, selected: selected, muted: muted, mute: mute, home: home)
         .speaker(muted, over: $overSpeaker, corner: 11, action: mute)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
@@ -1391,8 +1397,28 @@ struct CloseButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(folder ? "Close Tabs in Folder" : "Close Tab")
         .accessibilityLabel(folder ? "Close Tabs in Folder" : "Close Tab")
         .onHover { hovering = $0 }
+    }
+}
+
+extension View {
+    /// A tab, tile or bookmark as VoiceOver and Full Keyboard Access have
+    /// it: by its title, marked when it is the one on screen, and with what
+    /// its buttons do as actions of its own, as the close button shows only
+    /// under the pointer and the speaker only while there is sound.
+    func tabAccessibility(_ title: String, selected: Bool, close: (() -> Void)? = nil, closeName: String = "Close Tab",
+                          muted: Bool? = nil, mute: @escaping () -> Void = {}, rename: (() -> Void)? = nil,
+                          home: (() -> Void)? = nil) -> some View {
+        accessibilityLabel(title)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityActions {
+                if let close { Button(closeName, action: close) }
+                if let muted { Button(muted ? "Unmute Tab" : "Mute Tab", action: mute) }
+                if let rename { Button("Rename", action: rename) }
+                if let home { Button("Back to Pinned Page", action: home) }
+            }
     }
 }
 

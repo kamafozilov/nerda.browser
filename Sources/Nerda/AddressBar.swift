@@ -89,7 +89,6 @@ struct AddressBar: View {
                 let label = tab.reader == nil ? "Show Reader" : "Hide Reader"
                 BarButton(icon: tab.reader == nil ? "doc.plaintext" : "doc.plaintext.fill", help: "\(label)  ⌃⌘R",
                           action: browser.toggleReader)
-                    .accessibilityLabel(label)
                     .padding(.leading, 4)
             }
             if let tab, tab.isOnThisMac {
@@ -241,7 +240,6 @@ private struct BlockedPopups: View {
         // What a script was to fill (about:blank) can't be opened after.
         let showable = popups.filter { ["http", "https"].contains($0.scheme?.lowercased() ?? "") }
         BarButton(icon: "rectangle.on.rectangle.slash", help: "Pop-up Blocked") { shown.toggle() }
-            .accessibilityLabel("Pop-up Blocked")
             .background {
                 Color.clear
                     .popover(isPresented: $shown, arrowEdge: .bottom) {
@@ -365,6 +363,8 @@ struct BarButton: View {
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.35)
         .help(help)
+        // What the tooltip says, less its shortcut: "Reload", not "Reload ⌘R".
+        .accessibilityLabel(help.components(separatedBy: "  ")[0])
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: lit)
     }

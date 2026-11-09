@@ -473,6 +473,16 @@ private struct DownloadRow: View {
                 .fill(hovering ? Palette.hover : .clear)
         )
         .contentShape(Rectangle())
+        // One element for VoiceOver, its buttons inside it, opened as a
+        // double-click opens it.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(download.name)
+        .accessibilityValue(detail)
+        .accessibilityActions {
+            if download.state == .finished, let file = download.file {
+                Button("Open") { NSWorkspace.shared.open(file) }
+            }
+        }
         .onHover { hovering = $0 }
         // Opens the file, as a double-click on it anywhere else does.
         .onTapGesture(count: 2) {
