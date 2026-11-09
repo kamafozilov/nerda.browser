@@ -15,6 +15,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Changed
 
 - Offering to save a password shows a card with the site's icon, the user name, to correct before you save, and the password, hidden until you click the eye. It warns when the password is easy to guess.
+- File › Import Bookmarks… no longer stops you with a dialog once it has worked: the bookmarks come in as the Imported folder at the end of your bookmarks, and the sidebar opens to show it. After File › Import Passwords…, the reminder to delete the file shows on the window you are in, rather than holding up all of Nerda.
 
 ### Fixed
 
