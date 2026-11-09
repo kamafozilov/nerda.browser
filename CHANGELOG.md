@@ -33,6 +33,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Close Tab (⌘W) with Task Manager, the Vault or About in front closes that window, as in Safari, where before it closed a tab in the browser window behind it and left the window open. The other tab commands, such as ⌘1 to ⌘9 and ⌃Tab, leave the tabs behind it alone too.
 - A page that tries to open a pop-up as it loads now always shows the blocked pop-up button in the address bar. Before, the button sometimes did not appear, and the pop-up could not be opened.
 - A tab you close while your Mac is offline gives its memory back at once. Before, it stayed in memory until the Mac was online again, and a closed incognito window's pages with it.
+- History (⌘Y) that couldn't be saved, with your Mac's disk full, is saved at the next try once there is room. Before, the pages visited since the last save could be lost.
 - VoiceOver says which tab is on screen, in the sidebar and across the top, and its actions close, mute or rename a tab and take a pinned site back to its page. Before, the close button showed only under the pointer, so VoiceOver could not reach it. The address bar's buttons are read by what they do, such as Reload or Stop.
 - Switching tabs stays quick with hundreds of bookmarks in the sidebar. Before, each switch slowed with every bookmark kept, as each was drawn again.
 

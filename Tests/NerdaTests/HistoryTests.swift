@@ -242,3 +242,31 @@ private func historyFile() throws -> URL {
     cancelled.cancel()
     #expect(await cancelled.value.rows.map(\.url.absoluteString) == ["https://www.google.com/search?q=you"])
 }
+
+/// History that couldn't be written (a full disk, a folder it may not write
+/// in) is kept to write again at the next save, not taken as saved.
+@MainActor
+@Test func historyThatFailedToSaveIsWrittenLater() async throws {
+    let file = try historyFile()
+    let folder = file.deletingLastPathComponent()
+    defer {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path())
+        try? FileManager.default.removeItem(at: folder)
+    }
+    let history = History()
+    history.load(from: file)
+    history.visit(URL(string: "https://example.com/")!, title: "Example")
+    try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path())
+    history.save()
+    #expect(!FileManager.default.fileExists(atPath: file.path()))
+
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path())
+    // The failure is told back on the main actor, a moment after the write.
+    for _ in 0..<50 where !FileManager.default.fileExists(atPath: file.path()) {
+        try await Task.sleep(for: .milliseconds(20))
+        history.save()
+    }
+    let next = History()
+    next.load(from: file)
+    #expect(next.visits[URL(string: "https://example.com/")!]?.title == "Example")
+}
