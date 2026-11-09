@@ -100,7 +100,9 @@ final class AppMenu: NSObject {
         let fileMenu = submenu("File", [
             item("New Tab", #selector(newTab), "t", target: self),
             item("Reopen Closed Tab", #selector(reopenClosedTab), "t", [.command, .shift], target: self),
-            // A window for each profile, as Safari's; there only once there are profiles (`fillFile`).
+            // ⌘N, the profile's window on a new tab; with profiles, it stays
+            // the key, and a window for each is listed instead, as Safari's (`fillFile`).
+            item("New Window", #selector(newWindow), "n", target: self),
             Self.profileWindows,
             item("New Incognito Window", #selector(newIncognitoWindow), "n", [.command, .shift], target: self),
             // ⌘⇧A, as Chrome's Search Tabs: a key sites leave to the browser,
@@ -251,14 +253,14 @@ final class AppMenu: NSObject {
     private static let latinKeys: [UInt16: String] = [17: "t", 13: "w", 37: "l", 12: "q", 43: ",", 0: "a", 45: "n", 2: "d",
                                                       34: "i", 38: "j", 8: "c", 15: "r", 32: "u", 31: "o"]
 
-    /// ⌘T, ⌘W, ⌘L, ⌘O, ⌘Q, ⌘D and ⌘, ⌘⇧W, ⌘⇧A and ⌘⇧N, ⌃⌘R, and Developer's ⌥⌘ keys, straight to the menu while
+    /// ⌘T, ⌘N, ⌘W, ⌘L, ⌘O, ⌘Q, ⌘D and ⌘, ⌘⇧W, ⌘⇧A and ⌘⇧N, ⌃⌘R, and Developer's ⌥⌘ keys, straight to the menu while
     /// a page has the keyboard (and no sheet or dialog is up).
     private static func browserKey(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
         guard let window = event.window, window.firstResponder is WKWebView, window.attachedSheet == nil,
               NSApp.modalWindow == nil, let typed = event.charactersIgnoringModifiers?.lowercased() else { return false }
         let key = typed.allSatisfy(\.isASCII) ? typed : latinKeys[event.keyCode] ?? typed
-        let reserved = modifiers == .command && ["t", "w", "l", "o", "q", "d", ","].contains(key)
+        let reserved = modifiers == .command && ["t", "n", "w", "l", "o", "q", "d", ","].contains(key)
             || modifiers == [.command, .shift] && ["t", "w", "a", "n"].contains(key)
             || modifiers == [.command, .option] && ["i", "j", "c", "r", "u"].contains(key)
             || modifiers == [.command, .control] && key == "r"
@@ -284,7 +286,27 @@ final class AppMenu: NSObject {
     @objc private func newIncognitoWindow() { Windows.openIncognito() }
     @objc private func openProfileWindow(_ sender: NSMenuItem) {
         guard let profile = (sender.representedObject as? UUID).flatMap(Profiles.shared.profile) else { return }
-        Windows.show(profile)
+        openTab(in: profile)
+    }
+
+    /// ⌘N: Nerda keeps one window a profile, so a new window is that
+    /// window in front, opened again if it was closed, on a new tab.
+    @objc private func newWindow() {
+        openTab(in: Self.newWindowProfile(front: (NSApp.mainWindow as? BrowserWindow)?.browser,
+                                         lastUsed: Windows.lastUsed?.browser))
+    }
+
+    private func openTab(in profile: Profile) {
+        let browser = Windows.show(profile)
+        // A window just opened again may already be on a new tab.
+        if browser.selected?.isBlank != true { browser.newTab() }
+    }
+
+    /// The profile of the window in front, or else of the one used last:
+    /// incognito has none of its own, so it goes by the one used last too.
+    static func newWindowProfile(front: Browser?, lastUsed: Browser?) -> Profile {
+        if let front, !front.isPrivate { return front.profile }
+        return lastUsed?.profile ?? .main
     }
     @objc private func openSettings() { shown.openSettings() }
     @objc private func openHistory() { shown.openHistory() }
@@ -436,7 +458,7 @@ extension AppMenu: NSMenuItemValidation {
         // A locked incognito window's tabs are out of reach; what goes to the
         // regular window, or unlocks first (a new incognito window), is not.
         if browser.locked {
-            return [#selector(openSettings), #selector(openHistory), #selector(newIncognitoWindow), #selector(openProfileWindow(_:)),
+            return [#selector(openSettings), #selector(openHistory), #selector(newIncognitoWindow), #selector(newWindow), #selector(openProfileWindow(_:)),
                     #selector(checkForUpdates), #selector(importFromBrowser), #selector(importPasswords), #selector(importBookmarks), #selector(exportBookmarks), #selector(openBookmark(_:)),
                     #selector(choosePicture), #selector(useOwnPictures)].contains(item.action)
         }
@@ -541,11 +563,19 @@ extension AppMenu: NSMenuDelegate {
     private func fillFile(_ menu: NSMenu) {
         if let windows = menu.items.first(where: { $0.identifier == Self.profileWindowsID }) {
             windows.isHidden = !Profiles.shared.many
+            let current = Self.newWindowProfile(front: (NSApp.mainWindow as? BrowserWindow)?.browser,
+                                                lastUsed: Windows.lastUsed?.browser)
             windows.submenu?.items = windows.isHidden ? [] : Profiles.shared.all.map { profile in
                 let item = item(profile.name, #selector(openProfileWindow(_:)), target: self)
                 item.representedObject = profile.id
                 item.image = Self.image(of: profile)
+                // Shown by the one ⌘N opens; the hidden New Window above takes the key.
+                if profile === current { item.keyEquivalent = "n" }
                 return item
+            }
+            if let plain = menu.items.first(where: { $0.action == #selector(newWindow) }) {
+                plain.isHidden = !windows.isHidden
+                plain.allowsKeyEquivalentWhenHidden = true
             }
         }
         guard let index = menu.items.firstIndex(where: { $0.identifier == Self.shareID }) else { return }

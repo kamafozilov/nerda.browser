@@ -34,3 +34,20 @@ private func ownWindow() -> NSWindow {
     guard case .browser = AppMenu.front(main: browserWindow, key: panel) else { Issue.record(); return }
     guard case .none = AppMenu.front(main: nil, key: nil) else { Issue.record(); return }
 }
+
+/// ⌘N goes to the window of the profile in front; from an incognito window,
+/// or with none in front, to the profile used last, else Personal.
+@MainActor
+@Test func newWindowGoesToTheProfileInFront() {
+    let root = FileManager.default.temporaryDirectory.appending(path: "nerda-menu-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let work = Profile(name: "Work", symbol: "briefcase", color: .blue, root: root)
+    let personal = Browser()
+    let workBrowser = Browser(profile: work)
+    let incognito = Browser(dataStore: .nonPersistent())
+    #expect(AppMenu.newWindowProfile(front: workBrowser, lastUsed: personal) === work)
+    #expect(AppMenu.newWindowProfile(front: incognito, lastUsed: workBrowser) === work)
+    #expect(AppMenu.newWindowProfile(front: nil, lastUsed: workBrowser) === work)
+    #expect(AppMenu.newWindowProfile(front: nil, lastUsed: nil).isMain)
+    #expect(AppMenu.newWindowProfile(front: personal, lastUsed: workBrowser).isMain)
+}
