@@ -176,10 +176,10 @@ struct Sidebar: View {
                             }
                             .simultaneousGesture(drag(id))
                             .contextMenu { TabMenu(browser: browser, id: id) }
-                            .transition(.asymmetric(
+                            .transition(Motion.moving(.asymmetric(
                                 insertion: .move(edge: .top).combined(with: .opacity),
                                 removal: .opacity
-                            ))
+                            )))
                         }
                     }
                     // With the keyboard on a tab: ↑ and ↓ put the one above or
@@ -212,7 +212,7 @@ struct Sidebar: View {
                     }
                     .padding(.bottom, incoming != nil && incoming == rest.count ? Self.rowHeight + Self.rowGap : 0)
                     .overlay(alignment: .bottom) { if incoming != nil && incoming == rest.count { incomingRow } }
-                    .animation(.snappy(duration: 0.2), value: incoming)
+                    .animation(Motion.moving(.snappy(duration: 0.2)), value: incoming)
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.rows = $0 }
                     .padding(.horizontal, 8)
                     .padding(.vertical, Self.edge)
@@ -252,14 +252,14 @@ struct Sidebar: View {
                 CrashCard(incognito: browser.isPrivate)
                     .padding(.horizontal, 8)
                     .padding(.top, 6)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(Motion.moving(.move(edge: .bottom).combined(with: .opacity)))
             }
 
             if let release = Updater.shared.found {
                 UpdateCard(release: release, incognito: browser.isPrivate)
                     .padding(.horizontal, 8)
                     .padding(.top, 6)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(Motion.moving(.move(edge: .bottom).combined(with: .opacity)))
             }
 
             HStack {
@@ -315,8 +315,8 @@ struct Sidebar: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
                 }
-                .animation(.snappy(duration: 0.2), value: becomingTile)
-                .animation(.snappy(duration: 0.2), value: becomingRow)
+                .animation(Motion.moving(.snappy(duration: 0.2)), value: becomingTile)
+                .animation(Motion.moving(.snappy(duration: 0.2)), value: becomingRow)
                 .allowsHitTesting(false)
             }
         }
@@ -394,7 +394,7 @@ struct Sidebar: View {
                         // Back to where it was pinned, from wherever it has been since.
                         .simultaneousGesture(TapGesture(count: 2).onEnded { tab.goHome() })
                         .contextMenu { TabMenu(browser: browser, id: id) }
-                        .transition(.scale(scale: 0.8).combined(with: .opacity))
+                        .transition(Motion.moving(.scale(scale: 0.8).combined(with: .opacity)))
                     }
                 } else if pins.isEmpty {
                     PinSlot(targeted: gap != nil)
@@ -404,7 +404,7 @@ struct Sidebar: View {
                 }
             }
         }
-        .animation(.snappy(duration: 0.2), value: gap)
+        .animation(Motion.moving(.snappy(duration: 0.2)), value: gap)
     }
 
     /// Dragging a tab or tile, by the id alone (see the rows).
@@ -448,7 +448,7 @@ struct Sidebar: View {
     /// its place, and the rest make way.
     private func reorder(_ id: Tab.ID, at point: CGPoint) {
         let pins = pins, rest = rest
-        withAnimation(.snappy(duration: 0.2)) {
+        withAnimation(Motion.moving(.snappy(duration: 0.2))) {
             if pins.contains(where: { $0.id == id }) {
                 // Heading down into the list: unpinned there on drop.
                 guard !belowTiles(point) else { return }
@@ -527,7 +527,7 @@ struct Sidebar: View {
                         }
                     }
                     .overlay(alignment: .topLeading) { landingMark.allowsHitTesting(false) }
-                    .animation(.snappy(duration: 0.2), value: landing)
+                    .animation(Motion.moving(.snappy(duration: 0.2)), value: landing)
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.marks = $0 }
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bookmarksHeight = $0 }
                 }
@@ -548,7 +548,7 @@ struct Sidebar: View {
             }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { [layout] in layout.line = $0 }
             .contextMenu { Button("New Folder") { newFolder(in: nil) } }
-            .animation(.snappy(duration: 0.2), value: bookmarking)
+            .animation(Motion.moving(.snappy(duration: 0.2)), value: bookmarking)
         }
     }
 
@@ -617,7 +617,7 @@ struct Sidebar: View {
     /// A folder in `folder` (nil: at the top), open, with its name to type.
     private func newFolder(in folder: Bookmarks.Item.ID?, at index: Int = .max) {
         let item = Bookmarks.Item(title: "New Folder", children: [])
-        withAnimation(.snappy(duration: 0.2)) {
+        withAnimation(Motion.moving(.snappy(duration: 0.2))) {
             if let folder { browser.bookmarks.open(folder) }
             browser.bookmarks.add(item, to: folder, at: index)
         }
@@ -852,7 +852,7 @@ private struct ZoomBadge: View {
                         Text(PageZoom.name(zoom))
                             .font(.system(size: 11, weight: .semibold))
                             .monospacedDigit()
-                            .contentTransition(.numericText(value: zoom))
+                            .contentTransition(Motion.reduced ? .opacity : .numericText(value: zoom))
                     }
                     .foregroundStyle(hovering ? Palette.ink : Palette.muted)
                     .padding(.horizontal, 8)
@@ -866,11 +866,11 @@ private struct ZoomBadge: View {
                 .help("Actual Size (⌘0)")
                 .accessibilityLabel("Zoom \(PageZoom.name(zoom)), Actual Size")
                 .padding(.trailing, gap)
-                .transition(.scale(scale: 0.8).combined(with: .opacity))
+                .transition(Motion.moving(.scale(scale: 0.8).combined(with: .opacity)))
             }
         }
-        .animation(.snappy(duration: 0.2), value: shown)
-        .animation(.snappy(duration: 0.2), value: zoom)
+        .animation(Motion.moving(.snappy(duration: 0.2)), value: shown)
+        .animation(Motion.moving(.snappy(duration: 0.2)), value: zoom)
         .animation(.easeOut(duration: 0.14), value: hovering)
     }
 }
@@ -955,7 +955,8 @@ extension Animation {
     /// For anything that slides into place: tabs arriving and leaving, the
     /// sidebar. Without bounce: a sidebar that overshot its place would pull
     /// away from the window's edge and show a strip of the page there.
-    static let slide = Animation.smooth(duration: 0.25)
+    /// None with Reduce Motion (`Motion`).
+    static var slide: Animation? { Motion.moving(.smooth(duration: 0.25)) }
 }
 
 /// Under the bookmarks, the line between them and the tabs, a hairline as
@@ -1073,7 +1074,7 @@ private struct BookmarkRow: View {
             press: tabID.map { tabID in { browser.select(tabID) } }
         ) {
             if item.isFolder {
-                withAnimation(.snappy(duration: 0.2)) { browser.bookmarks.toggle(id) }
+                withAnimation(Motion.moving(.snappy(duration: 0.2))) { browser.bookmarks.toggle(id) }
             } else {
                 browser.open(bookmark: id)
             }

@@ -47,7 +47,7 @@ final class TabDrag {
         self.mouse = mouse
         let off = outside ? id : nil
         if off != detached {
-            withAnimation(.snappy(duration: 0.2)) { detached = off }
+            withAnimation(Motion.moving(.snappy(duration: 0.2))) { detached = off }
             // Taken now, not as the drag began: the press brings the tab on
             // screen, and its page isn't drawn yet then.
             if off != nil { takeLook(of: tab) }

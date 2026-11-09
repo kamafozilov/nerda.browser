@@ -205,7 +205,7 @@ private struct HistoryRow: View {
         .help(visit.url.absoluteString)
         .overlay(alignment: .trailing) {
             if hovering {
-                Button { withAnimation(.snappy(duration: 0.2)) { history.remove(visit.url) } } label: {
+                Button { withAnimation(Motion.moving(.snappy(duration: 0.2))) { history.remove(visit.url) } } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Palette.muted)

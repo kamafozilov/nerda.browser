@@ -200,7 +200,6 @@ struct DownloadsButton: View {
     /// Where the button is in the window, for a download to fly into.
     @State private var frame = CGRect.zero
     @State private var flight: Flight?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let running = browser.downloads.filter { $0.state == .running }
@@ -210,7 +209,8 @@ struct DownloadsButton: View {
             Image(systemName: running.isEmpty ? "arrow.down.circle" : "arrow.down")
                 .font(.system(size: running.isEmpty ? 16 : 10, weight: running.isEmpty ? .medium : .semibold))
                 .foregroundStyle(hovering || shown ? Palette.ink : Palette.muted)
-                .symbolEffect(.bounce, value: finished)
+                // Still with Reduce Motion, as the flight below is.
+                .symbolEffect(.bounce, value: Motion.reduced ? 0 : finished)
                 .frame(width: 28, height: 28)
                 .overlay {
                     if !running.isEmpty { ProgressRing(fraction: Self.progress(of: running)) }
@@ -237,7 +237,7 @@ struct DownloadsButton: View {
         }
         // Downloads are only ever added at the top.
         .onChange(of: browser.downloads.count) { old, new in
-            guard new > old, !reduceMotion, let download = browser.downloads.first else { return }
+            guard new > old, !Motion.reduced, let download = browser.downloads.first else { return }
             flight = Flight(name: download.name, from: Self.pointer(from: frame))
         }
     }
