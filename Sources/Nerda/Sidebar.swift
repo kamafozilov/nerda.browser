@@ -1216,9 +1216,9 @@ private struct SidebarRow: View {
     }
 
     // In an incognito window, in its accent.
-    private var wash: Color { incognito ? Palette.incognitoAccent.opacity(0.22) : Palette.wash }
-    private var hover: Color { incognito ? Palette.incognitoAccent.opacity(0.1) : Palette.hover }
-    private var rim: Color { incognito ? Palette.incognitoAccent.opacity(0.35) : Palette.rim }
+    private var wash: Color { incognito ? Palette.incognitoWash : Palette.wash }
+    private var hover: Color { incognito ? Palette.incognitoHover : Palette.hover }
+    private var rim: Color { incognito ? Palette.incognitoRim : Palette.rim }
 }
 
 /// A tab's title made editable where it is, all of it selected, so typing

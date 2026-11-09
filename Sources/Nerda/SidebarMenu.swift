@@ -414,7 +414,7 @@ private struct MenuRow: View {
             .frame(height: 32)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(hovering && isEnabled || lit ? incognito ? Palette.incognitoAccent.opacity(0.18) : Palette.wash : .clear)
+                    .fill(hovering && isEnabled || lit ? incognito ? Palette.incognitoLit : Palette.wash : .clear)
             )
             .padding(.horizontal, 5)
             .contentShape(Rectangle())

@@ -52,7 +52,7 @@ struct BrowserView: View {
     static let margin: CGFloat = 6
     static let cornerRadius: CGFloat = 10
     /// The card's hairline edge, which the tab on screen across the top wears too.
-    static let edge = Color.primary.opacity(0.12)
+    static let edge = Palette.edge
     private var margin: CGFloat { pageFullscreen ? 0 : Self.margin }
     /// A sidebar the page is laid out beside, when it is open.
     private var docks: Bool { !pageFullscreen && !horizontal }

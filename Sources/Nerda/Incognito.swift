@@ -403,7 +403,7 @@ struct IncognitoPage: View {
                 )
                 // On the plain page, an edge to find it by, in the accent.
                 .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .strokeBorder(Palette.incognitoAccent.opacity(0.45)))
+                    .strokeBorder(Palette.incognitoFieldEdge))
                 .padding(.horizontal, 12)
                 .padding(.top, top)
             }
