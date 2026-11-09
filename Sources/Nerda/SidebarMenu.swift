@@ -51,7 +51,9 @@ struct SidebarMenuButton: View {
 /// beside it. Profiles go at its top once there is more than Personal, each
 /// opening its own window, the window's own ticked.
 /// In an incognito window, no History: it isn't kept there.
-/// Drawn by SwiftUI rather than as a system menu, so it can look like the rest.
+/// Drawn by SwiftUI rather than as a system menu, so it can look like the rest,
+/// and so worked from the keyboard by hand: ↑ and ↓ light a row, → and
+/// Return go into a submenu, ← and Esc come back out, Return picks.
 struct SidebarMenu: View {
     let browser: Browser
     /// Under its button at the window's top right (the tabs across the top),
@@ -62,54 +64,192 @@ struct SidebarMenu: View {
     static let width: CGFloat = 240
     static let animation = Animation.snappy(duration: 0.18)
 
-    private enum Submenu { case history, developer }
+    enum Submenu { case history, developer }
+
+    /// The menu's own rows, top to bottom.
+    enum Row: Hashable {
+        case profile(UUID), history, vault, settings, developer, newTab, incognito
+
+        var submenu: Submenu? {
+            switch self {
+            case .history: .history
+            case .developer: .developer
+            default: nil
+            }
+        }
+    }
+
+    /// A submenu's row.
+    struct Item: Identifiable {
+        let id: String
+        var icon: String?
+        var site: URL?
+        let title: String
+        var shortcut: String?
+        var checked = false
+        var enabled = true
+        /// A line above it, setting it apart from those before.
+        var parted = false
+        let action: () -> Void
+    }
 
     /// The submenu out beside its row: the one the pointer last went over.
     @State private var open: Submenu?
+    /// The row lit from the keyboard (↑ and ↓), as a system menu's; and in
+    /// the submenu out, once → or Return went into it.
+    @State private var keyed: Row?
+    @State private var subKeyed: Item.ID?
+    @FocusState private var focused: Bool
+
+    /// Profiles first, once there is more than Personal; no History in an
+    /// incognito window, as it isn't kept there.
+    static func rows(profiles: [Profile], incognito: Bool) -> [Row] {
+        (profiles.count > 1 ? profiles.map { .profile($0.id) } : [])
+            + (incognito ? [] : [.history]) + [.vault, .settings, .developer, .newTab, .incognito]
+    }
+
+    private var rows: [Row] { Self.rows(profiles: Profiles.shared.all, incognito: browser.isPrivate) }
 
     var body: some View {
         VStack(spacing: 0) {
-            if Profiles.shared.many {
-                ForEach(Profiles.shared.all) { profile in
-                    MenuRow(icon: profile.symbol, tint: profile.color.color, title: profile.name,
-                            checked: !browser.isPrivate && profile === browser.profile) { run { Windows.show(profile) } }
-                        .onHover { if $0 { open = nil } }
-                }
-                MenuDivider()
-            }
-            Group {
-                if !browser.isPrivate {
-                    MenuRow(icon: "clock.arrow.circlepath", title: "History", submenu: true, lit: open == .history) {
-                        open = .history
+            ForEach(rows, id: \.self) { row in
+                view(of: row)
+                // Each row's hover says which submenu is out, and puts the
+                // keyboard's light out: the pointer has the menu now.
+                    .onHover { over in
+                        guard over else { return }
+                        open = row.submenu
+                        keyed = nil
+                        subKeyed = nil
                     }
-                    .overlay(alignment: fromTop ? .topTrailing : .bottomLeading) { if open == .history { beside(history) } }
-                    .onHover { if $0 { open = .history } }
-                }
-
-                MenuRow(icon: "lock.shield", title: "Vault", shortcut: "⌥⌘P") { run { VaultWindow.show(browser.profile) } }
-                    .onHover { if $0 { open = nil } }
-                MenuRow(icon: "gearshape", title: "Settings", shortcut: "⌘,") { run { browser.openSettings() } }
-                    .onHover { if $0 { open = nil } }
-                MenuRow(icon: "chevron.left.forwardslash.chevron.right", title: "Developer", submenu: true, lit: open == .developer) {
-                    open = .developer
-                }
-                .overlay(alignment: fromTop ? .topTrailing : .bottomLeading) { if open == .developer { beside(developer) } }
-                .onHover { if $0 { open = .developer } }
+                if case .profile(let id) = row, id == Profiles.shared.all.last?.id { MenuDivider() }
+                if row == .developer { MenuDivider() }
             }
-            MenuDivider()
-            MenuRow(icon: "plus", title: "New Tab", shortcut: "⌘T") { run(browser.newTab) }
-                .onHover { if $0 { open = nil } }
-            MenuRow(mark: true, title: "Incognito Window", shortcut: "⇧⌘N") { run { Windows.openIncognito() } }
-                .onHover { if $0 { open = nil } }
         }
         .padding(.vertical, 5)
         .frame(width: Self.width)
         .menuPanel()
-        // Esc puts it away, as it does a system menu.
+        // Esc puts away the submenu gone into, then the menu, as in a system menu.
         .background {
-            Button("Close Menu", action: close)
+            Button("Close Menu") {
+                guard subKeyed == nil else { return leaveSubmenu() }
+                close()
+                // The keyboard the menu took goes back to the page.
+                browser.focusPage()
+            }
                 .keyboardShortcut(.cancelAction)
                 .hidden()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Menu")
+        // The keyboard comes to the menu as it opens, for ↑ ↓ → ← and Return.
+        .focusable()
+        .focusEffectDisabled()
+        .focused($focused)
+        .onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow, .return]) { press in
+            key(press.key) ? .handled : .ignored
+        }
+        .onAppear {
+            focused = true
+            // Opened from the keyboard, its first row is lit at once.
+            if NSApp.currentEvent?.type == .keyDown { keyed = rows.first }
+        }
+    }
+
+    @ViewBuilder private func view(of row: Row) -> some View {
+        switch row {
+        case .profile(let id):
+            if let profile = Profiles.shared.profile(id) {
+                MenuRow(icon: profile.symbol, tint: profile.color.color, title: profile.name,
+                        lit: keyed == row, checked: !browser.isPrivate && profile === browser.profile) { activate(row) }
+            }
+        case .history:
+            MenuRow(icon: "clock.arrow.circlepath", title: "History", submenu: true, lit: open == .history || keyed == row) {
+                activate(row)
+            }
+            .overlay(alignment: fromTop ? .topTrailing : .bottomLeading) {
+                if open == .history { beside(submenu(historyItems, width: 300, empty: "No history yet")) }
+            }
+        case .vault:
+            MenuRow(icon: "lock.shield", title: "Vault", shortcut: "⌥⌘P", lit: keyed == row) { activate(row) }
+        case .settings:
+            MenuRow(icon: "gearshape", title: "Settings", shortcut: "⌘,", lit: keyed == row) { activate(row) }
+        case .developer:
+            MenuRow(icon: "chevron.left.forwardslash.chevron.right", title: "Developer", submenu: true,
+                    lit: open == .developer || keyed == row) { activate(row) }
+            .overlay(alignment: fromTop ? .topTrailing : .bottomLeading) {
+                if open == .developer { beside(submenu(developerItems, width: 290)) }
+            }
+        case .newTab:
+            MenuRow(icon: "plus", title: "New Tab", shortcut: "⌘T", lit: keyed == row) { activate(row) }
+        case .incognito:
+            MenuRow(mark: true, title: "Incognito Window", shortcut: "⇧⌘N", lit: keyed == row) { activate(row) }
+        }
+    }
+
+    /// A row picked, by a click or Return: a submenu's comes out, and the
+    /// keyboard goes into it.
+    private func activate(_ row: Row) {
+        if let submenu = row.submenu {
+            open = submenu
+            if keyed == row { subKeyed = items(of: submenu).first(where: \.enabled)?.id }
+            return
+        }
+        switch row {
+        case .profile(let id): if let profile = Profiles.shared.profile(id) { run { Windows.show(profile) } }
+        case .vault: run { VaultWindow.show(browser.profile) }
+        case .settings: run { browser.openSettings() }
+        case .newTab: run(browser.newTab)
+        case .incognito: run { Windows.openIncognito() }
+        case .history, .developer: break
+        }
+    }
+
+    /// ↑ and ↓ go from row to row, round past either end, skipping those
+    /// greyed; → and Return go into a submenu, ← comes back out of it, and
+    /// Return picks the row lit. False for a key left to others.
+    private func key(_ key: KeyEquivalent) -> Bool {
+        if let open, let subKeyed {
+            let items = items(of: open).filter(\.enabled)
+            switch key {
+            case .upArrow, .downArrow:
+                let index = items.firstIndex { $0.id == subKeyed } ?? 0
+                let step = key == .downArrow ? 1 : -1
+                if !items.isEmpty { self.subKeyed = items[(index + step + items.count) % items.count].id }
+            case .leftArrow: leaveSubmenu()
+            case .return: items.first { $0.id == subKeyed }?.action()
+            default: return false
+            }
+            return true
+        }
+        switch key {
+        case .upArrow, .downArrow:
+            let step = key == .downArrow ? 1 : -1
+            let next = keyed.flatMap(rows.firstIndex).map { ($0 + step + rows.count) % rows.count }
+                ?? (step > 0 ? 0 : rows.count - 1)
+            keyed = rows[next]
+            open = nil
+        case .rightArrow:
+            guard let keyed, keyed.submenu != nil else { return false }
+            activate(keyed)
+        case .return:
+            guard let keyed else { return false }
+            activate(keyed)
+        default:
+            return false
+        }
+        return true
+    }
+
+    private func leaveSubmenu() {
+        subKeyed = nil
+        open = nil
+    }
+
+    private func items(of submenu: Submenu) -> [Item] {
+        switch submenu {
+        case .history: historyItems
+        case .developer: developerItems
         }
     }
 
@@ -125,49 +265,66 @@ struct SidebarMenu: View {
             .transition(.opacity)
     }
 
-    private var history: some View {
-        let visits = browser.history.recent(12)
-        return VStack(spacing: 0) {
-            if visits.isEmpty {
-                Text("No history yet")
+    private func submenu(_ items: [Item], width: CGFloat, empty: String? = nil) -> some View {
+        VStack(spacing: 0) {
+            // Nothing before the first line: nothing visited yet.
+            if let empty, items.first?.parted == true {
+                Text(empty)
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14)
                     .frame(height: 32)
             }
-            ForEach(visits, id: \.url) { visit in
-                MenuRow(site: visit.url, title: visit.title.isEmpty ? visit.url.absoluteString : visit.title) {
-                    run { browser.go(to: visit.url) }
-                }
+            ForEach(items) { item in
+                if item.parted { MenuDivider() }
+                MenuRow(icon: item.icon, site: item.site, title: item.title, shortcut: item.shortcut,
+                        lit: subKeyed == item.id, checked: item.checked, action: item.action)
+                    .disabled(!item.enabled)
             }
-            MenuDivider()
-            MenuRow(icon: "clock.arrow.circlepath", title: "Show All History", shortcut: "⌘Y") { run(browser.openHistory) }
-            MenuRow(icon: "trash", title: "Clear History…") { run(browser.clearHistory) }
         }
-        .frame(width: 300)
+        .accessibilityElement(children: .contain)
+        .frame(width: width)
+    }
+
+    private var historyItems: [Item] {
+        let visits = browser.history.recent(12).map { visit in
+            Item(id: visit.url.absoluteString, site: visit.url, title: visit.title.isEmpty ? visit.url.absoluteString : visit.title) {
+                run { browser.go(to: visit.url) }
+            }
+        }
+        return visits + [
+            Item(id: "all", icon: "clock.arrow.circlepath", title: "Show All History", shortcut: "⌘Y", parted: true) {
+                run(browser.openHistory)
+            },
+            Item(id: "clear", icon: "trash", title: "Clear History…") { run(browser.clearHistory) },
+        ]
     }
 
     /// For the page on screen; none without one (a new tab, Settings).
-    private var developer: some View {
+    private var developerItems: [Item] {
         let tab = browser.selected
-        return VStack(spacing: 0) {
-            MenuRow(icon: "wrench.and.screwdriver", title: "Developer Tools", shortcut: "⌥⌘I") { run { tab?.inspect(.tools) } }
-            MenuRow(icon: "terminal", title: "JavaScript Console", shortcut: "⌥⌘J") { run { tab?.inspect(.console) } }
-            MenuRow(icon: "cursorarrow.rays", title: "Inspect Element", shortcut: "⌥⌘C") { run { tab?.inspect(.element) } }
-            MenuDivider()
-            MenuRow(icon: "iphone", title: "Responsive Design Mode", shortcut: "⌥⌘R",
-                    checked: tab?.responsive != nil) { run(browser.toggleResponsive) }
-            MenuRow(icon: "doc.plaintext", title: "View Page Source", shortcut: "⌥⌘U") { run(browser.viewSource) }
-                .disabled(tab?.site?.scheme == ViewSource.scheme)
-            MenuDivider()
-            MenuRow(icon: "curlybraces", title: "Disable JavaScript", checked: tab?.javaScriptOff == true) {
-                run { tab?.javaScriptOff.toggle() }
-            }
-            MenuRow(icon: "trash", title: "Clear Site Data") { run { Task { await tab?.clearSiteData() } } }
-        }
-        .disabled(tab?.hasPage != true)
-        .frame(width: 290)
+        let page = tab?.hasPage == true
+        return [
+            Item(id: "tools", icon: "wrench.and.screwdriver", title: "Developer Tools", shortcut: "⌥⌘I", enabled: page) {
+                run { tab?.inspect(.tools) }
+            },
+            Item(id: "console", icon: "terminal", title: "JavaScript Console", shortcut: "⌥⌘J", enabled: page) {
+                run { tab?.inspect(.console) }
+            },
+            Item(id: "element", icon: "cursorarrow.rays", title: "Inspect Element", shortcut: "⌥⌘C", enabled: page) {
+                run { tab?.inspect(.element) }
+            },
+            Item(id: "responsive", icon: "iphone", title: "Responsive Design Mode", shortcut: "⌥⌘R",
+                 checked: tab?.responsive != nil, enabled: page, parted: true) { run(browser.toggleResponsive) },
+            Item(id: "source", icon: "doc.plaintext", title: "View Page Source", shortcut: "⌥⌘U",
+                 enabled: page && tab?.site?.scheme != ViewSource.scheme) { run(browser.viewSource) },
+            Item(id: "javascript", icon: "curlybraces", title: "Disable JavaScript", checked: tab?.javaScriptOff == true,
+                 enabled: page, parted: true) { run { tab?.javaScriptOff.toggle() } },
+            Item(id: "clear", icon: "trash", title: "Clear Site Data", enabled: page) {
+                run { Task { await tab?.clearSiteData() } }
+            },
+        ]
     }
 
     /// The menu goes first, as a system menu's does, and then what was picked.
@@ -202,7 +359,7 @@ private struct MenuRow: View {
     var shortcut: String?
     /// Opens a submenu to its side: a chevron at its end.
     var submenu = false
-    /// Its submenu is out.
+    /// Its submenu is out, or the keyboard is on it.
     var lit = false
     /// On, as a switch: a tick at its end.
     var checked = false
@@ -264,6 +421,12 @@ private struct MenuRow: View {
         }
         .buttonStyle(MenuRowStyle())
         .onHover { hovering = $0 }
+        // VoiceOver reads it as a system menu's item: its name, whether it
+        // is ticked, and that it opens a submenu.
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityValue(checked ? "Checked" : "")
+        .accessibilityHint(submenu ? "Opens a submenu" : "")
     }
 }
 

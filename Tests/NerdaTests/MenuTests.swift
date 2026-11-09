@@ -91,3 +91,17 @@ private func items(of menu: NSMenu) -> [NSMenuItem] {
     #expect(AppMenu.tabStep(key: 30, modifiers: .command, editingText: false) == nil)
     #expect(AppMenu.tabStep(key: 124, modifiers: [.command, .function, .numericPad], editingText: false) == nil)
 }
+
+/// The sidebar's menu, row by row as the keyboard goes down it: profiles
+/// first once there are several, and no History in an incognito window.
+@MainActor
+@Test func sidebarMenuRowsInOrder() {
+    let root = FileManager.default.temporaryDirectory.appending(path: "nerda-menu-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let work = Profile(name: "Work", symbol: "briefcase", color: .blue, root: root)
+    let rest: [SidebarMenu.Row] = [.vault, .settings, .developer, .newTab, .incognito]
+    #expect(SidebarMenu.rows(profiles: [.main], incognito: false) == [.history] + rest)
+    #expect(SidebarMenu.rows(profiles: [.main], incognito: true) == rest)
+    #expect(SidebarMenu.rows(profiles: [.main, work], incognito: false)
+        == [.profile(Profile.main.id), .profile(work.id), .history] + rest)
+}
