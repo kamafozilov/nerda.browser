@@ -84,19 +84,25 @@ final class AIChats {
 
         let folder = Self.folder
         let file = folder.appending(path: host + ".png")
-        var data = await Task.detached(priority: .userInitiated) { try? Data(contentsOf: file) }.value
+        var data = await Self.read(file)
         // One it has none for is a 404.
         if data == nil, let (fetched, response) = try? await URLSession.cookieless.data(from: url),
            (response as? HTTPURLResponse)?.statusCode == 200 {
             data = fetched
-            await Task.detached(priority: .utility) {
-                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                try? fetched.write(to: file, options: .atomic)
-            }.value
+            await Self.write(fetched, to: file)
         }
         if let data, let image = NSImage(data: data) {
             icons[host] = Icon(image: image, fill: Self.fill(of: image))
         }
+    }
+
+    @concurrent nonisolated private static func read(_ file: URL) async -> Data? {
+        try? Data(contentsOf: file)
+    }
+
+    @concurrent nonisolated private static func write(_ data: Data, to file: URL) async {
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: file, options: .atomic)
     }
 
     /// The colour at the middle of its top and left edges, when both are

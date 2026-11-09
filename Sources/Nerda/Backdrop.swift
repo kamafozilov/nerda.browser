@@ -177,15 +177,18 @@ final class Backdrop {
         let screens = NSScreen.screens.map {
             CGSize(width: $0.frame.width * $0.backingScaleFactor, height: $0.frame.height * $0.backingScaleFactor)
         }
-        Task.detached(priority: .userInitiated) {
-            // As big as it takes to fill the largest screen, and no bigger.
-            let side = Self.size(of: file).map { Self.side(of: $0, covering: screens) } ?? Self.side
-            let image = Self.image(from: file, side: side)
-            await MainActor.run {
-                guard self.shown == file else { return }
-                withAnimation(.easeInOut(duration: 0.35)) { self.image = image }
-            }
+        Task {
+            let image = await Self.image(from: file, covering: screens)
+            guard shown == file else { return }
+            withAnimation(.easeInOut(duration: 0.35)) { self.image = image }
         }
+    }
+
+    /// The picture in `file`, as big as it takes to fill the largest screen,
+    /// and no bigger.
+    @concurrent nonisolated private static func image(from file: URL, covering screens: [CGSize]) async -> CGImage? {
+        let needed = size(of: file).map { side(of: $0, covering: screens) } ?? Self.side
+        return image(from: file, side: needed)
     }
 
     /// Makes small copies of the pictures for the picker, those not made
@@ -195,14 +198,18 @@ final class Backdrop {
         let files = (Self.own + chosen).filter { !thumbnailsAsked.contains($0) }
         guard !files.isEmpty else { return }
         thumbnailsAsked.formUnion(files)
-        Task.detached(priority: .utility) {
-            let made = files.compactMap { file in
-                // The small copy inside is at most 320 px: too thin for a
-                // tile (112 × 70 pt, on Retina) from a panorama.
-                let small = Self.image(from: file, side: 360, small: true).flatMap { $0.width >= 224 && $0.height >= 140 ? $0 : nil }
-                return (small ?? Self.image(from: file, side: 360)).map { (file, $0) }
-            }
-            await MainActor.run { self.thumbnails.merge(made) { $1 } }
+        Task {
+            let made = await Self.thumbnails(of: files)
+            thumbnails.merge(made) { $1 }
+        }
+    }
+
+    @concurrent nonisolated private static func thumbnails(of files: [URL]) async -> [(URL, CGImage)] {
+        files.compactMap { file in
+            // The small copy inside is at most 320 px: too thin for a
+            // tile (112 × 70 pt, on Retina) from a panorama.
+            let small = image(from: file, side: 360, small: true).flatMap { $0.width >= 224 && $0.height >= 140 ? $0 : nil }
+            return (small ?? image(from: file, side: 360)).map { (file, $0) }
         }
     }
 
@@ -210,8 +217,7 @@ final class Backdrop {
     /// copy is made off the main thread: a big picture takes a few hundred ms.
     func choose(_ file: URL) async -> Bool {
         let copy = Self.folder.appending(path: UUID().uuidString + ".heic")
-        guard await Task.detached(priority: .userInitiated, operation: { Self.copy(file, to: copy, side: Self.side) }).value
-        else { return false }
+        guard await Self.copying(file, to: copy) else { return false }
         chosen.append(copy)
         wallpaper = .chosen(copy.lastPathComponent)
         loadThumbnails()
@@ -274,6 +280,11 @@ final class Backdrop {
             kCGImageSourceThumbnailMaxPixelSize: side,
             kCGImageSourceShouldCacheImmediately: true,
         ] as CFDictionary)
+    }
+
+    /// `copy`, off the main thread, as big as a backdrop is kept.
+    @concurrent nonisolated private static func copying(_ file: URL, to destination: URL) async -> Bool {
+        copy(file, to: destination, side: side)
     }
 
     /// `file` as HEIC at `destination`, no bigger than `side`, with a small

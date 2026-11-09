@@ -216,6 +216,15 @@ final class History {
         return visit
     }
 
+    @concurrent nonisolated private static func importing(
+        _ imported: [Visit], into before: [URL: Visit], reusing entries: [URL: Entry]
+    ) async -> Loaded {
+        var visits = before
+        for visit in imported { visits[visit.url] = visits[visit.url].map { Self.imported($0, visit) } ?? visit }
+        let made = indexed(visits, reusing: entries)
+        return Loaded(visits: visits, entries: made.entries, index: made.index)
+    }
+
     /// A page imported joined to the same page here: the larger of the two
     /// counts, not their sum, as importing the same browser again would
     /// count its visits twice.
@@ -258,12 +267,7 @@ final class History {
     func add(_ imported: [Visit]) async -> Int {
         settle()
         let before = visits, entries = entries
-        let made = await Task.detached(priority: .userInitiated) {
-            var visits = before
-            for visit in imported { visits[visit.url] = visits[visit.url].map { Self.imported($0, visit) } ?? visit }
-            let made = Self.indexed(visits, reusing: entries)
-            return Loaded(visits: visits, entries: made.entries, index: made.index)
-        }.value
+        let made = await Self.importing(imported, into: before, reusing: entries)
         if visits == before {
             visits = made.visits
             self.entries = made.entries

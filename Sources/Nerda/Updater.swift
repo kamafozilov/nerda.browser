@@ -170,11 +170,9 @@ final class Updater {
         state = .downloading(0)
         Task {
             do {
-                staged = try await Task.detached(priority: .userInitiated) {
-                    try await Swap.fetch(release) { fraction in
-                        DispatchQueue.main.async { MainActor.assumeIsolated { Updater.shared.advance(fraction) } }
-                    }
-                }.value
+                staged = try await Swap.fetch(release) { fraction in
+                    DispatchQueue.main.async { MainActor.assumeIsolated { Updater.shared.advance(fraction) } }
+                }
                 state = .ready(release.version)
             } catch {
                 state = .available(release.version)
@@ -364,7 +362,7 @@ nonisolated private enum Swap {
 
     /// The new bundle, checked, in a scratch folder of its own (`place` puts
     /// it in). `progress`: how much of the ZIP is in, 0 to 1, in whole percents.
-    static func fetch(_ release: Updater.Release, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+    @concurrent static func fetch(_ release: Updater.Release, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         let files = FileManager.default
         // No team: an ad-hoc build, which can't tell who made a download.
         guard let team = teamID(of: target) else { throw Refused.unsigned }

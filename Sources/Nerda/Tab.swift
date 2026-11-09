@@ -699,7 +699,7 @@ final class Tab: Identifiable {
         packedLook = nil
         if let pixels = look?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
             Task {
-                let packed = await Task.detached(priority: .utility) { Self.png(pixels) }.value
+                let packed = await Self.png(pixels)
                 if isAsleep { packedLook = packed }
             }
         }
@@ -729,7 +729,7 @@ final class Tab: Identifiable {
 
     /// Lossless, so the card shows just what the page did, see-through
     /// parts (a page not yet in) and all.
-    nonisolated static func png(_ image: CGImage) -> Data? {
+    @concurrent nonisolated static func png(_ image: CGImage) async -> Data? {
         NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
     }
 
