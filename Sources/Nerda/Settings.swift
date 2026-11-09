@@ -109,7 +109,7 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
                 // Return opens the first page found.
-                SettingsSearch(query: $query) { if let first = found.first { tab.settings = first } }
+                SettingsSearch(query: $query) { if let first = found.first { tab.content = .settings(first) } }
                     .padding(.bottom, 10)
                 ForEach(sections, id: \.self) { section in
                     Text(section)
@@ -119,7 +119,7 @@ struct SettingsView: View {
                         .padding(.top, section == sections.first ? 0 : 12)
                         .padding(.bottom, 4)
                     ForEach(found.filter { $0.section == section }) { page in
-                        SettingsNavRow(page: page, selected: page == open) { tab.settings = page }
+                        SettingsNavRow(page: page, selected: page == open) { tab.content = .settings(page) }
                     }
                 }
                 if found.isEmpty {
@@ -143,7 +143,7 @@ struct SettingsView: View {
                     switch open {
                     case .general:
                         GeneralSettings(browser: browser, languages: languages, editLanguages: { editingLanguages = true },
-                                        editSearch: { editingSearch = true }, openReleaseNotes: { tab.settings = .releaseNotes })
+                                        editSearch: { editingSearch = true }, openReleaseNotes: { tab.content = .settings(.releaseNotes) })
                     case .appearance:
                         AppearanceSettings()
                     case .tabs:

@@ -418,3 +418,39 @@ private final class UnclickedAction: WKNavigationAction {
     browser.close(browser.others(than: a.id), keeping: a.id)
     #expect(browser.tabs.map(\.id) == [pinned.id, a.id] && browser.selectedID == a.id)
 }
+
+/// A session written before tabs said what they show with one value still
+/// opens each tab on what it showed, and is written back the same way.
+@MainActor
+@Test func aSessionOfSettingsAndHistoryTabsRestoresWhatTheyShowed() throws {
+    let json = """
+        {"tabs":[{"title":"","zoom":1,"settings":"privacy"},{"title":"","zoom":1,"history":true},
+        {"url":"https://a.test/","title":"a.test","zoom":1}],"selected":0}
+        """
+    let session = try JSONDecoder().decode(Session.self, from: Data(json.utf8))
+    let tabs = session.tabs.map(Nerda.Tab.init(restoring:))
+    #expect(tabs.map(\.content) == [.settings(.privacy), .history, .web])
+    #expect(tabs[0].settings == .privacy && !tabs[0].showsHistory)
+    #expect(tabs[1].settings == nil && tabs[1].showsHistory)
+    #expect(tabs.map { $0.saved } == session.tabs)
+}
+
+/// What a tab shows is one thing at a time: the settings, the history or
+/// the web, never two of them, whichever way it gets there.
+@MainActor
+@Test func aTabShowsOneThingAtATime() {
+    let tab = Nerda.Tab()
+    tab.content = .settings(.tabs)
+    tab.content = .history
+    #expect(tab.settings == nil && tab.showsHistory)
+    tab.content = .settings(.general)
+    #expect(tab.settings == .general && !tab.showsHistory)
+    tab.go(to: URL(fileURLWithPath: "/"))
+    #expect(tab.content == .web && tab.settings == nil && !tab.showsHistory && tab.hasPage)
+
+    let browser = Browser()
+    browser.openSettings()
+    browser.openHistory()
+    let shown = browser.tabs.map(\.content).filter { $0 != .web }
+    #expect(shown.count == 2 && shown.contains(.settings(.general)) && shown.contains(.history))
+}

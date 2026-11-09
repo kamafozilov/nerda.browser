@@ -73,10 +73,22 @@ final class Tab: Identifiable {
     /// A name of your own for the tab (double-click it in the sidebar), kept
     /// in place of the page's title wherever the tab goes.
     var name: String?
+    /// What the tab shows: the web, or one of Nerda's own pages in its place.
+    /// One value, so a tab can't be the settings and the history at once.
+    enum Content: Equatable {
+        case web
+        /// Nerda's settings, open on this page of them.
+        case settings(SettingsPage)
+        /// Every page visited (⌘Y).
+        case history
+    }
+    var content = Content.web
     /// Nerda's settings, open on this page of them, in place of a web page.
-    var settings: SettingsPage?
+    var settings: SettingsPage? {
+        if case .settings(let page) = content { page } else { nil }
+    }
     /// Every page visited (⌘Y), in place of a web page.
-    var showsHistory = false
+    var showsHistory: Bool { content == .history }
     /// Responsive Design Mode (⌥⌘R): the page at a device's size, as that
     /// device's browser. A new browser takes a reload to be seen by the site.
     var responsive: Responsive? {
@@ -276,8 +288,7 @@ final class Tab: Identifiable {
         isPinned = saved.pinned == true
         // Sessions from before homes: where it was left is the best guess.
         home = saved.home ?? (isPinned ? saved.url : nil)
-        settings = saved.settings
-        showsHistory = saved.history == true
+        content = saved.settings.map(Content.settings) ?? (saved.history == true ? .history : .web)
         name = saved.name
         bookmark = saved.bookmark
     }
@@ -330,8 +341,7 @@ final class Tab: Identifiable {
             }
             return
         }
-        settings = nil
-        showsHistory = false
+        content = .web
         // An extension's page is only served to a view made from its
         // extension's configuration, and the web only outside one: going
         // from one kind to the other, the page is made anew.

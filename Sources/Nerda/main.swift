@@ -708,11 +708,11 @@ extension Browser {
         if commandBarOpen { hideCommandBar() }
         endAddressEdit()
         if let open = tabs.first(where: { $0.settings != nil }) {
-            if let page { open.settings = page }
+            if let page { open.content = .settings(page) }
             return selectedID = open.id
         }
         let tab = Tab()
-        tab.settings = page ?? .general
+        tab.content = .settings(page ?? .general)
         withAnimation(.slide) { add(tab) }
     }
 
@@ -724,7 +724,7 @@ extension Browser {
         endAddressEdit()
         if let open = tabs.first(where: \.showsHistory) { return selectedID = open.id }
         let tab = Tab()
-        tab.showsHistory = true
+        tab.content = .history
         withAnimation(.slide) { add(tab) }
     }
 
