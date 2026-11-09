@@ -82,6 +82,11 @@ final class Browser: NSObject {
     @ObservationIgnored var downloadFolder: URL?
     var recentlyClosed: [Session.ClosedTab] = []
     @ObservationIgnored private var closing: Set<Tab.ID> = []
+    /// A tab put on screen from the keyboard in the sidebar's list (the
+    /// arrows): its page comes on screen without taking the keyboard, which
+    /// stays in the list for the next arrow. Taken by the next pass of the
+    /// pages (`PageView`), whichever tab is on screen then.
+    @ObservationIgnored var keepsKeyboard: Tab.ID?
     /// A tab on its way to another window, which goes on playing there.
     @ObservationIgnored private var handedOver: Tab?
     let siteSettings: SiteSettings
@@ -308,6 +313,12 @@ final class Browser: NSObject {
     /// The tab on screen, at once: a press and the click it ends in both ask.
     func select(_ id: Tab.ID) {
         if selectedID != id { selectedID = id }
+    }
+
+    /// `id` on screen, the keyboard left where it is (`keepsKeyboard`).
+    func select(keepingKeyboard id: Tab.ID) {
+        keepsKeyboard = id
+        select(id)
     }
 
     /// A tab's own name; an empty one gives it back its page's title.

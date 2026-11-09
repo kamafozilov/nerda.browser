@@ -74,3 +74,42 @@ private func withAccessibility(_ body: () async throws -> Void) async rethrows {
         #expect(!browser.tabs.contains { $0.title == "One" })
     }
 }
+
+/// ↑ and ↓ in the tab list go one tab up or down, and stop at either end.
+@MainActor
+@Test func theArrowsGoToTheTabAboveOrBelow() {
+    let ids = [UUID(), UUID(), UUID()]
+    #expect(Sidebar.tab(after: ids[1], in: ids, by: 1) == ids[2])
+    #expect(Sidebar.tab(after: ids[1], in: ids, by: -1) == ids[0])
+    #expect(Sidebar.tab(after: ids[0], in: ids, by: -1) == nil)
+    #expect(Sidebar.tab(after: ids[2], in: ids, by: 1) == nil)
+    #expect(Sidebar.tab(after: ids[1], in: ids, by: 0) == nil)
+    #expect(Sidebar.tab(after: UUID(), in: ids, by: 1) == nil)
+}
+
+/// A tab put on screen from the list by the keyboard leaves the keyboard
+/// in the list, for the next arrow; a click's tab takes it, as before.
+@MainActor
+@Test func aTabPutOnScreenFromTheKeyboardLeavesItInTheList() async throws {
+    let browser = Browser()
+    let window = window(of: browser)
+    defer { window.close() }
+    let a = browser.open(URL(string: "data:text/html,a")!), b = browser.open(URL(string: "data:text/html,b")!)
+    try await Task.sleep(for: .milliseconds(500))
+    func pageHasKeyboard(_ tab: Nerda.Tab) -> Bool {
+        guard let responder = window.firstResponder as? NSView, let page = tab.page else { return false }
+        return responder === page || responder.isDescendant(of: page)
+    }
+
+    window.makeFirstResponder(nil)
+    browser.select(keepingKeyboard: a.id)
+    for _ in 0..<100 where browser.keepsKeyboard != nil { try await Task.sleep(for: .milliseconds(20)) }
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(browser.selectedID == a.id)
+    #expect(!pageHasKeyboard(a))
+    #expect(browser.keepsKeyboard == nil)
+
+    browser.select(b.id)
+    for _ in 0..<50 where !pageHasKeyboard(b) { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(pageHasKeyboard(b))
+}
