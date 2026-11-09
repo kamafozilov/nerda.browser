@@ -100,49 +100,103 @@ final class MediaCache: NSObject, WKURLSchemeHandler, URLSessionDataDelegate {
         })();
         """#, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
 
+    /// The file's reads and writes, in the order asked, on a queue of its
+    /// own: while a video plays they come at its pace, and on the main
+    /// thread a busy disk would hold up scrolling and typing. Each answers
+    /// on the main thread.
+    nonisolated final class Disk: Sendable {
+        private let handle: FileHandle
+        private let path: URL
+        private let queue = DispatchQueue(label: "Nerda media file", qos: .userInitiated)
+
+        init?(path: URL) {
+            guard FileManager.default.createFile(atPath: path.path, contents: nil),
+                  let handle = try? FileHandle(forUpdating: path) else { return nil }
+            self.handle = handle
+            self.path = path
+        }
+
+        func write(_ data: Data, at offset: Int64, then done: @escaping @MainActor @Sendable (Bool) -> Void) {
+            queue.async {
+                let written = (try? self.handle.seek(toOffset: UInt64(offset))) != nil && (try? self.handle.write(contentsOf: data)) != nil
+                DispatchQueue.main.async { done(written) }
+            }
+        }
+
+        func read(_ range: Range<Int64>, then done: @escaping @MainActor @Sendable (Data?) -> Void) {
+            queue.async {
+                let data = (try? self.handle.seek(toOffset: UInt64(range.lowerBound))) != nil
+                    ? try? self.handle.read(upToCount: Int(range.upperBound - range.lowerBound)) : nil
+                DispatchQueue.main.async { done(data) }
+            }
+        }
+
+        /// After what was asked before it.
+        func remove() {
+            queue.async {
+                try? self.handle.close()
+                try? FileManager.default.removeItem(at: self.path)
+            }
+        }
+    }
+
     /// One file: what has come of it, kept by byte range in a file of its
     /// own, the answers WebKit waits on, and the fetches filling it.
-    private final class Stored {
+    final class Stored {
         let url: URL
-        let path: URL
-        let handle: FileHandle
+        let disk: Disk
         /// As WebKit would send them for the page: its browser's name, not
         /// AVFoundation's, the frame's origin as referrer, its cookies.
         var headers: [String: String]?
         /// The whole file's size and type, once its server has said.
         var length: Int64?
         var type: String?
-        /// Sorted, apart from each other.
+        /// Sorted, apart from each other: on disk.
         var have: [Range<Int64>] = []
-        var loads: [Load] = []
-        var fetches: [Fetch] = []
+        /// Come from the server, on their way to disk.
+        var writing: [Range<Int64>] = []
+        fileprivate var loads: [Load] = []
+        fileprivate var fetches: [Fetch] = []
         var used = Date.now
+        private var removed = false
 
         init?(url: URL, path: URL) {
-            guard FileManager.default.createFile(atPath: path.path, contents: nil),
-                  let handle = try? FileHandle(forUpdating: path) else { return nil }
+            guard let disk = Disk(path: path) else { return nil }
             self.url = url
-            self.path = path
-            self.handle = handle
+            self.disk = disk
         }
 
         var size: Int64 { have.reduce(0) { $0 + $1.upperBound - $1.lowerBound } }
 
         func kept(at offset: Int64) -> Range<Int64>? { have.first { $0.contains(offset) } }
 
+        /// Kept, or come and about to be.
+        func coming(at offset: Int64) -> Bool { writing.contains { $0.contains(offset) } }
+
         /// Where what is kept or on its way runs out, going on from `offset`.
         func covered(from offset: Int64) -> Int64 {
             var end = offset
-            for span in (have + fetches.map { $0.at..<$0.end }).sorted(by: { $0.lowerBound < $1.lowerBound })
+            for span in (have + writing + fetches.map { $0.at..<$0.end }).sorted(by: { $0.lowerBound < $1.lowerBound })
             where span.lowerBound <= end {
                 end = max(end, span.upperBound)
             }
             return end
         }
 
-        func keep(_ data: Data, at offset: Int64) {
-            guard (try? handle.seek(toOffset: UInt64(offset))) != nil, (try? handle.write(contentsOf: data)) != nil else { return }
-            var merged = offset..<offset + Int64(data.count)
+        /// Counts as kept, and is read, once on disk; `done` follows, unless the file has gone.
+        func keep(_ data: Data, at offset: Int64, then done: @escaping @MainActor @Sendable () -> Void) {
+            let span = offset..<offset + Int64(data.count)
+            writing.append(span)
+            disk.write(data, at: offset) { [self] written in
+                if let index = writing.firstIndex(of: span) { writing.remove(at: index) }
+                guard !removed else { return }
+                if written { merge(span) }
+                done()
+            }
+        }
+
+        private func merge(_ span: Range<Int64>) {
+            var merged = span
             have.removeAll { other in
                 guard other.lowerBound <= merged.upperBound, merged.lowerBound <= other.upperBound else { return false }
                 merged = min(other.lowerBound, merged.lowerBound)..<max(other.upperBound, merged.upperBound)
@@ -152,19 +206,18 @@ final class MediaCache: NSObject, WKURLSchemeHandler, URLSessionDataDelegate {
             have.sort { $0.lowerBound < $1.lowerBound }
         }
 
-        func read(_ range: Range<Int64>) -> Data? {
-            guard (try? handle.seek(toOffset: UInt64(range.lowerBound))) != nil else { return nil }
-            return try? handle.read(upToCount: Int(range.upperBound - range.lowerBound))
+        func read(_ range: Range<Int64>, then done: @escaping @MainActor @Sendable (Data?) -> Void) {
+            disk.read(range, then: done)
         }
 
         func remove() {
-            try? handle.close()
-            try? FileManager.default.removeItem(at: path)
+            removed = true
+            disk.remove()
         }
     }
 
     /// One answer to WebKit: the bytes it asked for, from what is kept.
-    private final class Load {
+    fileprivate final class Load {
         let task: any WKURLSchemeTask
         /// The next byte to send, and the last asked for, if any.
         var at: Int64
@@ -185,7 +238,7 @@ final class MediaCache: NSObject, WKURLSchemeHandler, URLSessionDataDelegate {
     }
 
     /// Bytes `at` up to `end` asked of the server, kept as they come.
-    private final class Fetch {
+    fileprivate final class Fetch {
         let stored: Stored
         var at: Int64
         var end: Int64
@@ -275,6 +328,7 @@ final class MediaCache: NSObject, WKURLSchemeHandler, URLSessionDataDelegate {
         for load in stored.loads where stored.length.map({ load.at < $0 }) ?? true {
             if stored.kept(at: load.at) == nil {
                 // On its way within a moment: waited for.
+                if stored.coming(at: load.at) { continue }
                 if stored.fetches.contains(where: { $0.at <= load.at && load.at < min($0.end, $0.at + Self.near) }) { continue }
                 // Missed: a step elsewhere. What was on its way for no one near gives way,
                 // and one coming up behind stops where this one starts.
@@ -312,20 +366,24 @@ final class MediaCache: NSObject, WKURLSchemeHandler, URLSessionDataDelegate {
         }
         guard let kept = stored.kept(at: load.at) else { return }
         let upTo = min(kept.upperBound, end, load.at + Self.piece)
-        guard let data = stored.read(load.at..<upTo), !data.isEmpty else {
-            load.task.didFailWithError(URLError(.cannotOpenFile))
-            return self.end(load, of: stored)
-        }
-        load.task.didReceive(data)
-        load.at += Int64(data.count)
-        guard load.at < end else {
-            load.task.didFinish()
-            return self.end(load, of: stored)
-        }
         load.sending = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(10)) {
-            load.sending = false
-            self.serve(stored)
+        stored.read(load.at..<upTo) { [self] data in
+            // Stopped while it was read: WebKit is told nothing more.
+            guard !load.over else { return }
+            guard let data, !data.isEmpty else {
+                load.task.didFailWithError(URLError(.cannotOpenFile))
+                return self.end(load, of: stored)
+            }
+            load.task.didReceive(data)
+            load.at += Int64(data.count)
+            guard load.at < end else {
+                load.task.didFinish()
+                return self.end(load, of: stored)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(10)) {
+                load.sending = false
+                self.serve(stored)
+            }
         }
     }
 
@@ -412,9 +470,11 @@ final class MediaCache: NSObject, WKURLSchemeHandler, URLSessionDataDelegate {
         MainActor.assumeIsolated {
             guard let fetch = fetches[dataTask.taskIdentifier] else { return }
             let data = data.prefix(Int(fetch.end - fetch.at))
-            fetch.stored.keep(data, at: fetch.at)
+            let stored = fetch.stored
+            stored.keep(data, at: fetch.at) { [self] in
+                for load in stored.loads where !load.sending { pump(load, of: stored) }
+            }
             fetch.at += Int64(data.count)
-            for load in fetch.stored.loads where !load.sending { pump(load, of: fetch.stored) }
             // Cut short by a fetch started further on, which has the rest.
             if fetch.at >= fetch.end {
                 cancel(fetch)
@@ -433,7 +493,7 @@ final class MediaCache: NSObject, WKURLSchemeHandler, URLSessionDataDelegate {
             // would, and what is kept stays for the next ask.
             if error != nil || task.countOfBytesReceived == 0 {
                 let failure = (error as? URLError) ?? URLError(.zeroByteResource)
-                for load in stored.loads where fetch.at <= load.at && load.at < fetch.end && stored.kept(at: load.at) == nil {
+                for load in stored.loads where fetch.at <= load.at && load.at < fetch.end && stored.kept(at: load.at) == nil && !stored.coming(at: load.at) {
                     load.task.didFailWithError(failure)
                     end(load, of: stored)
                 }
