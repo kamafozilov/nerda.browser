@@ -440,12 +440,21 @@ private struct Overhang: Layout {
 final class BrowserWindow: NSWindow {
     let browser: Browser
 
-    /// The whole screen short of the menu bar and Dock, every time. Not the
-    /// frame it was left at: one stray resize would otherwise stick for good.
-    /// An incognito window is always dark, and its own colours (see
-    /// `IncognitoPage`), so it is plain which window is which. On `screen`,
-    /// for a tab moved to a window of its own; the main one's otherwise.
-    init(browser: Browser, screen: NSScreen? = NSScreen.main) {
+    /// Where and at the size it was left (`WindowFrame`), as in Safari and
+    /// Chrome; the whole screen short of the menu bar and Dock the first
+    /// time. An incognito window opens where the regular one was left, and
+    /// is always dark, and its own colours (see `IncognitoPage`), so it is
+    /// plain which window is which.
+    convenience init(browser: Browser) {
+        self.init(browser: browser, filling: nil, remembered: true)
+    }
+
+    /// Filling `screen`, the main one's if none: a tab moved to a window of its own.
+    convenience init(browser: Browser, filling screen: NSScreen?) {
+        self.init(browser: browser, filling: screen ?? NSScreen.main, remembered: false)
+    }
+
+    private init(browser: Browser, filling screen: NSScreen?, remembered: Bool) {
         self.browser = browser
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
@@ -470,13 +479,18 @@ final class BrowserWindow: NSWindow {
         title = Self.title(of: browser)
         if browser.isPrivate { appearance = NSAppearance(named: .darkAqua) }
         // Sized before it has content, so the content is laid out once, at that size.
-        fill(screen)
+        if remembered { place() } else { fill(screen) }
         // The Dock hidden or shown, or the display changed: the screen's free
         // part is another size, and a window still filling it follows.
         NotificationCenter.default.addObserver(
             self, selector: #selector(screenChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil
         )
+        if remembered, keepsFrame {
+            for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didExitFullScreenNotification] {
+                NotificationCenter.default.addObserver(self, selector: #selector(remember), name: name, object: self)
+            }
+        }
         contentView = NSHostingView(rootView: BrowserView(browser: browser, window: self)
             .environment(\.incognito, browser.isPrivate))
         browser.window = self
@@ -487,13 +501,41 @@ final class BrowserWindow: NSWindow {
         browser.isPrivate ? "Incognito" : Profiles.shared.many ? browser.profile.name : "Nerda"
     }
 
-    /// The frame `fill` last gave it: still this, the window was left filling the screen.
+    /// The frame `fill` (or `place`, filling) last gave it: still this, the
+    /// window was left filling the screen.
     private var filled = NSRect.zero
 
     private func fill(_ screen: NSScreen?) {
         guard let screen else { return }
         filled = screen.visibleFrame
         setFrame(filled, display: isVisible)
+    }
+
+    /// Its profile's own window keeps its frame for the next launch; an
+    /// incognito window, or a secondary one (see `Windows.moveToNewWindow`), doesn't.
+    private var keepsFrame: Bool { !browser.isPrivate && !browser.isSecondary }
+    /// Where it was left, on the screens there are now. Incognito, where the
+    /// regular window was left, down and to the right of a window already there.
+    private func place() {
+        let screens = (NSScreen.main.map { [$0] } ?? []) + NSScreen.screens.filter { $0 != NSScreen.main }
+        let visible = screens.map(\.visibleFrame)
+        let saved = WindowFrame.saved(for: browser.isPrivate ? Profile.mainID : browser.profile.id)
+        guard var placed = WindowFrame.place(saved, on: visible) else { return }
+        if browser.isPrivate {
+            let taken = NSApp.windows.filter { $0 is BrowserWindow && $0 !== self && $0.isVisible }.map(\.frame)
+            placed = WindowFrame.place(placed.cascaded(past: taken), on: visible) ?? placed
+        }
+        if placed.fills { filled = placed.frame }
+        setFrame(placed.frame, display: isVisible)
+    }
+
+    /// Moved, resized, or back from full screen: kept for the next launch,
+    /// with whether it fills the screen. Not the frame of full screen (on
+    /// the way in, the window already says it is), which would open the
+    /// next time as a window over the whole display: the one before it stays.
+    @objc private func remember() {
+        guard !styleMask.contains(.fullScreen), !isMiniaturized else { return }
+        WindowFrame(frame: frame, fills: frame == filled || frame == screen?.visibleFrame).save(for: browser.profile.id)
     }
 
     /// When the Dock shows, AppKit shrinks a window it covers, but never grows

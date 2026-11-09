@@ -148,7 +148,7 @@ enum Windows {
         guard browser.tabs.contains(where: { $0.id == id }) else { return }
         let moved = browser.isPrivate ? Browser(dataStore: browser.dataStore)
             : Browser(profile: browser.profile, secondary: true)
-        let window = BrowserWindow(browser: moved, screen: screen)
+        let window = BrowserWindow(browser: moved, filling: screen)
         let delegate = AppDelegate(window: window, browser: moved)
         window.delegate = delegate
         if browser.isPrivate {
@@ -240,7 +240,7 @@ enum Windows {
         }
         let browser = Browser(profile: profile, secondary: true)
         browser.restore(session, from: file, loadingPins: loadingPins)
-        let window = BrowserWindow(browser: browser, screen: screen ?? NSScreen.main)
+        let window = BrowserWindow(browser: browser, filling: screen)
         let delegate = AppDelegate(window: window, browser: browser)
         window.delegate = delegate
         secondary.append(delegate)
