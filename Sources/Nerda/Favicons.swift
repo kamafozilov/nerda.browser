@@ -30,7 +30,11 @@ final class Favicons {
     }
 
     private var icons: [String: Icon] = [:]
-    private var inFlight: [String: Task<Void, Never>] = [:]
+    /// Each site's fetch under way, with the call's own mark: only that call
+    /// takes it off when it ends, not one that came later.
+    private var inFlight: [String: (id: UUID, task: Task<Void, Never>)] = [:]
+    /// How an icon is asked of its site; another in tests.
+    var fetch: @MainActor (URL) async throws -> (Data, URLResponse) = { try await URLSession.cookieless.data(from: $0) }
     /// Icons pages named that failed, not asked again this run: the page
     /// names the same one at every load.
     private var failedNamed: Set<URL> = []
@@ -131,13 +135,20 @@ final class Favicons {
     /// incognito window, it is fetched leaving nothing on disk, and kept
     /// only while Nerda runs.
     func load(_ site: String, icon named: URL? = nil, keep: Bool = true) async {
-        // Two rows asking for the same site share one fetch.
-        if let task = inFlight[site] { await task.value }
+        // Two rows asking for the same site share one fetch: each waits for
+        // the one under way, and then for any one set off meanwhile, before
+        // looking whether it still needs its own.
+        while let running = inFlight[site] { await running.task.value }
         let icon = icon(site)
         guard icon.image == nil, named.map({ !failedNamed.contains($0) }) ?? !icon.failed,
               let url = named ?? URL(string: site + "/favicon.ico") else { return }
 
+        let id = UUID()
         let task = Task {
+            // Taken off by the fetch itself as it ends, before anyone waiting
+            // on it goes on: a waiter that still found it would wait on it
+            // again, done as it is, without ever letting it go.
+            defer { if self.inFlight[site]?.id == id { self.inFlight[site] = nil } }
             let file = folder.map { Self.file(for: site, in: $0) }
             if named == nil, let file {
                 switch await Task.detached(priority: .userInitiated, operation: { Self.read(file) }).value {
@@ -146,7 +157,7 @@ final class Favicons {
                 case nil: break
                 }
             }
-            let fetched = try? await URLSession.cookieless.data(from: url)
+            let fetched = try? await fetch(url)
             if let (data, _) = fetched, let found = await Task.detached(priority: .userInitiated, operation: { Self.decode(data) }).value {
                 self.keep(found, for: site)
                 if keep, let file { await Self.write(found.smaller ?? data, to: file) }
@@ -158,9 +169,8 @@ final class Favicons {
                 if keep, named == nil, fetched != nil, let file { await Self.write(Data(), to: file) }
             }
         }
-        inFlight[site] = task
+        inFlight[site] = (id, task)
         await task.value
-        inFlight[site] = nil
     }
 
     /// Takes off disk the icons of sites no longer in history, bookmarks or
