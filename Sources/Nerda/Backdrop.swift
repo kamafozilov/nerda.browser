@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
@@ -100,6 +101,87 @@ final class Backdrop {
         guard showing == 0, image != nil else { return }
         image = nil
         shown = nil
+        composites = []
+    }
+
+    /// A page's size in pixels, and its points' scale.
+    nonisolated struct Canvas: Hashable, Sendable {
+        let width: Int
+        let height: Int
+        let scale: CGFloat
+
+        init(size: CGSize, scale: CGFloat) {
+            width = Int((size.width * scale).rounded())
+            height = Int((size.height * scale).rounded())
+            self.scale = scale
+        }
+    }
+
+    /// The picture as a new tab draws it (`BackdropView`), for the last
+    /// pages' sizes: two windows of different sizes don't make it over and over.
+    @ObservationIgnored private var composites: [(source: CGImage, canvas: Canvas, image: CGImage)] = []
+
+    func composite(of image: CGImage, for canvas: Canvas) -> CGImage? {
+        composites.first { $0.source === image && $0.canvas == canvas }?.image
+    }
+
+    /// Makes it off the main thread, unless it is made already.
+    func makeComposite(of image: CGImage, for canvas: Canvas) async {
+        guard composite(of: image, for: canvas) == nil else { return }
+        let made = await Task.detached(priority: .userInitiated) { Self.composite(of: image, for: canvas) }.value
+        // Let go, or another picture shown, meanwhile.
+        guard let made, self.image === image else { return }
+        composites.removeAll { $0.source !== image || $0.canvas == canvas }
+        composites.append((image, canvas, made))
+        if composites.count > 2 { composites.removeFirst() }
+    }
+
+    /// Core Image, as the page draws: in the pictures' own colours, not
+    /// in linear light, so its blends come out as SwiftUI's would.
+    private nonisolated static let drawing = CIContext(options: [.workingColorSpace: NSNull(), .cacheIntermediates: false])
+
+    /// What `BackdropView` would draw of `image` live, as one picture: the
+    /// picture filling the page, blurred from just under the field down,
+    /// fading out toward the bottom, half see-through. Its blur alone would
+    /// take a pass of the whole page each time the field's glass is drawn.
+    nonisolated static func composite(of image: CGImage, for canvas: Canvas) -> CGImage? {
+        guard canvas.width > 0, canvas.height > 0, image.width > 0, image.height > 0 else { return nil }
+        let width = CGFloat(canvas.width), height = CGFloat(canvas.height)
+        let page = CGRect(x: 0, y: 0, width: width, height: height)
+        // Filled to the page's edges, its middle kept (`scaledToFill`).
+        let scale = max(width / CGFloat(image.width), height / CGFloat(image.height))
+        let scaled = CIImage(cgImage: image).applyingFilter("CILanczosScaleTransform", parameters: [
+            kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1,
+        ])
+        let picture = scaled
+            .transformed(by: CGAffineTransform(translationX: ((width - scaled.extent.width) / 2).rounded() - scaled.extent.minX,
+                                               y: ((height - scaled.extent.height) / 2).rounded() - scaled.extent.minY))
+            .cropped(to: page)
+        // `blur(radius: 14, opaque: true)` of the page's part of the picture:
+        // its edges carried on, not faded into nothing.
+        let blurred = picture.clampedToExtent()
+            .applyingGaussianBlur(sigma: 14 * canvas.scale)
+            .cropped(to: page)
+        // Down from the top, as SwiftUI's gradients go; Core Image's y goes up.
+        func gradient(from top: CGFloat, _ start: CGFloat, to bottom: CGFloat, _ end: CGFloat) -> CIImage {
+            CIFilter(name: "CILinearGradient", parameters: [
+                "inputPoint0": CIVector(x: 0, y: height * (1 - top)),
+                "inputPoint1": CIVector(x: 0, y: height * (1 - bottom)),
+                "inputColor0": CIColor(red: 0, green: 0, blue: 0, alpha: start),
+                "inputColor1": CIColor(red: 0, green: 0, blue: 0, alpha: end),
+            ])!.outputImage!.cropped(to: page)
+        }
+        let sharpThenBlurred = blurred.applyingFilter("CIBlendWithAlphaMask", parameters: [
+            kCIInputBackgroundImageKey: picture,
+            kCIInputMaskImageKey: gradient(from: 0.45, 0, to: 0.9, 1),
+        ])
+        // The fade and the opacity at once: 1 to 0.1 from 0.4 down, of 0.55.
+        let shown = sharpThenBlurred.applyingFilter("CIBlendWithAlphaMask", parameters: [
+            kCIInputBackgroundImageKey: CIImage(color: .clear).cropped(to: page),
+            kCIInputMaskImageKey: gradient(from: 0.4, 0.55, to: 1, 0.055),
+        ])
+        let space = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        return drawing.createCGImage(shown, from: page, format: .RGBA8, colorSpace: space)
     }
 
     /// Lets the picture go once no new tab has shown it for a few minutes:
@@ -298,18 +380,50 @@ final class Backdrop {
 
 /// A new tab's picture across the page: clear at the top, and toward the
 /// bottom blurred and fading into the window's glass, where the list of
-/// suggestions grows down to.
+/// suggestions grows down to. Drawn as one picture made for the page's size
+/// (`Backdrop.composite`); live, as below, while the page is being resized
+/// and until that picture is made.
 struct BackdropView: View {
     let image: CGImage
+    @Environment(\.displayScale) private var scale
+    @State private var size: CGSize = .zero
+    /// Counts the pictures made, so the one just made is drawn.
+    @State private var made = 0
 
     var body: some View {
+        let canvas = Backdrop.Canvas(size: size, scale: scale)
+        let _ = made
+        Color.clear
+            .overlay {
+                if let composite = Backdrop.shared.composite(of: image, for: canvas) {
+                    Image(decorative: composite, scale: scale).resizable()
+                } else {
+                    live
+                }
+            }
+            .onGeometryChange(for: CGSize.self, of: \.size) { size = $0 }
+            .task(id: canvas) {
+                guard canvas.width > 0, canvas.height > 0, Backdrop.shared.composite(of: image, for: canvas) == nil else { return }
+                // Not each step of a resize: once it stops.
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+                await Backdrop.shared.makeComposite(of: image, for: canvas)
+                made += 1
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .onAppear { Backdrop.shared.showing += 1 }
+            .onDisappear { Backdrop.shared.showing -= 1 }
+    }
+
+    private var live: some View {
         // Filled to the page's edges without making the page any bigger.
         let picture = Color.clear
             .overlay { Image(decorative: image, scale: 1).resizable().scaledToFill() }
             .clipped()
         // Half see-through, over the window's glass: there to set the
         // page's mood, not to be looked at instead of the field.
-        ZStack {
+        return ZStack {
             picture
             picture
                 .blur(radius: 14, opaque: true)
@@ -319,9 +433,5 @@ struct BackdropView: View {
         .mask(LinearGradient(stops: [.init(color: .black, location: 0.4), .init(color: .black.opacity(0.1), location: 1)],
                              startPoint: .top, endPoint: .bottom))
         .opacity(0.55)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-        .onAppear { Backdrop.shared.showing += 1 }
-        .onDisappear { Backdrop.shared.showing -= 1 }
     }
 }
