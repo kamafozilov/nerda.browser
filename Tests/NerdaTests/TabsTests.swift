@@ -388,3 +388,33 @@ private final class UnclickedAction: WKNavigationAction {
     browser.closeAll()
     moved.closeAll()
 }
+
+/// Duplicate Tab opens the same page, its history kept, right after the tab
+/// and on screen; a pinned site's copy joins the list. Close Other Tabs and
+/// Close Tabs Below leave pinned sites alone.
+@MainActor
+@Test func duplicateAndCloseOtherTabs() {
+    let browser = Browser()
+    let state = Data("history".utf8)
+    browser.add([saved("pinned.example", pinned: true), saved("a.example"),
+                 Session.Tab(url: URL(string: "https://b.example/")!, title: "b", state: state, zoom: 1.25, pinned: nil, home: nil),
+                 saved("c.example")].map(Nerda.Tab.init(restoring:)))
+    let pinned = browser.tabs[0], a = browser.tabs[1], b = browser.tabs[2], c = browser.tabs[3]
+
+    #expect(browser.others(than: b.id).map(\.id) == [a.id, c.id])
+    #expect(browser.below(a.id).map(\.id) == [b.id, c.id])
+    #expect(browser.below(pinned.id).isEmpty)
+
+    browser.duplicate(b.id)
+    let copy = browser.tabs[3]
+    #expect(browser.tabs.count == 5 && copy.id != b.id && browser.selectedID == copy.id)
+    #expect(copy.url == b.url && copy.saved?.state == state && copy.saved?.zoom == 1.25 && !copy.isPinned)
+
+    browser.duplicate(pinned.id)
+    #expect(browser.tabs.count == 6 && browser.selected?.url == pinned.url && browser.selected?.isPinned == false)
+    #expect(browser.tabs.filter(\.isPinned).map(\.id) == [pinned.id])
+
+    browser.select(c.id)
+    browser.close(browser.others(than: a.id), keeping: a.id)
+    #expect(browser.tabs.map(\.id) == [pinned.id, a.id] && browser.selectedID == a.id)
+}

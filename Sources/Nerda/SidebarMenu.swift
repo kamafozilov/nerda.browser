@@ -291,13 +291,21 @@ struct TabMenu: View {
 
     var body: some View {
         if let tab = browser.tabs.first(where: { $0.id == id }) {
-            let rest = browser.tabs.filter(Browser.listed)
-            let others = rest.filter { $0.id != id }
-            let after = tab.isPinned ? [] : Array(rest.drop { $0.id != id }.dropFirst())
+            let others = browser.others(than: id)
+            let after = browser.below(id)
             Button("New Tab", action: browser.newTab)
             Divider()
             if tab.hasPage {
                 Button("Reload") { tab.reload() }
+                Button("Duplicate Tab") { browser.duplicate(id) }
+                // A tab of the list has a name to edit there; a pinned site's tile shows none.
+                if Browser.listed(tab) { Button("Rename") { browser.renaming = id } }
+                if let site = tab.site {
+                    Button("Copy Link") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(site.absoluteString, forType: .string)
+                    }
+                }
                 Button(tab.isMuted ? "Unmute Tab" : "Mute Tab") { browser.toggleMute(id) }
                 // Incognito keeps nothing pinned, nor bookmarks; a secondary
                 // window leaves them to the profile's own.
@@ -315,19 +323,13 @@ struct TabMenu: View {
             TabsLayoutMenu(browser: browser)
             Divider()
             Button("Close Tab") { withAnimation(.slide) { browser.close(id) } }
-            Button("Close Other Tabs") { close(others) }
+            Button("Close Other Tabs") { browser.close(others, keeping: id) }
                 .disabled(others.isEmpty)
             if !tab.isPinned {
-                Button(TabStyle.current == .horizontal ? "Close Tabs to the Right" : "Close Tabs Below") { close(after) }
+                Button(TabStyle.current == .horizontal ? "Close Tabs to the Right" : "Close Tabs Below") { browser.close(after, keeping: id) }
                     .disabled(after.isEmpty)
             }
         }
-    }
-
-    /// This tab stays, and comes on screen if the one there was among them.
-    private func close(_ tabs: [Tab]) {
-        if tabs.contains(where: { $0.id == browser.selectedID }) { browser.select(id) }
-        withAnimation(.slide) { tabs.forEach { browser.close($0.id) } }
     }
 }
 

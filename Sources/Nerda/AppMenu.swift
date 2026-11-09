@@ -58,7 +58,8 @@ final class AppMenu: NSObject {
         #selector(clearSiteData), #selector(printPage), #selector(exportPDF), #selector(toggleReader),
         #selector(toggleResponsive), #selector(toggleJavaScript), #selector(viewSource), #selector(nextTab),
         #selector(previousTab), #selector(selectTab(_:)), #selector(moveTabToNewWindow), #selector(toggleBookmark),
-        #selector(toggleSidebar),
+        #selector(toggleSidebar), #selector(togglePin), #selector(duplicateTab), #selector(closeOtherTabs),
+        #selector(closeTabsBelow),
     ]
 
     init(browser: Browser) {
@@ -82,6 +83,8 @@ final class AppMenu: NSObject {
             .separator(),
             item("Select Next Tab", #selector(nextTab), "\t", .control, target: self),
             item("Select Previous Tab", #selector(previousTab), "\t", [.control, .shift], target: self),
+            item("Pin Tab", #selector(togglePin), target: self),
+            item("Duplicate Tab", #selector(duplicateTab), target: self),
             item("Move Tab to New Window", #selector(moveTabToNewWindow), target: self),
             item("Merge All Windows", #selector(mergeAllWindows), target: self),
             .separator(),
@@ -123,6 +126,8 @@ final class AppMenu: NSObject {
             item("Open Location…", #selector(openLocation), "l", target: self),
             item("Open File…", #selector(openFile), "o", target: self),
             item("Close Tab", #selector(closeTab), "w", target: self),
+            item("Close Other Tabs", #selector(closeOtherTabs), target: self),
+            item("Close Tabs Below", #selector(closeTabsBelow), target: self),
             item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]),
             .separator(),
             Self.noShare,
@@ -366,6 +371,19 @@ final class AppMenu: NSObject {
         browser.closeSelectedTab()
     }
     @objc private func reopenClosedTab() { shown.reopenClosedTab() }
+    @objc private func closeOtherTabs() {
+        guard let id = browser.selectedID else { return }
+        browser.close(browser.others(than: id), keeping: id)
+    }
+    @objc private func closeTabsBelow() {
+        guard let id = browser.selectedID else { return }
+        browser.close(browser.below(id), keeping: id)
+    }
+    @objc private func togglePin() {
+        guard let tab = browser.selected else { return }
+        withAnimation(.slide) { browser.setPinned(!tab.isPinned, tab.id) }
+    }
+    @objc private func duplicateTab() { browser.selectedID.map(browser.duplicate) }
     @objc private func reopenTab(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? Session.ClosedTab.ID else { return }
         shown.reopenClosedTab(id)
@@ -512,6 +530,18 @@ extension AppMenu: NSMenuItemValidation {
         case #selector(toggleBookmark):
             item.title = browser.selected?.bookmark == nil ? "Bookmark This Tab" : "Remove Bookmark"
             return browser.keepsPins && browser.selected?.hasPage == true
+        case #selector(togglePin):
+            item.title = browser.selected?.isPinned == true ? "Unpin Tab" : "Pin Tab"
+            // As the tab's own menu: a bookmark's tab has its place, and
+            // incognito and a secondary window keep nothing pinned.
+            return browser.keepsPins && browser.selected.map { $0.hasPage && $0.bookmark == nil } == true
+        case #selector(duplicateTab):
+            return browser.selected?.hasPage == true
+        case #selector(closeOtherTabs):
+            return browser.selectedID.map { !browser.others(than: $0).isEmpty } ?? false
+        case #selector(closeTabsBelow):
+            item.title = TabStyle.current == .horizontal ? "Close Tabs to the Right" : "Close Tabs Below"
+            return browser.selectedID.map { !browser.below($0).isEmpty } ?? false
         case #selector(moveTabToNewWindow):
             // A window of its own already: nothing would change.
             return browser.selectedID != nil && (browser.keepsPins || browser.tabs.count > 1)
