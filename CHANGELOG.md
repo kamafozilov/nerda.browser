@@ -10,6 +10,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Added
 
 - After you sign in to a site with Google, Apple, GitHub, Microsoft, Telegram or another service, Nerda offers to save that sign-in, with the account you picked, as it offers to save a password. The site's sign-in box then lists it as Continue with Google, and picking it presses the site's own button for you.
+- File › New Window (⌘N) brings your profile's window to the front on a new tab, opening it again if you closed it, so ⌘N does what you expect from other browsers. With profiles, it goes to the profile of the window in front, or the one you used last.
 - The Vault (⌥⌘L), in Window and the sidebar's menu, where Passwords was: your passwords and sign-ins with services by kind, with Weak and Reused under Security for the passwords to change. Each can have a note, such as recovery codes, and Add makes up a strong password with the wand. Export Passwords… writes them to a file Passwords, Safari, Chrome and other password managers read.
 
 ### Changed

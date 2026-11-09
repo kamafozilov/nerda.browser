@@ -1537,6 +1537,7 @@ private struct ShortcutsSettings: View {
             ("Actual Size", "Back to the zoom pages open at", "⌘0"),
         ]),
         ("Nerda", [
+            ("New Window", "Bring your profile's window to the front, on a new tab", "⌘N"),
             ("New Incognito Window", "Browse without saving history", "⇧⌘N"),
             ("Close Window", "Close the window and its tabs", "⇧⌘W"),
             ("Show All History", "Every page you have visited", "⌘Y"),
