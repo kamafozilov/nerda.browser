@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The tabs as they were left, opened again at the next launch: after a quit,
 /// a crash, or the app being rebuilt. Kept in a JSON file, written soon after
@@ -226,7 +227,7 @@ nonisolated extension Session {
             }
             return true
         } catch {
-            NSLog("Nerda: couldn't save the session: \(error)")
+            Logger.session.error("couldn't save the session: \(String(describing: error), privacy: .private)")
             return false
         }
     }

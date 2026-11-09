@@ -3,6 +3,7 @@ import LocalAuthentication
 import Security
 import SwiftUI
 import WebKit
+import os
 
 // Contact info and cards, filled in as Safari and Chrome fill them: the
 // passwords' script (Passwords.swift) also tells which boxes of a form take a
@@ -372,7 +373,7 @@ final class AutoFill {
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(Saved(addresses: addresses, cards: cards)).write(to: file, options: .atomic)
         } catch {
-            NSLog("Nerda: couldn't save AutoFill: \(error)")
+            Logger.autoFill.error("couldn't save AutoFill: \(String(describing: error), privacy: .private)")
         }
     }
 

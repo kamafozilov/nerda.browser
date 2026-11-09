@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import os
 
 /// A saved sign-in, without its password, which is read from the keychain
 /// only as it goes into a page.
@@ -143,7 +144,7 @@ actor Vault {
             try FileManager.default.createDirectory(at: namesFile.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(new).write(to: namesFile, options: .atomic)
         } catch {
-            NSLog("Nerda: couldn't save the names of saved passwords: \(error)")
+            Logger.passwords.error("couldn't save the names of saved passwords: \(String(describing: error), privacy: .private)")
         }
     }
 
