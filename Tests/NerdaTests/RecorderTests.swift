@@ -46,10 +46,17 @@ struct RecorderTests {
 
     private func kinds(_ recorder: Recorder) -> [Recorder.Kind] { recorder.timings().map(\.kind) }
 
+    /// A tab operation is timed once the main loop next goes to sleep. With
+    /// the whole suite running, hundreds of tests keep it busy for seconds
+    /// on end, so this waits longer than `waitFor` does.
+    private func settled(sourceLocation: SourceLocation = #_sourceLocation, _ condition: () -> Bool) async throws {
+        try await waitFor(timeout: .seconds(30), sourceLocation: sourceLocation, condition)
+    }
+
     @Test func openingATabIsTimed() async throws {
         let (browser, recorder) = recordedBrowser()
         browser.newTab()
-        try await waitFor { kinds(recorder).contains(.tabOpen) }
+        try await settled { kinds(recorder).contains(.tabOpen) }
     }
 
     @Test func switchingTabsIsTimed() async throws {
@@ -57,18 +64,18 @@ struct RecorderTests {
         browser.newTab()
         browser.newTab()
         let first = try #require(browser.tabs.first { $0.id != browser.selectedID })
-        try await waitFor { kinds(recorder).contains(.tabOpen) }
+        try await settled { kinds(recorder).contains(.tabOpen) }
         browser.select(first.id)
-        try await waitFor { kinds(recorder).contains(.tabSwitch) }
+        try await settled { kinds(recorder).contains(.tabSwitch) }
     }
 
     @Test func closingATabIsTimed() async throws {
         let (browser, recorder) = recordedBrowser()
         browser.newTab()
         browser.newTab()
-        try await waitFor { kinds(recorder).contains(.tabOpen) }
+        try await settled { kinds(recorder).contains(.tabOpen) }
         browser.closeSelectedTab()
-        try await waitFor { kinds(recorder).contains(.tabClose) }
+        try await settled { kinds(recorder).contains(.tabClose) }
         // The tab put on screen in its place is the close's, not a switch of its own.
         #expect(!kinds(recorder).contains(.tabSwitch))
     }
@@ -80,9 +87,9 @@ struct RecorderTests {
         browser.newTab()
         let pinned = try #require(browser.selected)
         browser.setPinned(true, pinned.id)
-        try await waitFor { kinds(recorder).contains(.tabOpen) }
+        try await settled { kinds(recorder).contains(.tabOpen) }
         browser.closeSelectedTab()
-        try await waitFor { kinds(recorder).contains(.tabClose) }
+        try await settled { kinds(recorder).contains(.tabClose) }
     }
 
     /// However long Nerda runs, the record holds only its last five minutes,
@@ -179,7 +186,7 @@ struct RecorderTests {
         let browser = Browser(dataStore: .nonPersistent())
         browser.newTab()
         browser.newTab()
-        try await waitFor { Recorder.shared.timings().contains { $0.kind == .tabOpen } }
+        try await settled { Recorder.shared.timings().contains { $0.kind == .tabOpen } }
         #expect(Feedback.diagnostics.contains("tab open"))
         #expect(Feedback.diagnostics.utf8.count <= 4096)
     }
