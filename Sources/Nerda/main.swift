@@ -914,8 +914,9 @@ Launch.stage("restore") {
 // Opening on a new tab, it opens with its picture already there. On a web
 // page, the picture waits for the first new tab: 20 to 100 MB not taken for one.
 if browser.selected?.isBlank == true { Launch.stage("backdrop") { Backdrop.shared.load() } }
-// Once the first page is in: a page's process ready for the next one.
-Launch.later("warm up") { Tab.warmUp() }
+// Once the first page is in: a page already running for the next tab
+// (SparePages), or with that off, a page's process ready for it.
+Launch.later("spare page") { SparePages.isOn ? SparePages.keep(for: browser.dataStore, in: 0) : Tab.warmUp() }
 let menu = Launch.stage("menu") {
     let menu = AppMenu(browser: browser)
     menu.install()

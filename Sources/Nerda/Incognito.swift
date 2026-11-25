@@ -269,6 +269,7 @@ enum Windows {
         }
         guard making else { return nil }
         let browser = Browser(profile: profile)
+        SparePages.keep(for: browser.dataStore)
         let window = BrowserWindow(browser: browser)
         let delegate = AppDelegate(window: window, browser: browser)
         window.delegate = delegate
@@ -300,6 +301,8 @@ enum Windows {
         for delegate in secondary where delegate.browser.profile === profile { delegate.window.close() }
         guard let index = profiles.firstIndex(where: { $0.browser.profile === profile }) else { return }
         let delegate = profiles.remove(at: index)
+        // Its spare page too, or the store would still be in use.
+        SparePages.drop(for: delegate.browser.dataStore)
         delegate.window.close()
         delegate.window.delegate = nil
         delegate.window.contentView = nil

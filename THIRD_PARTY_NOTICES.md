@@ -223,3 +223,4 @@ Adapted in Nerda:
 - Sources/Nerda/Watchdog.swift
 - Sources/Nerda/LastFrame.swift
 - Sources/Nerda/HungPages.swift
+- Sources/Nerda/SparePages.swift
