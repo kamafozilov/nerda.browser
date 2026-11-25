@@ -28,6 +28,9 @@ final class AgentHarness {
     let notifier = RecordingNotifier()
     /// The server's awake time, moved by hand (`advance(by:)`).
     let clock = AgentTestClock()
+    /// The saved logins every Agent browser here signs in with: in memory
+    /// and a temporary file, never the owner's vault or keychain.
+    let vault: Vault
     private let defaultsName: String
     var socket: URL { server.socket }
 
@@ -46,9 +49,13 @@ final class AgentHarness {
         defaults = try #require(UserDefaults(suiteName: defaultsName))
         // Every profile's Agent tabs on a store of their own, kept in memory.
         let clock = clock
+        let vault = Vault(inMemory: folder.appending(path: "accounts.json"))
+        self.vault = vault
         server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults,
                              profiles: { [.main] + profiles }, notifier: notifier, now: { clock.now }, ask: ask) { profile in
-            AgentBrowser(profile: profile, dataStore: .nonPersistent())
+            let agents = AgentBrowser(profile: profile, dataStore: .nonPersistent())
+            agents.browser.vault = vault
+            return agents
         }
         server.start()
     }
