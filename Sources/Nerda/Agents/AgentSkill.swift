@@ -49,11 +49,14 @@ nonisolated enum AgentSkill {
                 \(name) open https://example.com
                 \(name) navigate t1 https://example.com/next
                 \(name) close --tab t1
+                \(name) screenshot t1 --out page.jpeg
                 \(name) <verb> --help
 
             Arguments go in the order shown above, or by name (`--tab t1`). The answer is printed; \
-            a failure goes to standard error. Exit codes: 0 done, 1 failed, 2 Nerda unreachable, \
-            3 needs the user, 124 timed out, 130 interrupted. Run from Claude Code or Codex, the \
+            a failure goes to standard error. `screenshot` writes its JPEG to a file, `--out` or \
+            a new one in the temporary folder, and prints its path after `file:`; read that file to \
+            see the page, and give `click_at` points in its pixels. Exit codes: 0 done, 1 failed, \
+            2 Nerda unreachable, 3 needs the user, 124 timed out, 130 interrupted. Run from Claude Code or Codex, the \
             command shares the agent's session: it sees the tabs the MCP tools opened.
 
             ## Rules

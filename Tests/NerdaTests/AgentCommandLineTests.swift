@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Nerda
@@ -28,6 +29,44 @@ struct AgentCommandLineTests {
         let closed = await AgentCommandLine.run(["close", "--tab", "t1"], environment: shell, socket: harness.socket)
         #expect(closed.status == 0, "\(closed.errors)")
         #expect(harness.agents?.tabs.isEmpty == true)
+    }
+
+    /// A screenshot's picture is written to a file, --out or a new one in
+    /// the temporary folder, and its path printed: never dropped, and no
+    /// JPEG bytes on standard output.
+    @Test func aScreenshotIsSavedToAFileAndItsPathPrinted() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        let url = try await harness.pages.serve("/red", "<title>Red</title><style>html, body { margin: 0; height: 100%; background: rgb(255, 0, 0); }</style>")
+        let shell = ["NERDA_BROWSER_SESSION": "script-shot", "TMPDIR": harness.folder.path]
+        let opened = await AgentCommandLine.run(["open", url.absoluteString], environment: shell, socket: harness.socket)
+        #expect(opened.status == 0, "\(opened.errors)")
+
+        let named = harness.folder.appending(path: "page.jpeg")
+        let saved = await AgentCommandLine.run(["screenshot", "t1", "--out", named.path], environment: shell, socket: harness.socket)
+        #expect(saved.status == 0, "\(saved.errors)")
+        #expect(saved.output.contains("tab: t1"))
+        #expect(saved.output.contains("file: \(named.standardizedFileURL.path)\n"))
+        let picture = try Data(contentsOf: named)
+        #expect(picture.starts(with: [0xFF, 0xD8, 0xFF]))
+        #expect(NSBitmapImageRep(data: picture)?.pixelsWide == AgentShot.width)
+
+        // Without --out, a new file in the temporary folder.
+        let unnamed = await AgentCommandLine.run(["screenshot", "--tab=t1"], environment: shell, socket: harness.socket)
+        #expect(unnamed.status == 0, "\(unnamed.errors)")
+        let line = try #require(unnamed.output.split(separator: "\n").first { $0.hasPrefix("file: ") })
+        let path = String(line.dropFirst("file: ".count))
+        #expect(path.hasPrefix(harness.folder.standardizedFileURL.path))
+        #expect(path.hasSuffix(".jpeg"))
+        #expect(try Data(contentsOf: URL(fileURLWithPath: path)).starts(with: [0xFF, 0xD8, 0xFF]))
+
+        let bare = await AgentCommandLine.run(["screenshot", "t1", "--out"], environment: shell, socket: harness.socket)
+        #expect(bare.status == 1)
+        #expect(bare.errors.contains("--out needs a path"))
+        // Only picture verbs take --out.
+        let other = await AgentCommandLine.run(["tabs", "--out", named.path], environment: shell, socket: harness.socket)
+        #expect(other.status == 1)
+        #expect(AgentCommandLine.synopsis(of: .screenshot).contains("[--out <path>]"))
     }
 
     /// Run from a Claude Code shell, the command is in the same Agent
