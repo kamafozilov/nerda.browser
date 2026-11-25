@@ -758,16 +758,30 @@ extension Browser: WKUIDelegate {
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo) async {
+        let held = agentDialog("an alert", message, on: webView)
+        defer { held?.end() }
         _ = await ask(Self.says(frame), message, over: webView)
     }
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo) async -> Bool {
-        await ask(Self.says(frame), message, over: webView, buttons: ["OK", "Cancel"]) == .alertFirstButtonReturn
+        let held = agentDialog("a confirm dialog", message, on: webView)
+        defer { held?.end() }
+        return await ask(Self.says(frame), message, over: webView, buttons: ["OK", "Cancel"]) == .alertFirstButtonReturn
+    }
+
+    /// An Agent tab's dialog, told to its agent and holding its page
+    /// (`AgentNotices.hold`) until answered; nil for the owner's tabs.
+    private func agentDialog(_ kind: String, _ message: String, on webView: WKWebView) -> AgentNotices.Hold? {
+        guard isForAgents else { return nil }
+        let words = String(message.replacing(/\s+/, with: " ").prefix(300))
+        return AgentNotices.hold(tab(for: webView), "raised \(kind): \(String(reflecting: words))")
     }
 
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String,
                  defaultText: String?, initiatedByFrame frame: WKFrameInfo) async -> String? {
+        let held = agentDialog("a prompt", prompt, on: webView)
+        defer { held?.end() }
         let field = NSTextField(string: defaultText ?? "")
         field.frame.size.width = 280
         let answer = await ask(Self.says(frame), prompt, over: webView, buttons: ["OK", "Cancel"], accessory: field, focus: field)

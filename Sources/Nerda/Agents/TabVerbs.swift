@@ -88,14 +88,7 @@ enum AgentPage {
             try await Task.sleep(for: .milliseconds(50))
         }
         let reading = (try? await read(agentTab)) ?? AgentReading()
-        var lines = header(agentTab, reading)
-        if tab.isLoading { lines.append("still loading: what follows is what has arrived so far") }
-        lines += ["", untrusted(reading.outline(), as: "page-outline")]
-        let text = (try? await self.text(of: agentTab))?.text ?? ""
-        lines.append("")
-        lines.append(untrusted(String(text.prefix(textStart))))
-        if text.count > textStart { lines.append("(\(text.count - textStart) more characters of text: read them all with text)") }
-        return lines.joined(separator: "\n")
+        return await shown(agentTab, reading, text: true)
     }
 
     /// The tab, title and address lines every answer about a page starts

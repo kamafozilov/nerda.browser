@@ -28,7 +28,8 @@ nonisolated extension AgentVerb {
         name: "click_at",
         summary: """
             Click at a point of an Agent tab's screenshot, in its pixels from the top left, \
-            as a person would. For pages with nothing else to click by, such as a canvas or a map.
+            as a person would. For pages with nothing else to click by, such as a canvas or a map. \
+            Answers as click does: what the click changed.
             """,
         arguments: [
             .tab,
@@ -42,8 +43,10 @@ nonisolated extension AgentVerb {
             throw AgentError(.invalid, "Give x and y as numbers: pixels in the screenshot.")
         }
         let full = call.arguments["full"]?.bool ?? false
-        try AgentShot.click(tab, at: CGPoint(x: x, y: y), full: full)
-        return "Clicked \(tab.ref) at \(Int(x)), \(Int(y)) of the screenshot."
+        return try await AgentPage.act(tab, for: call) {
+            try AgentShot.click(tab, at: CGPoint(x: x, y: y), full: full)
+            return "clicked \(tab.ref) at \(Int(x)), \(Int(y)) of the screenshot"
+        }
     }
 }
 
@@ -93,8 +96,8 @@ enum AgentShot {
     }
 
     /// A click at `point` of the tab's screenshot (`width` wide, or full
-    /// resolution), sent to the page as the mouse's own, so it sees a
-    /// trusted click.
+    /// resolution), sent to the page as the mouse's own (`AgentInput`), so
+    /// it sees a trusted click.
     static func click(_ agentTab: AgentTab, at point: CGPoint, full: Bool) throws {
         guard let page = agentTab.tab.page, let window = page.window, page.bounds.width > 0 else {
             throw AgentError(.failed, "Tab \(agentTab.ref) has no page to click in yet. Try again once it has loaded.")
@@ -105,15 +108,6 @@ enum AgentShot {
         guard page.bounds.contains(inPage) else {
             throw AgentError(.invalid, "\(Int(point.x)), \(Int(point.y)) is outside the screenshot.")
         }
-        let inView = page.isFlipped ? inPage : CGPoint(x: inPage.x, y: page.bounds.height - inPage.y)
-        let location = page.convert(inView, to: nil)
-        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-            guard let event = NSEvent.mouseEvent(
-                with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
-                pressure: type == .leftMouseDown ? 1 : 0
-            ) else { continue }
-            if type == .leftMouseDown { page.mouseDown(with: event) } else { page.mouseUp(with: event) }
-        }
+        try AgentInput.click(page, at: inPage)
     }
 }
