@@ -58,7 +58,7 @@ final class Recorder {
     /// How far back the record reads.
     static let window: TimeInterval = 300
     /// The shortest stop of the main thread kept as a hitch.
-    static let hitchThreshold: TimeInterval = 0.1
+    nonisolated static let hitchThreshold: TimeInterval = 0.1
 
     /// A fixed ring: the newest `capacity`, the oldest overwritten.
     struct Ring<Element> {
@@ -88,7 +88,7 @@ final class Recorder {
 
     init(clock: @escaping () -> TimeInterval = Recorder.uptime) { self.clock = clock }
 
-    private static var isOn: Bool { Speedups.isOn("RECORDER") }
+    private static var isOn: Bool { Speedups.isOn(.recorder) }
 
     private static let signposter = OSSignposter(subsystem: Bundle.main.bundleIdentifier ?? "dev.nerda.browser", category: "tabs")
 

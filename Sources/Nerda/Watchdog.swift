@@ -1,6 +1,7 @@
 // Adapted from Watchdog.swift in Yab (https://github.com/yetanotherbrowser/yab), Apache License 2.0, Copyright 2026 Serafim Korablev; changed for Nerda.
 import Darwin
 import Foundation
+import Synchronization
 
 /// Where the main thread stopped: every stop of 100 ms or more kept in the
 /// record (Recorder.hitch), and every stall of a second or more written,
@@ -8,136 +9,187 @@ import Foundation
 /// (stalls.log), which a feedback report carries (Feedback.diagnostics).
 /// The log stays on the Mac otherwise.
 ///
-/// Nothing here wakes the main thread. The main run loop is watched from
-/// inside, by an observer that notes the time at each step of its pass: a
-/// step 100 ms or more after the one before it, with no sleep between them,
-/// is a hitch, measured whole, and one of a second or more a stall. A
-/// timer on a queue of its own is set as the loop wakes, if it isn't set
-/// already, and fires a second later, with a second's leeway for the system
-/// to fold it into other wakes. If the loop has slept since, it is left
-/// unset until the next wake; if the loop is awake and has moved, it is set
-/// again for a second after the last step; if it hasn't moved, the stall is
-/// still going on, and is written down at once with the main thread's
-/// stack, so a stall that ends with Nerda forced to quit still leaves its
-/// line. So the timer fires at most once a second, and only in a second
-/// Nerda was awake in.
+/// The main run loop is watched from inside, by an observer that notes the
+/// time at each step of its pass: a step 100 ms or more after the one
+/// before it, with no sleep between them, is a hitch, measured whole, and
+/// one of a second or more a stall. While the loop is awake a kernel timer
+/// is set a second after its last step, with almost no leeway, and moved
+/// on as the loop steps; it is taken off as the loop goes to sleep. So a
+/// loop that keeps moving, however busy, never lets it fire, nor does a
+/// loop asleep: it fires only a second into a stall, and then the stall is
+/// written down at once with the main thread's stack, so even a stall that
+/// ends with Nerda forced to quit leaves its line. Setting the timer is a
+/// call into the kernel and wakes nothing: the thread waiting on it sleeps
+/// until it fires.
 ///
-/// Started once, from main.swift: never in tests, which would write to the
-/// development build's data folder. `NERDA_RECORDER=0` leaves it off.
-enum Watchdog {
+/// The one Nerda runs is started once, from main.swift: never in tests,
+/// which would write to the development build's data folder, and make
+/// watchdogs of their own instead. `NERDA_RECORDER=0` leaves it off.
+nonisolated final class Watchdog: Sendable {
     /// A stall this long is written down.
-    nonisolated static let threshold: TimeInterval = 1
+    static let threshold: TimeInterval = 1
 
-    nonisolated static var file: URL { Edition.folder.appending(path: "stalls.log") }
+    static var file: URL { Edition.folder.appending(path: "stalls.log") }
 
-    /// Four words the main thread writes at every step of its loop and the
-    /// timer reads: the last step, in mach ticks; 1 while the loop sleeps
-    /// after it; the step a stall the timer wrote down began at; 1 while the
-    /// timer is set. Plain words, not behind a lock: each is written whole,
-    /// a step is a few loads and stores, and a word read a moment stale
-    /// costs the timer one more look, never a wrong stall.
-    private nonisolated(unsafe) static let words: UnsafeMutablePointer<UInt64> = {
-        let words = UnsafeMutablePointer<UInt64>.allocate(capacity: 4)
-        words.initialize(repeating: 0, count: 4)
-        words[1] = 1
-        return words
-    }()
-    private nonisolated static let (last, asleep, told, armed) = (0, 1, 2, 3)
+    /// Nerda's own, once started.
+    @MainActor private static var running: Watchdog?
 
-    private nonisolated static let queue = DispatchQueue(label: "nerda.watchdog", qos: .utility)
-    private nonisolated(unsafe) static var timer: DispatchSourceTimer?
-    private static var observer: CFRunLoopObserver?
-    private nonisolated(unsafe) static var main: thread_act_t = 0
+    /// Once, on the main thread, at launch.
+    @MainActor static func start() {
+        guard running == nil, Speedups.isOn(.recorder) else { return }
+        let watchdog = Watchdog(file: file, recorder: .shared)
+        watchdog.start()
+        running = watchdog
+    }
+
+    /// Where this one writes.
+    let file: URL
+    private let recorder: Recorder
+
+    init(file: URL, recorder: Recorder) {
+        self.file = file
+        self.recorder = recorder
+    }
+
+    // The main thread writes these at each step of its loop, and the
+    // watching thread reads them.
+    /// The last step, in mach ticks; 0 before the first.
+    private let last = Atomic<UInt64>(0)
+    /// The loop is asleep after its last step.
+    private let asleep = Atomic<Bool>(true)
+    /// The step a stall the watching thread wrote down began at.
+    private let told = Atomic<UInt64>(0)
+    /// When the timer was last set, in mach ticks; 0 while it is off. The
+    /// main thread's alone.
+    private let setAt = Atomic<UInt64>(0)
+    /// How many times the timer fired.
+    private let fired = Atomic<Int>(0)
+    /// The main thread, set before the watching thread starts.
+    private let main = Atomic<UInt32>(0)
+
+    /// The times the timer fired: each a second into a stall.
+    var wakes: Int { fired.load(ordering: .relaxed) }
+
+    /// The kernel queue the timer is on, which the watching thread waits on.
+    private let events = kqueue()
+    private static let (timerEvent, stopEvent) = (UInt(1), UInt(2))
+    /// The log, written in order off the main thread.
+    private let queue = DispatchQueue(label: "nerda.watchdog", qos: .utility)
+    /// The main thread's alone.
+    private nonisolated(unsafe) var observer: CFRunLoopObserver?
+
     /// Seconds in a mach tick.
-    private nonisolated static let ticks: Double = {
+    private static let ticks: Double = {
         var base = mach_timebase_info_data_t()
         mach_timebase_info(&base)
         return Double(base.numer) / Double(base.denom) / 1e9
     }()
-    private nonisolated static let limit = UInt64(threshold / ticks)
+    private static let limit = UInt64(threshold / ticks)
     private static let hitchLimit = UInt64(Recorder.hitchThreshold / ticks)
+    /// Steps closer than this to the timer's setting leave it as set, a
+    /// little later than a second, so a pass's few steps set it once.
+    private static let slack: TimeInterval = 0.01
+    private static let slackTicks = UInt64(slack / ticks)
 
-    /// Once, on the main thread, at launch.
-    static func start() {
-        guard observer == nil, Speedups.isOn("RECORDER") else { return }
-        main = pthread_mach_thread_np(pthread_self())
-        let timer = DispatchSource.makeTimerSource(flags: [], queue: queue)
-        timer.setEventHandler { @Sendable in fired() }
-        timer.schedule(deadline: .distantFuture, leeway: .seconds(1))
-        timer.resume()
-        self.timer = timer
+    /// Watches the main loop, from the main thread.
+    @MainActor func start() {
+        guard events >= 0, observer == nil else { return }
+        main.store(pthread_mach_thread_np(pthread_self()), ordering: .releasing)
+        let thread = Thread { [self] in watch() }
+        thread.name = "nerda.watchdog"
+        thread.qualityOfService = .utility
+        thread.start()
         // The steps a pass has between its sleeps, and the sleep itself:
         // entering and leaving a loop inside one adds nothing to measure.
         let steps: CFRunLoopActivity = [.afterWaiting, .beforeTimers, .beforeSources, .beforeWaiting]
-        let observer = CFRunLoopObserverCreateWithHandler(nil, steps.rawValue, true, Int.max) { _, activity in
+        let made = CFRunLoopObserverCreateWithHandler(nil, steps.rawValue, true, Int.max) { [self] _, activity in
             MainActor.assumeIsolated { step(going: activity == .beforeWaiting) }
         }
-        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
-        self.observer = observer
+        CFRunLoopAddObserver(CFRunLoopGetMain(), made, .commonModes)
+        observer = made
+    }
+
+    /// Stops watching, for tests.
+    @MainActor func stop() {
+        guard let made = observer else { return }
+        observer = nil
+        CFRunLoopRemoveObserver(CFRunLoopGetMain(), made, .commonModes)
+        change(Self.timerEvent, filter: EVFILT_TIMER, flags: EV_DELETE)
+        change(Self.stopEvent, filter: EVFILT_USER, flags: EV_ADD | EV_ONESHOT, fflags: NOTE_TRIGGER)
     }
 
     /// Each step of the main loop's pass, on the main thread.
-    private static func step(going: Bool) {
+    @MainActor private func step(going: Bool) {
         let now = mach_absolute_time()
-        let was = words[last], wasAsleep = words[asleep] == 1
-        words[last] = now
-        words[asleep] = going ? 1 : 0
-        if !wasAsleep, was > 0, now > was, now - was >= hitchLimit {
-            let seconds = Double(now - was) * ticks
-            Recorder.shared.hitch(seconds)
-            if now - was >= limit { queue.async { ended(seconds, began: was) } }
+        let was = last.load(ordering: .relaxed), wasAsleep = asleep.load(ordering: .relaxed)
+        last.store(now, ordering: .releasing)
+        asleep.store(going, ordering: .releasing)
+        if !wasAsleep, was > 0, now > was, now - was >= Self.hitchLimit {
+            let seconds = Double(now - was) * Self.ticks
+            recorder.hitch(seconds)
+            if now - was >= Self.limit { queue.async { [self] in ended(seconds, began: was) } }
         }
-        if !going, words[armed] == 0 {
-            words[armed] = 1
-            timer?.schedule(deadline: .now() + threshold, leeway: .seconds(1))
+        let set = setAt.load(ordering: .relaxed)
+        if going {
+            guard set != 0 else { return }
+            setAt.store(0, ordering: .relaxed)
+            change(Self.timerEvent, filter: EVFILT_TIMER, flags: EV_DELETE)
+        } else if set == 0 || now - set >= Self.slackTicks {
+            setAt.store(now, ordering: .relaxed)
+            // A second after this step, and the slack a later step in it
+            // may have left the timer as it was.
+            let microseconds = Int((Self.threshold + Self.slack) * 1e6)
+            change(Self.timerEvent, filter: EVFILT_TIMER, flags: EV_ADD | EV_ONESHOT,
+                   fflags: NOTE_USECONDS | NOTE_CRITICAL, data: microseconds)
         }
     }
 
-    /// On the queue, a second after the loop woke with the timer unset.
-    private nonisolated static func fired() {
+    private func change(_ ident: UInt, filter: Int32, flags: Int32, fflags: Int32 = 0, data: Int = 0) {
+        var event = kevent(ident: ident, filter: Int16(filter), flags: UInt16(flags), fflags: UInt32(fflags), data: data, udata: nil)
+        _ = kevent(events, &event, 1, nil, 0, nil)
+    }
+
+    /// The watching thread: asleep in the kernel until the timer fires, a
+    /// second into a stall.
+    private func watch() {
+        change(Self.stopEvent, filter: EVFILT_USER, flags: EV_ADD | EV_CLEAR)
+        var event = kevent()
+        while true {
+            let got = kevent(events, nil, 0, &event, 1, nil)
+            if got < 0, errno == EINTR { continue }
+            guard got == 1, event.ident == Self.timerEvent else { break }
+            fired.add(1, ordering: .relaxed)
+            stalling()
+        }
+        close(events)
+    }
+
+    /// A second after the main loop's last step, with no sleep since.
+    private func stalling() {
         let now = mach_absolute_time()
-        let stepped = words[last]
-        // Asleep: nothing to watch until it wakes and sets it again.
-        guard words[asleep] == 0, stepped > 0 else {
-            words[armed] = 0
-            return
-        }
-        let since = now > stepped ? now - stepped : 0
-        guard since >= limit else {
-            // Busy, but moving: looked at again a second after its last step.
-            timer?.schedule(deadline: .now() + threshold - Double(since) * ticks, leeway: .seconds(1))
-            return
-        }
-        // Stuck. Written down once, now, with where it is; the next step,
-        // the stall's end, sets the timer again.
-        guard words[told] != stepped else { return }
-        words[told] = stepped
-        words[armed] = 0
-        let stack = mainStack()
-        write(String(format: "%@  stalling %.1f s so far\n", stamp(), Double(since) * ticks) + stack)
+        let stepped = last.load(ordering: .acquiring)
+        // It stepped or went to sleep just as the timer fired.
+        guard !asleep.load(ordering: .acquiring), stepped > 0, now > stepped, now - stepped >= Self.limit,
+              told.load(ordering: .relaxed) != stepped else { return }
+        told.store(stepped, ordering: .relaxed)
+        let stack = Self.stack(of: main.load(ordering: .acquiring))
+        let line = String(format: "%@  stalling %.1f s so far\n", Self.stamp(), Double(now - stepped) * Self.ticks) + stack
+        queue.async { [self] in write(line) }
     }
 
-    private nonisolated static func ended(_ seconds: Double, began: UInt64) {
-        let seen = words[told] == began
-        write(String(format: "%@  stall %.1f s%@\n", stamp(), seconds, seen ? "" : " (ended before it was looked at)"))
+    private func ended(_ seconds: Double, began: UInt64) {
+        let seen = told.load(ordering: .relaxed) == began
+        write(String(format: "%@  stall %.1f s%@\n", Self.stamp(), seconds, seen ? "" : " (ended before it was looked at)"))
     }
 
-    /// A line of Nerda's own beside the stalls, for the next report: what
-    /// it did about a page that stopped answering, say.
-    nonisolated static func note(_ line: String) {
-        let at = Date()
-        queue.async { write("\(stamp(at))  \(line)\n") }
+    private static func stamp(_ at: Date = Date()) -> String {
+        Date.ISO8601FormatStyle().format(at)
     }
-
-    /// One formatter, used on the queue alone.
-    private nonisolated(unsafe) static let stamps = ISO8601DateFormatter()
-
-    private nonisolated static func stamp(_ at: Date = Date()) -> String { stamps.string(from: at) }
 
     /// Appended, the file kept to its last 32 KB once past 64. The throwing
     /// FileHandle calls only: the old `write(_:)` raises an Objective-C
     /// exception when the disk is full or the file is gone.
-    private nonisolated static func write(_ text: String) {
+    private func write(_ text: String) {
         let data = Data(text.utf8)
         let log = file
         if let handle = try? FileHandle(forWritingTo: log) {
@@ -157,7 +209,7 @@ enum Watchdog {
 
     /// The newest `bytes` of the log, from the start of a line, for a
     /// feedback report; nil with nothing logged.
-    nonisolated static func recent(_ bytes: Int) -> String? {
+    static func recent(_ bytes: Int, in file: URL = Watchdog.file) -> String? {
         guard let data = try? Data(contentsOf: file), !data.isEmpty else { return nil }
         var kept = data.suffix(bytes)
         if kept.count < data.count, let line = kept.firstIndex(of: UInt8(ascii: "\n")) { kept = kept[(line + 1)...] }
@@ -169,9 +221,8 @@ enum Watchdog {
     /// The main thread held for the few microseconds it takes to follow its
     /// frame pointers, then each address named from outside: the binary,
     /// the offset `./symbolicate.sh` reads, and the symbol where there is one.
-    private nonisolated static func mainStack() -> String {
+    private static func stack(of port: thread_act_t) -> String {
         #if arch(arm64)
-        let port = main
         guard port != 0, port != pthread_mach_thread_np(pthread_self()) else { return "" }
         // Allocated before the thread is held: it may hold the allocator's lock.
         let frames = UnsafeMutablePointer<UInt>.allocate(capacity: 64)
