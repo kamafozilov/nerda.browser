@@ -148,6 +148,9 @@ final class Browser: NSObject {
     /// Pages' processes ending, in every window, to tell a page that keeps
     /// crashing (PageEnds.swift). Tests give a browser its own.
     @ObservationIgnored var pageEnds = PageEnds.shared
+    /// The launch whose first page this window's may be. Tests give a
+    /// browser one of its own.
+    @ObservationIgnored var launch = Launch.current
     /// Every window's browser, incognito ones too, while it lives.
     private static let living = NSHashTable<Browser>.weakObjects()
     static var all: [Browser] { living.allObjects }
@@ -1118,6 +1121,8 @@ extension Browser: WKNavigationDelegate {
     func webView(_ webView: WKWebView, renderingProgressDidChange events: UInt) {
         guard events & Recorder.paintEvents != 0, let tab = tab(for: webView) else { return }
         recorder.painted(tab, onScreen: tab.id == selectedID)
+        // The launch's first page: drawn, on screen.
+        if tab.id == selectedID { launch.mark("page") }
     }
 
     /// A server sending a tab with no page yet on to an extension's page
@@ -1134,7 +1139,6 @@ extension Browser: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        Launch.mark("page")
         tab(for: webView)?.pageDidLoad()
         if let tab = tab(for: webView) { recorder.arrived(tab) }
         tab(for: webView)?.checkReadable()
