@@ -23,6 +23,8 @@ final class AgentHarness {
     let server: AgentServer
     /// Settings of the test's own, for the switch that lets agents in.
     let defaults: UserDefaults
+    /// The server's awake time, moved by hand (`advance(by:)`).
+    let clock = AgentTestClock()
     private let defaultsName: String
     var socket: URL { server.socket }
 
@@ -36,7 +38,9 @@ final class AgentHarness {
         defaultsName = "nerda.agents.tests." + UUID().uuidString
         defaults = try #require(UserDefaults(suiteName: defaultsName))
         // Every profile's Agent tabs on a store of their own, kept in memory.
-        server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults) { profile in
+        let clock = clock
+        server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults,
+                             now: { clock.now }) { profile in
             AgentBrowser(profile: profile, dataStore: .nonPersistent())
         }
         server.start()
@@ -70,6 +74,15 @@ final class AgentHarness {
         UserDefaults.standard.removePersistentDomain(forName: defaultsName)
         try? FileManager.default.removeItem(at: folder)
     }
+}
+
+/// Awake time that only moves when a test moves it, so cleanup's 15
+/// minutes pass at once.
+@MainActor
+final class AgentTestClock {
+    private(set) var now = SuspendingClock.now
+
+    func advance(by duration: Duration) { now = now.advanced(by: duration) }
 }
 
 /// One MCP client's side of the conversation with the shim.
