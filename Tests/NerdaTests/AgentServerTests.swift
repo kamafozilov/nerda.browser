@@ -123,6 +123,26 @@ struct AgentServerTests {
         #expect(ContinuousClock.now - started < .seconds(10))
     }
 
+    /// An agent can't open files on this Mac (Nerda's own data among
+    /// them): open and navigate take web addresses only.
+    @Test func agentsCantOpenFiles() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        let file = harness.folder.appending(path: "secret.html")
+        try "<title>Secret</title><p>Not for agents</p>".write(to: file, atomically: true, encoding: .utf8)
+        let url = try await harness.pages.serve("/start", "<title>Start</title>")
+        let agent = try await harness.agent()
+
+        let opened = try await agent.call("open", ["url": AgentJSON(file)])
+        #expect(opened.isError)
+        #expect(!opened.text.contains("Not for agents"))
+        _ = try await agent.call("open", ["url": AgentJSON(url)])
+        let navigated = try await agent.call("navigate", ["tab": "t1", "url": AgentJSON(file)])
+        #expect(navigated.isError)
+        #expect(!navigated.text.contains("Not for agents"))
+        #expect(harness.agents?.tabs.allSatisfy { $0.url?.isFileURL != true } == true)
+    }
+
     /// A shim from another version of Nerda than the one running (Nerda
     /// updated, not reopened) is told plainly to reopen Nerda, whichever
     /// side is newer.
