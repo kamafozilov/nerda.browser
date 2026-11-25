@@ -192,6 +192,10 @@ final class Tab: Identifiable {
     /// An extension's page a tab with no page yet was sent to, to be opened
     /// if WebKit then says a site's server sent it there.
     @ObservationIgnored var returning: URL?
+    /// Whether the page has stopped answering, as far as Nerda knows (HungPages.swift).
+    @ObservationIgnored var hang = Hang()
+    /// "This page isn't answering", Wait or Reload, asked over the page.
+    var asksAboutHang = false
 
     /// The page, woken first if the tab was asleep.
     var webView: WKWebView { page ?? wake() }
@@ -346,6 +350,7 @@ final class Tab: Identifiable {
 
     /// Takes the tab to `url`, a new one included.
     func go(to url: URL) {
+        letGoHung()
         stopReconnecting()
         // An address typed, a bookmark: the browser leaving the page asks.
         if let page, hasUnsavedWork, !departureApproved, let browser = delegate as? Browser {
@@ -716,6 +721,7 @@ final class Tab: Identifiable {
     /// `look`, the page's top (`snapshot`), stays for its hover card: some
     /// 100 KB, of the hundreds of MB let go.
     func sleep(keeping look: NSImage? = nil, discarding: Bool = false) {
+        if letGoHung() { return }
         guard discarding || !hasUnsavedWork else { return }
         guard let page else { return }
         stopReconnecting()
@@ -843,11 +849,23 @@ final class Tab: Identifiable {
         reconnecting = nil
     }
 
+    /// Back and Forward, a page that stopped answering ended first.
+    func goBack() {
+        letGoHung()
+        webView.goBack()
+    }
+
+    func goForward() {
+        letGoHung()
+        webView.goForward()
+    }
+
     /// Go Back from a page that couldn't be opened: to the page still under
     /// it, when a link from there failed, or else back in its history.
     var canLeaveFailure: Bool { failure != nil && (failedOverPage || canGoBack) }
 
     func leaveFailure() {
+        if letGoHung() { return goBack() }
         if failedOverPage { failure = nil } else { page?.goBack() }
     }
 
@@ -860,6 +878,7 @@ final class Tab: Identifiable {
     /// From origin, the page and what it loads are fetched anew, not taken
     /// from the cache.
     func reload(fromOrigin: Bool = false) {
+        if letGoHung() { _ = webView; return }
         stopReconnecting()
         if let failure {
             webView.load(.page(failure.url, cachePolicy: fromOrigin ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy))
@@ -945,6 +964,8 @@ final class Tab: Identifiable {
     /// For a closed tab: no more sound or video, and the camera and microphone off,
     /// for good. Suspended rather than paused, so the page can't start them again.
     func silence() {
+        // Its window closed, a page that stopped answering would spin on.
+        letGoHung()
         stopReconnecting()
         guard let page else { return }
         recoloring?.cancel()

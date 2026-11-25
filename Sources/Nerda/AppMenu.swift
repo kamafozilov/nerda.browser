@@ -431,8 +431,8 @@ final class AppMenu: NSObject {
     @objc private func showOriginal() { browser.selected?.showOriginal() }
     @objc private func reload() { browser.selected?.reload() }
     @objc private func hardReload() { browser.selected?.reload(fromOrigin: true) }
-    @objc private func goBack() { browser.selected?.webView.goBack() }
-    @objc private func goForward() { browser.selected?.webView.goForward() }
+    @objc private func goBack() { browser.selected?.goBack() }
+    @objc private func goForward() { browser.selected?.goForward() }
     @objc private func zoom(_ sender: NSMenuItem) { browser.selected?.zoom(sender.tag) }
     @objc private func selectTab(_ sender: NSMenuItem) { browser.selectTab(number: sender.tag) }
     @objc private func nextTab() { browser.selectTab(after: 1) }

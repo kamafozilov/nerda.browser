@@ -39,10 +39,10 @@ struct AddressBar: View {
                     .padding(.trailing, 4)
             }
             BarButton(icon: "chevron.left", help: "Back  ⌘[", enabled: tab?.canGoBack == true) {
-                browser.selected?.webView.goBack()
+                browser.selected?.goBack()
             }
             BarButton(icon: "chevron.right", help: "Forward  ⌘]", enabled: tab?.canGoForward == true) {
-                browser.selected?.webView.goForward()
+                browser.selected?.goForward()
             }
             BarButton(icon: loading ? "xmark" : "arrow.clockwise", help: loading ? "Stop" : "Reload  ⌘R",
                       enabled: tab?.hasPage == true) {
