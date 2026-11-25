@@ -92,6 +92,22 @@ struct SparePageTests {
         }
     }
 
+    /// Under critical memory pressure no page is kept running for nobody:
+    /// the spare goes, none is made while it lasts, and one comes back after.
+    @Test func criticalMemoryPressureKeepsNoSpare() async throws {
+        try await withSpare { store, browser in
+            let coordinator = SleepCoordinator(watchingSystem: false)
+            coordinator.register(browser)
+            coordinator.pressure(.critical)
+            #expect(SparePages.page(for: store) == nil)
+            SparePages.keep(for: store, in: 0)
+            try await Task.sleep(for: .milliseconds(300))
+            #expect(SparePages.page(for: store) == nil)
+            coordinator.pressure(.normal)
+            try await waitFor("A spare again", timeout: .seconds(10)) { SparePages.page(for: store) != nil }
+        }
+    }
+
     /// NERDA_SPARE_PAGE=0: no spare is made, and one already there isn't taken.
     @Test func theSwitchTurnsTheSpareOff() async throws {
         try await withSpare { store, browser in

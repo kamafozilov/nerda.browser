@@ -102,16 +102,3 @@ private func coordinator(for browsers: Browser...) -> SleepCoordinator {
     try await waitFor("Browser gone") { gone == nil }
     coordinator.pressure(.critical)
 }
-
-/// Low Power Mode reaches the coordinator as it changes, and a test can turn it on.
-@MainActor
-@Test func lowPowerModeReachesTheCoordinator() {
-    defer { LowPowerMode.forced = nil; LowPowerMode.changed() }
-    let coordinator = SleepCoordinator(watchingSystem: false)
-    LowPowerMode.forced = true
-    LowPowerMode.changed()
-    #expect(coordinator.lowPower)
-    LowPowerMode.forced = false
-    LowPowerMode.changed()
-    #expect(!coordinator.lowPower)
-}

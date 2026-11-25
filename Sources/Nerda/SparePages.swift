@@ -7,8 +7,9 @@ import WebKit
 /// in one, or a sleeping tab's woken, is that page, so it starts loading at
 /// once rather than after its process starts: Yab measured 101–116 ms →
 /// 60–66 ms a new tab, for about 10 MB. Another is made a moment after one
-/// is taken. None in Low Power Mode, nor for an incognito window, whose
-/// store is in memory. NERDA_SPARE_PAGE=0 turns it off for one run.
+/// is taken. None in Low Power Mode or under critical memory pressure, nor
+/// for an incognito window, whose store is in memory, nor for a profile
+/// with no window open. NERDA_SPARE_PAGE=0 turns it off for one run.
 enum SparePages {
     static var isOn: Bool { Speedups.isOn(.sparePage) }
 
@@ -20,6 +21,8 @@ enum SparePages {
         let store: WKWebsiteDataStore
         var page: SwipingWebView?
         var timer: Timer?
+        /// Memory is short: none is kept until it isn't.
+        var held = false
 
         init(store: WKWebsiteDataStore) { self.store = store }
     }
@@ -53,12 +56,27 @@ enum SparePages {
         kept.first { $0.store === store }?.page
     }
 
-    /// `store` keeps none any more, its page let go: a profile deleted,
-    /// as WebKit removes a store only once no page uses it.
+    /// `store` keeps none any more, its page let go: a profile deleted, as
+    /// WebKit removes a store only once no page uses it, or its last window
+    /// closed.
     static func drop(for store: WKWebsiteDataStore) {
         guard let index = kept.firstIndex(where: { $0.store === store }) else { return }
         kept[index].timer?.invalidate()
         kept.remove(at: index)
+    }
+
+    /// Critical memory pressure (SleepCoordinator) for the windows of
+    /// `store`: its spare goes, and none is made until it ends.
+    static func hold(_ held: Bool, for store: WKWebsiteDataStore) {
+        guard let spare = kept.first(where: { $0.store === store }), spare.held != held else { return }
+        spare.held = held
+        if held { letGo(spare) } else { renew(spare, in: renewal) }
+    }
+
+    private static func letGo(_ spare: Kept) {
+        spare.timer?.invalidate()
+        spare.timer = nil
+        spare.page = nil
     }
 
     private static let watcher = NSObject()
@@ -68,9 +86,7 @@ enum SparePages {
     private static func powerChanged(_ on: Bool) {
         for spare in kept {
             if on {
-                spare.timer?.invalidate()
-                spare.timer = nil
-                spare.page = nil
+                letGo(spare)
             } else if spare.page == nil {
                 renew(spare, in: renewal)
             }
@@ -80,12 +96,12 @@ enum SparePages {
     /// Made on a turn of the run loop in its default mode only, so never in
     /// the middle of a drag or a scroll.
     private static func renew(_ spare: Kept, in seconds: TimeInterval) {
-        guard spare.timer == nil else { return }
+        guard spare.timer == nil, !spare.held else { return }
         let timer = Timer(timeInterval: seconds, repeats: false) { [weak spare] _ in
             MainActor.assumeIsolated {
                 guard let spare else { return }
                 spare.timer = nil
-                guard spare.page == nil, !LowPowerMode.isOn, kept.contains(where: { $0 === spare }) else { return }
+                guard spare.page == nil, !spare.held, !LowPowerMode.isOn, kept.contains(where: { $0 === spare }) else { return }
                 spare.page = Tab.sparePage(for: spare.store)
             }
         }

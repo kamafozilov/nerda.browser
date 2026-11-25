@@ -12,9 +12,6 @@ final class SleepCoordinator {
     /// How short the Mac is of memory, as the system reports it.
     enum MemoryPressure { case normal, warning, critical }
 
-    /// Whether Low Power Mode is on, as it last changed.
-    private(set) var lowPower = LowPowerMode.isOn
-
     /// The pressure as last reported.
     private var level = MemoryPressure.normal
     /// While pressure is critical, how long between one tab put to sleep and
@@ -30,7 +27,6 @@ final class SleepCoordinator {
     /// With `watchingSystem`, the minute's check and the system's memory
     /// pressure; without, as in tests, only what is called.
     init(watchingSystem: Bool = true) {
-        LowPowerMode.watch(self) { [weak self] on in self?.lowPower = on }
         guard watchingSystem else { return }
         // Checked each minute, loosely, so the system can fold it in with other wake-ups.
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
@@ -76,7 +72,9 @@ final class SleepCoordinator {
     /// all day, and a short spike shouldn't cost reloads. Critical, the
     /// heaviest tab that may sleep goes, then one more each `lookEvery`
     /// until it ends, so as few tabs as possible load again.
+    /// Critical, the spare pages of its windows' stores go too, until it ends.
     func pressure(_ level: MemoryPressure) {
+        for browser in browsers.allObjects { SparePages.hold(level == .critical, for: browser.dataStore) }
         guard Speedups.isOn(.pressurePolicy) else { return sleepAll(level) }
         self.level = level
         guard level == .critical else {

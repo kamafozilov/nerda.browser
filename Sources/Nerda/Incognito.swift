@@ -206,7 +206,18 @@ enum Windows {
         DispatchQueue.main.async {
             delegate.window.contentView = nil
             secondary.removeAll { $0 === delegate }
+            letSpareGo(of: browser.profile)
         }
+    }
+
+    /// A profile's spare page goes with its last window: a page kept
+    /// running for a window nobody has open would only take memory. It
+    /// comes back when the profile's window is shown. Personal's stays, as
+    /// Nerda's first window comes back at a click in the Dock.
+    static func letSpareGo(of profile: Profile, closing: NSWindow? = nil) {
+        guard !profile.isMain, !hasSecondary(of: profile) else { return }
+        if let own = window(of: profile, making: false), own !== closing, own.isVisible { return }
+        SparePages.drop(for: profile.dataStore)
     }
 
     /// At launch, each secondary window left open, with its tabs, on the
@@ -255,6 +266,7 @@ enum Windows {
     static func show(_ profile: Profile) -> Browser {
         let window = window(of: profile)
         if !window.isVisible { window.browser.restore(from: profile.sessionFile) }
+        SparePages.keep(for: window.browser.dataStore)
         window.makeKeyAndOrderFront(nil)
         mark(profile, open: true)
         return window.browser

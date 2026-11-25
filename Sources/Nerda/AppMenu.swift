@@ -766,7 +766,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         if browser.isSecondary { return Windows.closedSecondary(self) }
         browser.closeAll()
-        if browser.isPrivate { Windows.closed(self) } else { Windows.mark(browser.profile, open: false) }
+        if browser.isPrivate { Windows.closed(self) } else {
+            Windows.mark(browser.profile, open: false)
+            Windows.letSpareGo(of: browser.profile, closing: window)
+        }
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
