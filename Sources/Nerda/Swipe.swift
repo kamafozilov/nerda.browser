@@ -218,6 +218,18 @@ class SwipingWebView: WKWebView {
         if event.deltaX > 0, canGoBack { goBack() } else if event.deltaX < 0, canGoForward { goForward() } else { super.swipe(with: event) }
     }
 
+    /// A click or a key in a page that stopped answering asks about it again
+    /// (HungPages.swift); the page takes them as before.
+    override func mouseDown(with event: NSEvent) {
+        (navigationDelegate as? Browser)?.reached(self)
+        super.mouseDown(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        (navigationDelegate as? Browser)?.reached(self)
+        super.keyDown(with: event)
+    }
+
     /// A mouse's back and forward buttons: buttons 3 and 4, as mice send them.
     override func otherMouseDown(with event: NSEvent) {
         switch event.buttonNumber {

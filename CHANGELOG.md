@@ -20,6 +20,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - With Keyboard navigation on (System Settings › Keyboard), ↑ and ↓ in the sidebar's tabs put the tab above or below on screen and keep the keyboard in the list, Return takes it to the page, and Delete closes the tab.
 - File › New Window (⌘N) brings your profile's window to the front on a new tab, opening it again if you closed it, so ⌘N does what you expect from other browsers. With profiles, it goes to the profile of the window in front, or the one you used last.
 - The Vault (⌥⌘P), in Window and the sidebar's menu, where Passwords was: your passwords and sign-ins with services by kind, with Weak and Reused under Security for the passwords to change. Each can have a note, such as recovery codes, and Add makes up a strong password with the wand. Export Passwords… writes them to a file Passwords, Safari, Chrome and other password managers read.
+- A page that stops answering no longer holds up its tab. Once you try to use it, a card offers Wait or Reload, and reloading, closing the tab, typing an address and Back all work at once, on a fresh page, as in Chrome. A tab out of sight stuck in a loop is put to sleep, so it doesn't run down your battery, and loads again when you come back to it.
 
 ### Changed
 
