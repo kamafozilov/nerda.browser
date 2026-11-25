@@ -34,8 +34,10 @@ enum AgentInput {
     /// A person's drag from `start` to `end` of the page: the pointer
     /// pressed at `start`, moved there in `steps` moves a frame apart
     /// (the first a few points out, past where a press becomes a drag),
-    /// and let go at `end`.
-    static func drag(_ page: WKWebView, from start: CGPoint, to end: CGPoint, steps: Int = 12) async throws {
+    /// and let go at `end`. Once `stopping` says so (the page is held by a
+    /// dialog), no more moves are sent: it is let go of where it is.
+    static func drag(_ page: WKWebView, from start: CGPoint, to end: CGPoint, steps: Int = 12,
+                     stopping: () -> Bool = { false }) async throws {
         try send(.mouseMoved, to: page, at: start)
         try send(.leftMouseDown, to: page, at: start)
         let length = max(hypot(end.x - start.x, end.y - start.y), 1)
@@ -46,12 +48,15 @@ enum AgentInput {
             points.append(CGPoint(x: start.x + (end.x - start.x) * part, y: start.y + (end.y - start.y) * part))
         }
         points.append(end)
+        var at = start
         for point in points {
             try await Task.sleep(for: .milliseconds(16))
+            if stopping() { break }
             try send(.leftMouseDragged, to: page, at: point)
+            at = point
         }
         try await Task.sleep(for: .milliseconds(16))
-        try send(.leftMouseUp, to: page, at: end)
+        try send(.leftMouseUp, to: page, at: at)
     }
 
     /// One mouse event of `type` at `point` of the page (points from the top

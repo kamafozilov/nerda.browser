@@ -62,6 +62,49 @@ struct AgentDialogTests {
         #expect(harness.server.owner.waiting.isEmpty, "the owner was asked though the agent answered in time")
     }
 
+    /// The pointer's other verbs wait on a dialog as a click does: a drag
+    /// whose press brings one up stops there and answers at once, and while
+    /// it holds the page, hover, drag and scroll are refused at once.
+    @Test func pointerVerbsWaitOnADialogAsAClickDoes() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        let url = try await harness.pages.serve("/board", """
+            <title>Board</title>
+            <div id=card role=button tabindex=0 onmousedown="document.title = confirm('Move the card?') ? 'Moving' : 'Kept'">Write report</div>
+            <section aria-label="Done" style="height: 200px; margin-top: 300px; border: 1px solid"></section>
+            """)
+        let agent = try await harness.agent()
+        _ = try await agent.call("open", ["url": AgentJSON(url)])
+        let outline = try await agent.call("snapshot", ["tab": "t1", "full": true]).text
+        let card = try #require(AgentClickTests.ref(of: #"button "Write report""#, in: outline), "\(outline)")
+        let done = try #require(AgentClickTests.ref(of: #"region "Done""#, in: outline), "\(outline)")
+
+        let started = ContinuousClock.now
+        let dragged = try await agent.call("drag", ["tab": "t1", "ref": .string(card), "to": .string(done)])
+        #expect(!dragged.isError, "\(dragged.text)")
+        #expect(dragged.text.hasPrefix("began dragging"), "\(dragged.text)")
+        #expect(dragged.text.contains(#"raised a confirm dialog: "Move the card?""#), "\(dragged.text)")
+        #expect(ContinuousClock.now - started < .seconds(5))
+
+        let calls: [(String, [String: AgentJSON])] = [
+            ("hover", ["tab": "t1", "ref": .string(card)]),
+            ("drag", ["tab": "t1", "ref": .string(card), "to": .string(done)]),
+            ("scroll", ["tab": "t1"]),
+        ]
+        for (verb, arguments) in calls {
+            let started = ContinuousClock.now
+            let refused = try await agent.call(verb, arguments)
+            #expect(refused.isError, "\(verb): \(refused.text)")
+            #expect(refused.text.contains("waits on a dialog"), "\(verb): \(refused.text)")
+            #expect(ContinuousClock.now - started < .seconds(3), "\(verb)")
+        }
+
+        let answered = try await agent.call("dialog", ["tab": "t1", "accept": false])
+        #expect(!answered.isError, "\(answered.text)")
+        let page = try #require(harness.agents?.tabs.first?.page)
+        #expect(try await page.callAsyncJavaScript("return document.title", contentWorld: .page) as? String == "Kept")
+    }
+
     /// A prompt is answered with the agent's text, or cancelled.
     @Test func aPromptTakesTheAgentsText() async throws {
         let harness = try AgentHarness()

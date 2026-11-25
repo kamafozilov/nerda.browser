@@ -95,12 +95,18 @@ extension AgentPage {
         }
         let page = start.element.page
         _ = try await run(placeScript + guardScript, on: start.element)
+        // A dialog the press or a move brings up holds the page: the drag
+        // stops there, as a person's would, and nothing waits on its script.
+        let held = { AgentNotices.held(agentTab.tab) != nil }
         do {
-            try await AgentInput.drag(page, from: start.point, to: end.point)
+            try await AgentInput.drag(page, from: start.point, to: end.point, stopping: held)
         } catch {
-            _ = try? await run(dropScript, on: start.element, arguments: ["to": "", "point": [String: Any]()])
+            _ = await unlessHeld(agentTab.tab, by: .now + .seconds(2)) {
+                try await run(dropScript, on: start.element, arguments: ["to": "", "point": [String: Any]()])
+            }
             throw error
         }
+        if held() { return "began dragging \(start.what) to \(end.what), and a dialog came up, so it was let go of there" }
 
         // A drag of the browser's own drag and drop was stopped before the
         // Mac's began (`guardScript`): it is done by script instead.
