@@ -108,9 +108,15 @@ extension AgentPage {
         let address = tab.url
         let tabsBefore = Set(agentTab.agents.tabs.map(ObjectIdentifier.init))
 
-        let did = try await action()
+        await markActing(tab, true)
+        let did: String
+        do { did = try await action() } catch {
+            await markActing(tab, false)
+            throw error
+        }
 
         await settle(tab, until: min(.now + settleAtMost, call.deadline - .seconds(1)))
+        await markActing(tab, false)
         let opened = adoptNewTabs(of: agentTab, besides: tabsBefore, for: call)
         var notices = opened.map { "notice: opened a new tab \($0.ref): \($0.tab.url?.absoluteString ?? "") (snapshot \($0.ref) reads it)" }
         notices += AgentNotices.take(from: tab).map { "notice: " + $0 }
@@ -251,6 +257,25 @@ extension AgentPage {
             setTimeout(tick, 20);
         });
         """
+
+    /// Marks the time an agent acts on the tab's page, in each of its
+    /// frames, so what the agent types, picks or drops isn't taken for a
+    /// draft of the owner's (`PageActivity`): a draft keeps the tab from
+    /// cleanup and asks "Leave this page?" before the agent may go on. The
+    /// mark ends by itself, should a dialog keep it from being taken away.
+    private static func markActing(_ tab: Tab, _ acting: Bool) async {
+        guard let page = tab.page else { return }
+        let tree = await unlessHeld(tab, by: .now + .seconds(1)) { await frames(of: page) } ?? nil
+        let all: [WKFrameInfo?] = tree?.all.map(\.info) ?? [nil]
+        for frame in all {
+            _ = await unlessHeld(tab, by: .now + .seconds(1)) {
+                try await page.callAsyncJavaScript(
+                    "globalThis.nerdaAgentActs = acting ? Date.now() + 15000 : 0", arguments: ["acting": acting],
+                    in: frame, contentWorld: .defaultClient
+                )
+            }
+        }
+    }
 
     /// A mark of the main frame's document, the same until another
     /// document replaces it (a navigation, a reload).

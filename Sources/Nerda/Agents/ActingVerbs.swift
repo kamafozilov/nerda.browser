@@ -84,7 +84,7 @@ extension AgentPage {
     }
 
     /// `e7 button "Send"`, from the page model's description of an element.
-    private static func describe(ref: String?, _ description: Any?) -> String {
+    static func describe(ref: String?, _ description: Any?) -> String {
         let description = description as? [String: Any] ?? [:]
         var words = [ref ?? description["ref"] as? String, description["role"] as? String].compactMap(\.self)
         if let name = description["name"] as? String, !name.isEmpty {

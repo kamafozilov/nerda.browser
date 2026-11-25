@@ -240,6 +240,9 @@ final class AppMenu: NSObject {
         // that are the browser's whatever the page does with them, as in
         // Chrome: a page that took ⌘W or ⌘T for itself would keep you in it.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
+            // An agent's key the page left alone is the agent's, not the
+            // owner's: `AgentInput` keeps it from the browser's keys.
+            if MainActor.assumeIsolated({ AgentInput.isAgents(event) }) { return event }
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             // Only in a browser's window: in the Vault ⌃Tab is its own, and
             // the tabs of a window behind it are out of sight.
