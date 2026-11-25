@@ -1099,6 +1099,7 @@ extension Browser: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Launch.mark("page")
         tab(for: webView)?.pageDidLoad()
         tab(for: webView)?.checkReadable()
         if let tab = tab(for: webView) {

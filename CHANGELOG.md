@@ -28,6 +28,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - With the sidebar hidden, the window's close, minimise and zoom buttons show while the pointer is at the top of the window, and go when it leaves, without the sidebar coming out; the address bar starts past them, so they never sit over its buttons. Before, they showed only with the sidebar.
 - Offering to save a password shows a card with the site's icon, the user name, to correct before you save, and the password, hidden until you click the eye. It warns when the password is easy to guess.
 - File › Import Bookmarks… no longer stops you with a dialog once it has worked: the bookmarks come in as the Imported folder at the end of your bookmarks, and the sidebar opens to show it. After File › Import Passwords…, the reminder to delete the file shows on the window you are in, rather than holding up all of Nerda.
+- Help › Report a Problem… and a crash report carry how long Nerda's last launches took and the hangs macOS noticed, so a slow start or a freeze you report can be looked into. You see all of it before anything is sent, and nothing leaves your Mac otherwise. Nerda also puts off what it doesn't need for the first window, such as checking for updates, until your first page is in.
 
 ### Fixed
 

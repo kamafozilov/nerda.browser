@@ -880,9 +880,11 @@ extension Browser {
 
 // Nerda run again only to compile the block list (see Blocker), not as a browser.
 if CommandLine.arguments.contains(Blocker.compileArgument) { Blocker.compileAndExit() }
+// This launch's moments, from the process start (Launch.swift).
+Launch.start()
 
 // Read off the main thread while the rest below gets ready.
-let launchSession = Session.reading(Session.file)
+let launchSession = Launch.stage("session") { Session.reading(Session.file) }
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 // Tabs are ours; no system tab bar, and no Show Tab Bar items in the menus.
@@ -890,30 +892,40 @@ NSWindow.allowsAutomaticWindowTabbing = false
 SpellCheck.registerDefault()
 Theme.apply()
 
-let browser = Browser()
+let browser = Launch.stage("browser") { Browser() }
 // Read, and indexed for typing in the address bar, while the window comes up.
-History.shared.load(from: History.file, waiting: false)
+Launch.stage("history") { History.shared.load(from: History.file, waiting: false) }
 // Before the tabs: those of bookmarks are told by them.
-Bookmarks.shared.load(from: Bookmarks.file)
+Launch.stage("bookmarks") { Bookmarks.shared.load(from: Bookmarks.file) }
 Favicons.shared.folder = Favicons.folder
-browser.restore(launchSession(), from: Session.file)
-Favicons.shared.preload(browser.tabs.compactMap(\.site))
+Launch.stage("restore") {
+    browser.restore(launchSession(), from: Session.file)
+    // Read off the main thread, so the tabs' icons are there with the window.
+    Favicons.shared.preload(browser.tabs.compactMap(\.site))
+}
 // Opening on a new tab, it opens with its picture already there. On a web
 // page, the picture waits for the first new tab: 20 to 100 MB not taken for one.
-if browser.selected?.isBlank == true { Backdrop.shared.load() }
-// Once the window is up: a page's process ready for the first page.
-DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Tab.warmUp() }
-let menu = AppMenu(browser: browser)
-menu.install()
-if Edition.updates { Updater.shared.start() }
+if browser.selected?.isBlank == true { Launch.stage("backdrop") { Backdrop.shared.load() } }
+// Once the first page is in: a page's process ready for the next one.
+Launch.later("warm up") { Tab.warmUp() }
+let menu = Launch.stage("menu") {
+    let menu = AppMenu(browser: browser)
+    menu.install()
+    return menu
+}
+if Edition.updates { Launch.later("updates") { Updater.shared.start() } }
 Feedback.shared.start()
 
-let window = BrowserWindow(browser: browser)
+let window = Launch.stage("window") { BrowserWindow(browser: browser) }
 Windows.regular = window
 window.makeKeyAndOrderFront(nil)
-Windows.reopenProfiles()
-Windows.reopenSecondary()
-Profiles.removeStoresLeft()
+// A blank tab has no page to wait for: the window is the launch.
+Launch.watch(window, waitingForPage: browser.selected.map { !$0.isBlank } ?? false)
+Launch.stage("other windows") {
+    Windows.reopenProfiles()
+    Windows.reopenSecondary()
+}
+Launch.later("stores left") { Profiles.removeStoresLeft() }
 // Once the window is up: loading them takes the main thread a while.
 if Extensions.enabledAtLaunch { DispatchQueue.main.async { Extensions.shared.start(for: browser) } }
 

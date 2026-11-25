@@ -757,6 +757,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         self.browser = browser
     }
 
+    /// Only the regular window's delegate is the app's, and hears this.
+    func applicationDidFinishLaunching(_ notification: Notification) { Launch.mark("launched") }
+
     /// An incognito window's closing lets go of it, and with the last one,
     /// of all it held (see `Windows`), as a secondary one's does. A profile's
     /// stays closed at the next launch.
