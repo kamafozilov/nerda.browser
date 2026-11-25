@@ -90,7 +90,7 @@ final class Recorder {
 
     private static var isOn: Bool { Speedups.isOn(.recorder) }
 
-    private static let signposter = OSSignposter(subsystem: Bundle.main.bundleIdentifier ?? "dev.nerda.browser", category: "tabs")
+    private static let signposter = OSSignposter(subsystem: Logger.subsystem, category: "tabs")
 
     // MARK: - writing
 

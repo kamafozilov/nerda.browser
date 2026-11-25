@@ -7,7 +7,8 @@ import os
 /// Paths, addresses and errors, which name files, are logged private: the
 /// log is kept, and shared in a bug report.
 nonisolated extension Logger {
-    private static let subsystem = Bundle.main.bundleIdentifier ?? "dev.nerda.browser"
+    /// Nerda's logs and signposts all go under it.
+    static let subsystem = Bundle.main.bundleIdentifier ?? "dev.nerda.browser"
 
     static let autoFill = Logger(subsystem: subsystem, category: "autofill")
     static let blocker = Logger(subsystem: subsystem, category: "blocker")

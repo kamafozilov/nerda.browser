@@ -25,7 +25,7 @@ import os
 /// dragged or scrolled. NERDA_LAUNCH_LATER=0 runs it where it is asked
 /// for instead, to time a launch with and without it (`Speedups`).
 enum Launch {
-    static let signposter = OSSignposter(subsystem: Bundle.main.bundleIdentifier ?? "dev.nerda.browser", category: "launch")
+    static let signposter = OSSignposter(subsystem: Logger.subsystem, category: "launch")
 
     /// This launch's record: Nerda's own once `start()` has run, kept with
     /// the launches before it. Tests make records of their own.

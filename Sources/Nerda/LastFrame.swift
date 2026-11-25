@@ -282,7 +282,14 @@ final class LastFrame {
 
     /// Least recently used first.
     private static var entries: [Entry] = []
-    private static var pressure: DispatchSourceMemoryPressure?
+    /// Watches memory pressure on behalf of every frame, from the first kept.
+    private static let watcher = NSObject()
+    private static let watching: Void = MemoryPressure.watch(watcher) { level in
+        // Memory short: every frame out of sight goes.
+        guard level != .normal else { return }
+        for entry in entries where entry.frame?.shows == false { entry.frame?.drop() }
+        entries.removeAll { $0.frame?.keeps != true }
+    }
 
     /// How many bytes of frames are kept at most: a share of the Mac's
     /// memory, between 48 and 256 MB. A whole frame of a page on a Retina
@@ -305,18 +312,7 @@ final class LastFrame {
             old.drop()
         }
         entries.removeAll { $0.frame?.keeps != true }
-        // Memory short: every frame out of sight goes.
-        if pressure == nil {
-            let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
-            source.setEventHandler {
-                MainActor.assumeIsolated {
-                    for entry in entries where entry.frame?.shows == false { entry.frame?.drop() }
-                    entries.removeAll { $0.frame?.keeps != true }
-                }
-            }
-            source.resume()
-            pressure = source
-        }
+        _ = watching
     }
 
     // MARK: - Drawing one

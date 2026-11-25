@@ -10,9 +10,6 @@ import Foundation
 final class SleepCoordinator {
     static let shared = SleepCoordinator()
 
-    /// How short the Mac is of memory, as the system reports it.
-    enum MemoryPressure { case normal, warning, critical }
-
     /// The pressure as last reported.
     private var level = MemoryPressure.normal
     /// While pressure is critical, how long between one tab put to sleep and
@@ -23,7 +20,6 @@ final class SleepCoordinator {
 
     private let browsers = NSHashTable<Browser>.weakObjects()
     private var timer: Timer?
-    private var memoryPressure: (any DispatchSourceMemoryPressure)?
 
     /// With `watchingSystem`, the minute's check and the system's memory
     /// pressure; without, as in tests, only what is called.
@@ -35,19 +31,11 @@ final class SleepCoordinator {
         }
         timer?.tolerance = 15
         // Normal too, so relief hears that the pressure is over.
-        memoryPressure = DispatchSource.makeMemoryPressureSource(eventMask: [.normal, .warning, .critical], queue: .main)
-        memoryPressure?.setEventHandler { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, let event = self.memoryPressure?.data else { return }
-                self.pressure(event.contains(.critical) ? .critical : event.contains(.warning) ? .warning : .normal)
-            }
-        }
-        memoryPressure?.activate()
+        MemoryPressure.watch(self) { [weak self] level in self?.pressure(level) }
     }
 
     isolated deinit {
         timer?.invalidate()
-        memoryPressure?.cancel()
         relief?.cancel()
     }
 

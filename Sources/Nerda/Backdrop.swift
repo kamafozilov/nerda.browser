@@ -51,7 +51,6 @@ final class Backdrop {
         didSet { if showing == 0 { releaseLater() } }
     }
     @ObservationIgnored private var releasing: Task<Void, Never>?
-    @ObservationIgnored private var memoryPressure: (any DispatchSourceMemoryPressure)?
 
     /// Your pictures, oldest first.
     private(set) var chosen: [URL]
@@ -89,11 +88,9 @@ final class Backdrop {
         // Short of memory, the picture is let go while no new tab shows it:
         // decoded, it takes 20 MB, up to 100 MB for one of yours on a 6K
         // screen. The next new tab decodes it again.
-        memoryPressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
-        memoryPressure?.setEventHandler { [weak self] in
-            MainActor.assumeIsolated { self?.release() }
+        MemoryPressure.watch(self) { [weak self] level in
+            if level != .normal { self?.release() }
         }
-        memoryPressure?.activate()
     }
 
     private func release() {

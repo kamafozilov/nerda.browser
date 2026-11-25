@@ -384,11 +384,7 @@ final class Tab: Identifiable {
 
     /// `spare`, a page made ahead from this same configuration (SparePages), in place of a new one.
     private func makePage(_ configuration: WKWebViewConfiguration, spare: SwipingWebView? = nil) -> WKWebView {
-        Self.matchScreenRate(configuration.preferences)
-        Self.holdHidden(configuration.preferences)
-        let page = spare ?? SwipingWebView(frame: .zero, configuration: configuration)
-        _ = Self.powerWatch
-        Self.pages.add(page)
+        let page = spare ?? Self.newPage(configuration)
         page.isInspectable = true
         page.customUserAgent = responsive?.agent ?? ""
         // A sleeping page wakes at its own zoom (`wake`), set after this.
@@ -640,13 +636,20 @@ final class Tab: Identifiable {
     /// process started now rather than at its first load (SparePages).
     // WebKit SPI, Safari's: should it go, the process starts at the first load, as it did.
     static func sparePage(for store: WKWebsiteDataStore) -> SwipingWebView {
-        let configuration = configuration(store)
-        matchScreenRate(configuration.preferences)
-        holdHidden(configuration.preferences)
-        let page = SwipingWebView(frame: .zero, configuration: configuration)
-        pages.add(page)
+        let page = newPage(configuration(store))
         let launch = NSSelectorFromString("_launchInitialProcessIfNecessary")
         if page.responds(to: launch) { page.perform(launch) }
+        return page
+    }
+
+    /// Every page Nerda makes, a tab's or a spare: at the screen's rate,
+    /// run out of sight as Low Power Mode has it, and following the mode.
+    private static func newPage(_ configuration: WKWebViewConfiguration) -> SwipingWebView {
+        matchScreenRate(configuration.preferences)
+        applyHiddenPolicy(configuration.preferences)
+        _ = powerWatch
+        let page = SwipingWebView(frame: .zero, configuration: configuration)
+        pages.add(page)
         return page
     }
 
@@ -1146,8 +1149,6 @@ final class Tab: Identifiable {
         // out of sight has its timers slowed further the longer it stays so.
         set(configuration.preferences, "_setDNSPrefetchingEnabled:", true)
         set(configuration.preferences, "_setHiddenPageDOMTimerThrottlingAutoIncreases:", true)
-        // Slowed, but running, where WebKit would suspend it (`hiddenPolicy`).
-        holdHidden(configuration.preferences)
         // Picture in picture, for Auto Picture-in-Picture and a player's own
         // button: without it WebKit says no video supports it.
         set(configuration.preferences, "_setAllowsPictureInPictureMediaPlayback:", true)
@@ -1203,14 +1204,14 @@ final class Tab: Identifiable {
     /// Low Power Mode turned on or off reaches the pages already open too,
     /// not only those made from then on. The frame rate WebKit takes up as
     /// each is next loaded (reloaded, or gone somewhere), rather than when it
-    /// is woken; how a hidden page runs, at once (`holdHiddenAgain`).
+    /// is woken; how a hidden page runs, at once (`reapplyHiddenPolicy`).
     private static let powerWatch: Void = LowPowerMode.watch(pages) { _ in
         let open = pages.allObjects
         for page in open {
             matchScreenRate(page.configuration.preferences)
-            holdHidden(page.configuration.preferences)
+            applyHiddenPolicy(page.configuration.preferences)
         }
-        holdHiddenAgain(open)
+        reapplyHiddenPolicy(open)
     }
 
     /// How a page out of sight is run: it keeps running, where WebKit and
@@ -1227,9 +1228,10 @@ final class Tab: Identifiable {
 
     private static let webKitsHiddenPolicy = WKPreferences().inactiveSchedulingPolicy
 
+    /// Keeps a hidden page running, or suspends it, as `hiddenPolicy` says.
     /// Each change of a preference is sent to every page's process, so only
     /// a change is made.
-    private static func holdHidden(_ preferences: WKPreferences) {
+    private static func applyHiddenPolicy(_ preferences: WKPreferences) {
         let policy = hiddenPolicy
         if preferences.inactiveSchedulingPolicy != policy { preferences.inactiveSchedulingPolicy = policy }
     }
@@ -1242,7 +1244,7 @@ final class Tab: Identifiable {
     /// stops within seconds, or runs again.
     // WebKit SPI: should it go, a page open follows the mode once it is next
     // made (woken) or moves to another site's process.
-    private static func holdHiddenAgain(_ open: [WKWebView]) {
+    private static func reapplyHiddenPolicy(_ open: [WKWebView]) {
         let related = NSSelectorFromString("_setRelatedWebView:")
         var reached = Set<pid_t>()
         for page in open {
