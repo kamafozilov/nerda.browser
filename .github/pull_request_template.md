@@ -43,7 +43,6 @@ list. Mention anything left for later.
 Only what was really done, with its result:
 - `swift test`: 83 tests pass
 - On screen: the steps tried, and what happened
-- `./bench.sh` before and after, when speed or memory could change
 Anything not run is written as "Not run: …". Never claim a check that
 didn't happen.
 -->
