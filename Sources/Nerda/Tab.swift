@@ -54,7 +54,10 @@ final class Tab: Identifiable {
     var home: URL?
     /// The page is making sound now: its tab shows a speaker, which mutes it.
     private(set) var playsAudio = false {
-        didSet { if playsAudio != oldValue, Extensions.started { Extensions.shared.changed(self, .playingAudio) } }
+        didSet {
+            if oldValue, !playsAudio { lastHeard = .now }
+            if playsAudio != oldValue, Extensions.started { Extensions.shared.changed(self, .playingAudio) }
+        }
     }
     /// Its sound is off (the speaker on its tab, Mute Tab, or an extension)
     /// until turned on again, asleep and awake.
@@ -115,6 +118,12 @@ final class Tab: Identifiable {
     @ObservationIgnored var dataStore = WKWebsiteDataStore.default()
     /// When the tab was last on screen, so it sleeps only once it has been away a while.
     @ObservationIgnored var lastSeen = Date.now
+    /// How many times it was gone to: one gone back to often is kept awake
+    /// (SleepCoordinator).
+    @ObservationIgnored var switchCount = 0
+    /// When its page last stopped making sound, so memory pressure leaves a
+    /// song between tracks alone (SleepCoordinator).
+    @ObservationIgnored var lastHeard: Date?
     /// The page, while awake.
     @ObservationIgnored private(set) var page: WKWebView? {
         didSet {
@@ -150,8 +159,11 @@ final class Tab: Identifiable {
     /// The address last put in history, so a page is counted once per visit,
     /// not again when it wakes or reloads.
     @ObservationIgnored private var recorded: URL?
-    /// When the page's process last died, to tell a page that keeps crashing.
-    @ObservationIgnored var crashed: Date?
+    /// Why the page's process last ended, when WebKit said (PageEnds.swift).
+    @ObservationIgnored var ended: PageEnd?
+    /// Set just before Nerda ends the page's process itself, for not
+    /// answering: that end is no crash, and is not counted as one.
+    @ObservationIgnored var endingOnPurpose = false
     /// How many of the page's own print sheets (`window.print()`) in a row
     /// were cancelled, and when the last was (see `Browser.printFrame`).
     @ObservationIgnored var printCancels: (count: Int, last: Date)?
@@ -174,9 +186,16 @@ final class Tab: Identifiable {
     /// The load under way and the site last answering for it, which a
     /// server's redirect to an extension's page comes from (see Browser).
     @ObservationIgnored var loading: (navigation: WKNavigation, site: URL?)?
+    /// When the load on screen began, and when Back or Forward was asked
+    /// for, for the record (Recorder.painted).
+    @ObservationIgnored var timing = Recorder.PageTiming()
     /// An extension's page a tab with no page yet was sent to, to be opened
     /// if WebKit then says a site's server sent it there.
     @ObservationIgnored var returning: URL?
+    /// Whether the page has stopped answering, as far as Nerda knows (HungPages.swift).
+    @ObservationIgnored var hang = Hang()
+    /// "This page isn't answering", Wait or Reload, asked over the page.
+    var asksAboutHang = false
 
     /// The page, woken first if the tab was asleep.
     var webView: WKWebView { page ?? wake() }
@@ -331,6 +350,7 @@ final class Tab: Identifiable {
 
     /// Takes the tab to `url`, a new one included.
     func go(to url: URL) {
+        letGoHung()
         stopReconnecting()
         // An address typed, a bookmark: the browser leaving the page asks.
         if let page, hasUnsavedWork, !departureApproved, let browser = delegate as? Browser {
@@ -362,11 +382,9 @@ final class Tab: Identifiable {
         page.load(.page(url))
     }
 
-    private func makePage(_ configuration: WKWebViewConfiguration) -> WKWebView {
-        Self.matchScreenRate(configuration.preferences)
-        let page = SwipingWebView(frame: .zero, configuration: configuration)
-        _ = Self.powerWatch
-        Self.pages.add(page)
+    /// `spare`, a page made ahead from this same configuration (SparePages), in place of a new one.
+    private func makePage(_ configuration: WKWebViewConfiguration, spare: SwipingWebView? = nil) -> WKWebView {
+        let page = spare ?? Self.newPage(configuration)
         page.isInspectable = true
         page.customUserAgent = responsive?.agent ?? ""
         // A sleeping page wakes at its own zoom (`wake`), set after this.
@@ -614,6 +632,27 @@ final class Tab: Identifiable {
         if let pool = processPool as? NSObject, pool.responds(to: warm) { pool.perform(warm) }
     }
 
+    /// A blank page for `store`'s next tab, made as `wake` makes one, its
+    /// process started now rather than at its first load (SparePages).
+    // WebKit SPI, Safari's: should it go, the process starts at the first load, as it did.
+    static func sparePage(for store: WKWebsiteDataStore) -> SwipingWebView {
+        let page = newPage(configuration(store))
+        let launch = NSSelectorFromString("_launchInitialProcessIfNecessary")
+        if page.responds(to: launch) { page.perform(launch) }
+        return page
+    }
+
+    /// Every page Nerda makes, a tab's or a spare: at the screen's rate,
+    /// run out of sight as Low Power Mode has it, and following the mode.
+    private static func newPage(_ configuration: WKWebViewConfiguration) -> SwipingWebView {
+        matchScreenRate(configuration.preferences)
+        applyHiddenPolicy(configuration.preferences)
+        _ = powerWatch
+        let page = SwipingWebView(frame: .zero, configuration: configuration)
+        pages.add(page)
+        return page
+    }
+
     /// The colour along the page's top edge: what the address bar touches,
     /// which sites' theme colours often aren't (GitHub's, YouTube's). None
     /// when the edge isn't one colour; then the page's theme colour, or its background.
@@ -687,6 +726,7 @@ final class Tab: Identifiable {
     /// `look`, the page's top (`snapshot`), stays for its hover card: some
     /// 100 KB, of the hundreds of MB let go.
     func sleep(keeping look: NSImage? = nil, discarding: Bool = false) {
+        if letGoHung() { return }
         guard discarding || !hasUnsavedWork else { return }
         guard let page else { return }
         stopReconnecting()
@@ -745,7 +785,8 @@ final class Tab: Identifiable {
         packedLook = nil
         let site = target ?? url
         madeFor = Extensions.host(of: site)
-        let page = makePage(site.flatMap(Extensions.configuration(for:)) ?? Self.configuration(dataStore))
+        let page = site.flatMap(Extensions.configuration(for:)).map { makePage($0) }
+            ?? makePage(Self.configuration(dataStore), spare: SparePages.take(for: dataStore))
         self.page = page
         if let slept { page.pageZoom = slept.zoom }
         if let state = slept?.state {
@@ -813,11 +854,23 @@ final class Tab: Identifiable {
         reconnecting = nil
     }
 
+    /// Back and Forward, a page that stopped answering ended first.
+    func goBack() {
+        letGoHung()
+        webView.goBack()
+    }
+
+    func goForward() {
+        letGoHung()
+        webView.goForward()
+    }
+
     /// Go Back from a page that couldn't be opened: to the page still under
     /// it, when a link from there failed, or else back in its history.
     var canLeaveFailure: Bool { failure != nil && (failedOverPage || canGoBack) }
 
     func leaveFailure() {
+        if letGoHung() { return goBack() }
         if failedOverPage { failure = nil } else { page?.goBack() }
     }
 
@@ -830,6 +883,7 @@ final class Tab: Identifiable {
     /// From origin, the page and what it loads are fetched anew, not taken
     /// from the cache.
     func reload(fromOrigin: Bool = false) {
+        if letGoHung() { _ = webView; return }
         stopReconnecting()
         if let failure {
             webView.load(.page(failure.url, cachePolicy: fromOrigin ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy))
@@ -915,6 +969,8 @@ final class Tab: Identifiable {
     /// For a closed tab: no more sound or video, and the camera and microphone off,
     /// for good. Suspended rather than paused, so the page can't start them again.
     func silence() {
+        // Its window closed, a page that stopped answering would spin on.
+        letGoHung()
         stopReconnecting()
         guard let page else { return }
         recoloring?.cancel()
@@ -1035,6 +1091,7 @@ final class Tab: Identifiable {
         controller.add(Fullscreen.messages, contentWorld: .defaultClient, name: "fullscreen")
         Passwords.install(in: controller)
         PageActivity.install(in: controller)
+        LastFrame.install(in: controller)
         if Extensions.available { WebStore.install(in: controller) }
         Selection.install(in: controller)
         Find.install(in: controller)
@@ -1145,13 +1202,59 @@ final class Tab: Identifiable {
     private static let pages = NSHashTable<WKWebView>.weakObjects()
 
     /// Low Power Mode turned on or off reaches the pages already open too,
-    /// not only those made from then on: WebKit takes it up as each is next
-    /// loaded (reloaded, or gone somewhere), rather than when it is woken.
-    private static let powerWatch = NotificationCenter.default.addObserver(
-        forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main
-    ) { _ in
-        MainActor.assumeIsolated {
-            for page in pages.allObjects { matchScreenRate(page.configuration.preferences) }
+    /// not only those made from then on. The frame rate WebKit takes up as
+    /// each is next loaded (reloaded, or gone somewhere), rather than when it
+    /// is woken; how a hidden page runs, at once (`reapplyHiddenPolicy`).
+    private static let powerWatch: Void = LowPowerMode.watch(pages) { _ in
+        let open = pages.allObjects
+        for page in open {
+            matchScreenRate(page.configuration.preferences)
+            applyHiddenPolicy(page.configuration.preferences)
+        }
+        reapplyHiddenPolicy(open)
+    }
+
+    /// How a page out of sight is run: it keeps running, where WebKit and
+    /// Safari suspend it, so coming back to it has nothing to wake (Yab
+    /// measured the slowest tenth of switches 128 → 66 ms), and chats,
+    /// dashboards and players carry on. Its timers are still slowed, and a
+    /// runaway page still ended (`prepared`). In Low Power Mode it is
+    /// suspended, as before. NERDA_HIDDEN_RUN=0 leaves WebKit's own, to time
+    /// switches with and without (`Speedups`).
+    static var hiddenPolicy: WKPreferences.InactiveSchedulingPolicy {
+        guard Speedups.isOn(.hiddenRun) else { return webKitsHiddenPolicy }
+        return LowPowerMode.isOn ? .suspend : .none
+    }
+
+    private static let webKitsHiddenPolicy = WKPreferences().inactiveSchedulingPolicy
+
+    /// Keeps a hidden page running, or suspends it, as `hiddenPolicy` says.
+    /// Each change of a preference is sent to every page's process, so only
+    /// a change is made.
+    private static func applyHiddenPolicy(_ preferences: WKPreferences) {
+        let policy = hiddenPolicy
+        if preferences.inactiveSchedulingPolicy != policy { preferences.inactiveSchedulingPolicy = policy }
+    }
+
+    /// WebKit reads how a hidden page runs only as a page joins its process
+    /// (macOS 27, and WebKit's source: `WebProcessProxy::addExistingWebPage`):
+    /// changed later, a page already open kept what it began with. So each
+    /// process with pages gets one more, made in it and let go at once, and
+    /// reads it again from the pages it has; measured, a hidden page then
+    /// stops within seconds, or runs again.
+    // WebKit SPI: should it go, a page open follows the mode once it is next
+    // made (woken) or moves to another site's process.
+    private static func reapplyHiddenPolicy(_ open: [WKWebView]) {
+        let related = NSSelectorFromString("_setRelatedWebView:")
+        var reached = Set<pid_t>()
+        for page in open {
+            // No process (ended, or none started yet): one starts with the mode as it is.
+            guard let pid = Processes.pid(of: page), reached.insert(pid).inserted else { continue }
+            let configuration = page.configuration
+            guard configuration.responds(to: related) else { return }
+            configuration.perform(related, with: page)
+            configuration.webExtensionController = nil
+            _ = WKWebView(frame: .zero, configuration: configuration)
         }
     }
 
@@ -1286,6 +1389,7 @@ struct PageView: NSViewRepresentable {
             slot.stage.resized = { [weak selected] in selected?.resize(width: $0.width, height: $0.height) }
             if slot.isHidden { slot.isHidden = false }
             if page.isHidden { page.isHidden = false }
+            if arriving { slot.lastFrame.arrive(page, on: slot.stage, in: slot) }
             guard arriving, takesFocus, !keepsKeyboard else { continue }
             if let window, focused != nil {
                 window.makeFirstResponder(page)
@@ -1298,6 +1402,7 @@ struct PageView: NSViewRepresentable {
         // With no page on screen (a new tab, the settings), the keyboard
         // leaves the one hidden behind: Space would pause its video unseen.
         if shown == nil, focused != nil { window?.makeFirstResponder(nil) }
+        for slot in slots where slot.page !== shown && !slot.isHidden { slot.lastFrame.leave(slot.page, on: slot.stage) }
         for page in pages where page !== shown && !page.isHidden { page.isHidden = true }
         for slot in slots where slot.page !== shown && !slot.isHidden { slot.isHidden = true }
     }
@@ -1305,9 +1410,11 @@ struct PageView: NSViewRepresentable {
 
 /// A page's place in the card: its stage, and WebKit's inspector when docked
 /// under it, which WebKit puts here, beside the stage. They hide together.
-private final class PageSlot: NSView {
+/// Its last frame stands over the page as it comes back (LastFrame.swift).
+final class PageSlot: NSView {
     let page: WKWebView
     let stage = PageStage()
+    let lastFrame = LastFrame()
 
     init(_ page: WKWebView, frame: CGRect) {
         self.page = page

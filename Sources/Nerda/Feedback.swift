@@ -13,7 +13,10 @@ import SwiftUI
 /// The crash comes from MetricKit, which hands its report over the next time
 /// Nerda opens: why it stopped, and the calls it was in, as places in each
 /// binary. `./symbolicate.sh` turns Nerda's into function names with the
-/// release's Nerda.dSYM.zip (release.sh).
+/// release's Nerda.dSYM.zip (release.sh). MetricKit's reports of Nerda's
+/// main thread hanging, which macOS gathers over a day, are kept the same
+/// way, and go with a report with the launches' moments and the tab
+/// timings and stalls Nerda recorded (`diagnostics`).
 @Observable
 final class Feedback: NSObject, MXMetricManagerSubscriber {
     static let shared = Feedback()
@@ -24,10 +27,28 @@ final class Feedback: NSObject, MXMetricManagerSubscriber {
     private(set) var crash = UserDefaults.standard.string(forKey: crashKey)
     private static let crashKey = "feedback.crash"
 
-    /// At launch, before MetricKit hands over what it has kept.
-    func start() { MXMetricManager.shared.add(self) }
+    /// MetricKit's latest reports of the main thread hanging, newest first,
+    /// kept for the next report.
+    private(set) var hangs = UserDefaults.standard.stringArray(forKey: hangsKey) ?? []
+    private static let hangsKey = "feedback.hangs"
+    /// Hangs a report carries: macOS tells of a day's at a time.
+    nonisolated static let hangsKept = 3
+
+    /// At launch, before MetricKit hands over what it has kept. The hangs
+    /// it handed over before Nerda kept them are read off the main thread.
+    func start() {
+        MXMetricManager.shared.add(self)
+        Task { keep(hangs: await Self.pastHangs()) }
+    }
+
+    @concurrent
+    private nonisolated static func pastHangs() async -> [String] {
+        hangs(in: MXMetricManager.shared.pastDiagnosticPayloads)
+    }
 
     nonisolated func didReceive(_ payloads: [MXDiagnosticPayload]) {
+        let hangs = Self.hangs(in: payloads)
+        if !hangs.isEmpty { Task { @MainActor in Feedback.shared.keep(hangs: hangs) } }
         let crashes = payloads.flatMap { payload in
             (payload.crashDiagnostics ?? []).map { (payload.timeStampEnd, $0) }
         }
@@ -55,6 +76,7 @@ final class Feedback: NSObject, MXMetricManagerSubscriber {
 
             ---
             \(Self.system)
+            \(Self.diagnostics.isEmpty ? "" : "\n" + Self.diagnostics)
             \(report.map { "\n" + $0 } ?? "")
             """) { if report != nil { self.dismissCrash() } }
     }
@@ -82,7 +104,95 @@ final class Feedback: NSObject, MXMetricManagerSubscriber {
 
             ---
             \(crash)
+            \(Self.diagnostics.isEmpty ? "" : "\n" + Self.diagnostics)
             """) { self.dismissCrash() }
+    }
+
+    private func keep(hangs new: [String]) {
+        let kept = Self.keeping(new, in: hangs)
+        guard kept != hangs else { return }
+        hangs = kept
+        UserDefaults.standard.set(kept, forKey: Self.hangsKey)
+    }
+
+    /// `new`, oldest first, put before those `kept`, newest first: the
+    /// latest few, each once, as MetricKit may hand one over twice.
+    nonisolated static func keeping(_ new: [String], in kept: [String]) -> [String] {
+        var kept = kept
+        for hang in new {
+            kept.removeAll { $0 == hang }
+            kept.insert(hang, at: 0)
+        }
+        return Array(kept.prefix(hangsKept))
+    }
+
+    /// The most a report's diagnostics take: the report travels in an
+    /// address, with the rest of the report.
+    nonisolated static let diagnosticsLimit = 4096
+
+    /// The most of the watchdog's log a report takes, so the stalls leave
+    /// room for the launches and hangs after them.
+    nonisolated static let stallsLimit = 1536
+
+    /// What Nerda measured, under the system line of a report.
+    static var diagnostics: String {
+        diagnostics(tabs: Recorder.shared.report, stalls: Watchdog.recent(stallsLimit),
+                    launch: Launch.report, hangs: Feedback.shared.hangs)
+    }
+
+    /// The parts, the most useful first: the last minutes' tab timings and
+    /// hitches (Recorder), where the window stalled (Watchdog's log, newest
+    /// last), the last launches' moments, and the hangs macOS reported,
+    /// newest first. At most `diagnosticsLimit` in all, cut from the end.
+    nonisolated static func diagnostics(tabs: String, stalls: String?, launch: String, hangs: [String]) -> String {
+        let stalls = stalls.map { "Stalls:\n```\n" + ($0.hasSuffix("\n") ? $0 : $0 + "\n") + "```" } ?? ""
+        let hangs = hangs.isEmpty ? [] : ["Hangs macOS reported, newest first:"] + hangs
+        return capped(([tabs, stalls, launch] + hangs).filter { !$0.isEmpty }.joined(separator: "\n\n"), to: diagnosticsLimit)
+    }
+
+    /// `text` cut between lines to fit `limit` bytes, with a code block
+    /// left open closed.
+    nonisolated static func capped(_ text: String, to limit: Int) -> String {
+        guard text.utf8.count > limit else { return text }
+        let fence = "```", closing = 1 + fence.utf8.count
+        var kept: [Substring] = [], size = 0, open = false
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let opens = line.hasPrefix(fence) ? !open : open
+            let cost = (kept.isEmpty ? 0 : 1) + line.utf8.count
+            guard size + cost + (opens ? closing : 0) <= limit else { break }
+            kept.append(line)
+            size += cost
+            open = opens
+        }
+        if open { kept.append(Substring(fence)) }
+        return kept.joined(separator: "\n")
+    }
+
+    nonisolated static func hangs(in payloads: [MXDiagnosticPayload]) -> [String] {
+        payloads.sorted { $0.timeStampEnd < $1.timeStampEnd }.flatMap { payload in
+            (payload.hangDiagnostics ?? []).map { hang in
+                describeHang(seconds: hang.hangDuration.converted(to: .seconds).value,
+                             build: hang.metaData.applicationBuildVersion, os: hang.metaData.osVersion,
+                             on: payload.timeStampEnd, tree: hang.callStackTree.jsonRepresentation())
+            }
+        }
+    }
+
+    /// A hang as `./symbolicate.sh` reads a crash: how long, and the main
+    /// thread's calls, innermost first, fewer than a crash's so that a few
+    /// fit in a report.
+    nonisolated static func describeHang(seconds: Double, build: String, os: String, on day: Date? = nil, tree: Data) -> String {
+        let calls = Array(calls(in: tree).prefix(16))
+        let names = ["Nerda", Bundle.main.executableURL?.lastPathComponent]
+        let binary = calls.first { names.contains($0.binary) }?.uuid ?? "unknown"
+        let when = day.map { " · " + $0.formatted(.iso8601.year().month().day()) } ?? ""
+        return """
+            Hang \(String(format: "%.1f", seconds)) s\(when) · build \(build) · \(os)
+            ```
+            \(lines(calls).joined(separator: "\n"))
+            ```
+            Nerda binary \(binary)
+            """
     }
 
     func dismissCrash() {

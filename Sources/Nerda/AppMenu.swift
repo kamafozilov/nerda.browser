@@ -431,8 +431,8 @@ final class AppMenu: NSObject {
     @objc private func showOriginal() { browser.selected?.showOriginal() }
     @objc private func reload() { browser.selected?.reload() }
     @objc private func hardReload() { browser.selected?.reload(fromOrigin: true) }
-    @objc private func goBack() { browser.selected?.webView.goBack() }
-    @objc private func goForward() { browser.selected?.webView.goForward() }
+    @objc private func goBack() { browser.selected?.goBack() }
+    @objc private func goForward() { browser.selected?.goForward() }
     @objc private func zoom(_ sender: NSMenuItem) { browser.selected?.zoom(sender.tag) }
     @objc private func selectTab(_ sender: NSMenuItem) { browser.selectTab(number: sender.tag) }
     @objc private func nextTab() { browser.selectTab(after: 1) }
@@ -757,13 +757,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         self.browser = browser
     }
 
+    /// Only the regular window's delegate is the app's, and hears this.
+    func applicationDidFinishLaunching(_ notification: Notification) { Launch.mark("launched") }
+
     /// An incognito window's closing lets go of it, and with the last one,
     /// of all it held (see `Windows`), as a secondary one's does. A profile's
     /// stays closed at the next launch.
     func windowWillClose(_ notification: Notification) {
         if browser.isSecondary { return Windows.closedSecondary(self) }
         browser.closeAll()
-        if browser.isPrivate { Windows.closed(self) } else { Windows.mark(browser.profile, open: false) }
+        if browser.isPrivate { Windows.closed(self) } else {
+            Windows.mark(browser.profile, open: false)
+            Windows.letSpareGo(of: browser.profile, closing: window)
+        }
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

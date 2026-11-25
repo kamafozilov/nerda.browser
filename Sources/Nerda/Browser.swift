@@ -1,3 +1,4 @@
+import os
 import SecurityInterface
 import SwiftUI
 @preconcurrency import Translation
@@ -30,10 +31,12 @@ final class Browser: NSObject {
     var selectedID: Tab.ID? {
         didSet {
             if selected?.id != selectedID { findSelected() }
+            if selectedID != oldValue, oldValue != nil { recorder.begin(.tabSwitch) }
             if let left = tabs.first(where: { $0.id == oldValue }) {
                 left.lastSeen = .now
                 left.pageMoved()
             }
+            if selectedID != oldValue { selected?.switchCount += 1 }
             if let selected {
                 recent.removeAll { $0 === selected }
                 recent.append(selected)
@@ -80,6 +83,9 @@ final class Browser: NSObject {
     }
     /// Where this window's downloads go instead of `Downloads.folder` (tests).
     @ObservationIgnored var downloadFolder: URL?
+    /// Where this window's tab operations are timed: the app's one record,
+    /// or a test's own.
+    @ObservationIgnored var recorder = Recorder.shared
     var recentlyClosed: [Session.ClosedTab] = []
     @ObservationIgnored private var closing: Set<Tab.ID> = []
     /// A tab put on screen from the keyboard in the sidebar's list (the
@@ -133,10 +139,21 @@ final class Browser: NSObject {
     /// again in a second or two.
     static let heavyAfter: TimeInterval = 10 * 60
     static let heavy: UInt64 = 500 << 20
+    /// A tab gone to more than this many times is one you keep coming back
+    /// to (a mail, a chat): the idle timer leaves it awake, as Chrome's
+    /// Memory Saver does.
+    static let revisited = 15
     /// Between one pinned tab loading at launch and the next (Session).
     static let pinLoadGap: Duration = .milliseconds(500)
-    @ObservationIgnored private var sleepTimer: Timer?
-    @ObservationIgnored private var memoryPressure: (any DispatchSourceMemoryPressure)?
+    /// Pages' processes ending, in every window, to tell a page that keeps
+    /// crashing (PageEnds.swift). Tests give a browser its own.
+    @ObservationIgnored var pageEnds = PageEnds.shared
+    /// The launch whose first page this window's may be. Tests give a
+    /// browser one of its own.
+    @ObservationIgnored var launch = Launch.current
+    /// Every window's browser, incognito ones too, while it lives.
+    private static let living = NSHashTable<Browser>.weakObjects()
+    static var all: [Browser] { living.allObjects }
     /// The address last loaded again for a redirect WebKit lost, so it is only tried once.
     @ObservationIgnored private var retried: URL?
     /// The sites left to http this session; an incognito window's its own.
@@ -202,14 +219,9 @@ final class Browser: NSObject {
         vault = profile.vault
         bookmarks = profile.bookmarks
         super.init()
-        // Checked each minute, loosely, so the system can fold it in with other wake-ups.
-        sleepTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                if let after = TabSleep.current.interval { self?.sleepIdleTabs(unseenFor: after) }
-                self?.sleepIdleTabs(unseenFor: Self.heavyAfter, pinsToo: true, over: Self.heavy)
-            }
-        }
-        sleepTimer?.tolerance = 15
+        Self.living.add(self)
+        // Its tabs sleep by the rules for every window (SleepCoordinator).
+        SleepCoordinator.shared.register(self)
         // What changes without telling (the page on screen scrolled, a page
         // changing its own address) is saved every few seconds, and only if it
         // did change. Not while another app is in front: it was saved as Nerda
@@ -218,33 +230,23 @@ final class Browser: NSObject {
             MainActor.assumeIsolated { if NSApp?.isActive == true { self?.saveSession(waiting: false) } }
         }
         sessionTimer?.tolerance = 3
-        // When the Mac runs short of memory, every tab out of sight sleeps at
-        // once; when it runs out, as in Safari, pinned ones too.
-        memoryPressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
-        memoryPressure?.setEventHandler { [weak self] in
-            MainActor.assumeIsolated {
-                let critical = self?.memoryPressure?.data.contains(.critical) == true
-                // No picture for the hover card: it takes memory there is none of.
-                self?.sleepIdleTabs(unseenFor: 0, pinsToo: critical, picturing: false)
-            }
-        }
-        memoryPressure?.activate()
     }
 
     /// An incognito window's browser goes with its window.
     isolated deinit {
-        sleepTimer?.invalidate()
         sessionTimer?.invalidate()
-        memoryPressure?.cancel()
     }
 
     /// Tabs out of sight at least this long, and not busy (playing, on a call),
     /// sleep; of those, only the ones taking more than `size`, if given.
     /// Pinned ones only with `pinsToo`: being always ready is what they are for.
-    func sleepIdleTabs(unseenFor age: TimeInterval, pinsToo: Bool = false, over size: UInt64 = 0, picturing: Bool = true) {
+    /// With `sparingRevisited`, not one gone to more than `revisited` times.
+    func sleepIdleTabs(unseenFor age: TimeInterval, pinsToo: Bool = false, over size: UInt64 = 0,
+                       picturing: Bool = true, sparingRevisited: Bool = false) {
         let cutoff = Date.now.addingTimeInterval(-age)
         for tab in tabs where tab.id != selectedID && (pinsToo || !tab.isPinned) && !tab.isAsleep
-            && tab.lastSeen <= cutoff && (size == 0 || (tab.memory ?? 0) > size) {
+            && tab.lastSeen <= cutoff && (size == 0 || (tab.memory ?? 0) > size)
+            && !(sparingRevisited && tab.switchCount > Self.revisited) {
             Task {
                 // Asked of the page, so it may have come on screen in the meantime.
                 guard await !tab.isBusy(), tab.id != selectedID else { return }
@@ -297,6 +299,7 @@ final class Browser: NSObject {
     /// first, under the sidebar's New Tab, or across the top, newest `last`,
     /// by its + button.
     func add(_ tab: Tab, inBackground: Bool = false, last: Bool = TabStyle.current == .horizontal) {
+        recorder.begin(.tabOpen)
         tab.dataStore = dataStore
         tab.delegate = self
         tabs.insert(tab, at: tab.isPinned ? 0 : last ? tabs.count : pinnedCount)
@@ -381,6 +384,7 @@ final class Browser: NSObject {
     func close(_ id: Tab.ID, discarding: Bool = false) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let tab = tabs[index]
+        tab.letGoHung()
         if tab.hasUnsavedWork, !discarding {
             guard let page = tab.page, closing.insert(id).inserted else { return }
             // The question waits for its tab to be on screen (`ask`), as
@@ -392,6 +396,7 @@ final class Browser: NSObject {
             }
             return
         }
+        recorder.begin(.tabClose)
         if !isPrivate, let saved = tab.saved, saved.url != nil {
             recentlyClosed.append(Session.ClosedTab(tab: saved, index: index))
             recentlyClosed = Array(recentlyClosed.suffix(25))
@@ -837,6 +842,9 @@ extension Browser: WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  preferences: WKWebpagePreferences) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
         preferences.allowsContentJavaScript = tab(for: webView)?.javaScriptOff != true
+        if action.navigationType == .backForward, action.targetFrame?.isMainFrame ?? true, let tab = tab(for: webView) {
+            recorder.stepped(tab)
+        }
         if action.targetFrame?.isMainFrame ?? true {
             siteSettings.applyBlocking(to: preferences, for: action.request.url)
             if HTTPSUpgrade.isOn, let url = action.request.url, httpsUpgrade.applies(to: url) {
@@ -1100,7 +1108,21 @@ extension Browser: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        tab(for: webView)?.loading = (navigation, webView.url)
+        guard let tab = tab(for: webView) else { return }
+        tab.loading = (navigation, webView.url)
+        recorder.loading(tab, onScreen: tab.id == selectedID)
+    }
+
+    /// The page drew its first text or picture, for the record. WebKit SPI
+    /// (`WKNavigationDelegatePrivate`), told to a delegate that has it:
+    /// should it go, first paints go untimed, and Back and Forward are timed
+    /// to the page loaded.
+    @objc(_webView:renderingProgressDidChange:)
+    func webView(_ webView: WKWebView, renderingProgressDidChange events: UInt) {
+        guard events & Recorder.paintEvents != 0, let tab = tab(for: webView) else { return }
+        recorder.painted(tab, onScreen: tab.id == selectedID)
+        // The launch's first page: drawn, on screen.
+        if tab.id == selectedID { launch.mark("page") }
     }
 
     /// A server sending a tab with no page yet on to an extension's page
@@ -1118,6 +1140,7 @@ extension Browser: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         tab(for: webView)?.pageDidLoad()
+        if let tab = tab(for: webView) { recorder.arrived(tab) }
         tab(for: webView)?.checkReadable()
         if let tab = tab(for: webView) {
             signInLanded(on: tab)
@@ -1129,6 +1152,7 @@ extension Browser: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         tab(for: webView)?.departureApproved = false
+        if let tab = tab(for: webView) { recorder.failed(tab) }
         show(error, in: webView, opening: navigation)
     }
 
@@ -1271,27 +1295,58 @@ extension Browser: WKNavigationDelegate {
                 && parts.allSatisfy { $0.allSatisfy { $0.isASCII && $0.isNumber } && UInt8($0) != nil })
     }
 
-    /// The page's process died (out of memory, or a WebKit bug): it would stay
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        pageEnded(webView, reason: nil)
+    }
+
+    /// The page's process ended, with why when WebKit said (PageEnds.swift):
+    /// out of memory, a WebKit bug, or Nerda ending a hung page. It would stay
     /// blank, so it is loaded again, as Safari does. One out of sight sleeps
     /// instead, and loads when it is next shown: reloading it now would only
-    /// add to the memory it may have died for. A page that dies again within
-    /// a minute would only keep reloading, and says so instead; ⌘R tries again.
-    /// So does a page that had something typed into it (`hasUnsavedWork`):
-    /// that went with the process, and a page loaded afresh in its place
-    /// would hide that it was lost.
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+    /// add to the memory it may have died for. A page that ends three times
+    /// in a minute would only keep reloading, and says so instead; ⌘R tries
+    /// again. Pages that end within a tenth of a second of each other went
+    /// for something they share, and none of them counts. A page that had
+    /// something typed into it (`hasUnsavedWork`) says so at once: that went
+    /// with the process, and a page loaded afresh in its place would hide
+    /// that it was lost.
+    func pageEnded(_ webView: WKWebView, reason: PageEnd?) {
         guard let tab = tab(for: webView) else { return }
         if fullscreenTab == tab.id { fullscreenTab = nil }
-        let again = tab.crashed.map { Date.now.timeIntervalSince($0) < 60 } ?? false
-        tab.crashed = .now
+        tab.ended = reason
+        Logger.pages.notice("A page's process ended: \(reason?.word ?? "no reason given", privacy: .public)")
+        // Ended by Nerda itself, for not answering: loaded again, or asleep
+        // out of sight, and not counted.
+        if tab.endingOnPurpose {
+            tab.endingOnPurpose = false
+            return recover(tab)
+        }
         let edited = tab.hasUnsavedWork
         // Nothing is left to protect: closing or quitting needn't ask.
         tab.hasUnsavedWork = false
-        if again || edited, let url = webView.url ?? tab.site {
-            tab.failure = Tab.Failure(url: url, message: again ? "The page crashed each time it was opened."
-                                                               : "The page crashed. Changes you made in it may not have been saved.")
-        } else if tab.id == selectedID {
-            webView.reload()
+        if edited, let url = webView.url ?? tab.site {
+            tab.failure = Tab.Failure(url: url, message: "The page crashed. Changes you made in it may not have been saved.")
+        }
+        pageEnds.ended(PageEnds.Ended(browser: self, tab: tab, id: tab.id, reason: reason, edited: edited))
+    }
+
+    /// This window's pages that ended in one moment, a tenth of a second on.
+    func pagesEnded(_ batch: [(end: PageEnds.Ended, again: Bool)]) {
+        for (end, again) in batch {
+            guard let tab = end.tab, tabs.contains(where: { $0 === tab }), !tab.isAsleep, !end.edited else { continue }
+            if again, let url = tab.page?.url ?? tab.site {
+                tab.failure = Tab.Failure(url: url, message: (end.reason ?? .crash).again)
+            } else {
+                recover(tab)
+            }
+        }
+    }
+
+    /// A page whose process ended, back: at once on screen, when next shown
+    /// out of sight.
+    private func recover(_ tab: Tab) {
+        if tab.id == selectedID {
+            tab.page?.reload()
         } else {
             tab.sleep()
         }
