@@ -210,6 +210,44 @@ struct AgentAwakeTests {
         #expect(color(full.image, full.image.pixelsWide * 3 / 4, full.image.pixelsHigh / 2) == "blue")
     }
 
+    /// A screenshot shows secret fields masked, as the outline does: a card
+    /// number typed in a plain text box, or a password a page shows as
+    /// text, is drawn as dots in the picture, whatever its digits; other
+    /// boxes as they are. The page's own style is back after.
+    @Test func aScreenshotMasksSecretFields() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        let url = try await harness.pages.serve("/pay", """
+            <title>Pay</title>
+            <style>input { font: 40px monospace; width: 900px; display: block; margin: 20px; }</style>
+            <input id=card name=cardnumber value="4111111111111111">
+            <input id=shown aria-label=Password value="hunter2hunter2">
+            <input id=name name=fullname value="Jane Example">
+            """)
+        let agent = try await harness.agent()
+        #expect(try await agent.call("open", ["url": AgentJSON(url)]).isError == false)
+        let page = try #require(harness.agents?.tabs.first?.page)
+        func set(_ id: String, _ value: String) async throws {
+            _ = try await page.callAsyncJavaScript("document.getElementById(id).value = value",
+                                                   arguments: ["id": id, "value": value], contentWorld: .page)
+        }
+
+        let first = try await shot(agent, ["tab": "t1"]).image
+        try await set("card", "5555555555554444")
+        try await set("shown", "swordfish12345")
+        let secretsChanged = try await shot(agent, ["tab": "t1"]).image
+        try await set("name", "John Other")
+        let nameChanged = try await shot(agent, ["tab": "t1"]).image
+
+        #expect(first.representation(using: .png, properties: [:]) == secretsChanged.representation(using: .png, properties: [:]),
+                "the secret fields' characters show in the picture")
+        #expect(secretsChanged.representation(using: .png, properties: [:]) != nameChanged.representation(using: .png, properties: [:]),
+                "a plain box's change shows")
+        let style = try await page.callAsyncJavaScript(
+            "return getComputedStyle(document.getElementById('card')).webkitTextSecurity", contentWorld: .page) as? String
+        #expect(style == "none")
+    }
+
     /// A point in the screenshot is where the click lands: on the element
     /// drawn there, as a person's click.
     @Test func aClickAtAPointOfTheScreenshotLandsOnWhatIsThere() async throws {

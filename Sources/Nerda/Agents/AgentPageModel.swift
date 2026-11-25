@@ -285,6 +285,16 @@ extension AgentPage {
         return try JSONDecoder().decode(Answer.self, from: Data(json.utf8))
     }
 
+    /// Draws every secret field holding something as dots (`masking`),
+    /// in each frame of the page, or puts them back: what a screenshot
+    /// shows then keeps them as the outline does.
+    static func maskSecrets(on page: WKWebView, _ masking: Bool) async {
+        let frames: [WKFrameInfo?] = await frames(of: page)?.all.map(\.info) ?? [nil]
+        for frame in frames {
+            let _: Int? = try? await call(masking ? "mask" : "unmask", in: frame, on: page)
+        }
+    }
+
     /// The page's frames, through WebKit's frame tree; nil without it.
     static func frames(of page: WKWebView) async -> AgentFrame? {
         // WebKit SPI: should `_frames:` go, frames from other sites are named
