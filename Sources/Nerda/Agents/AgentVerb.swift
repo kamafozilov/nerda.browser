@@ -40,6 +40,7 @@ nonisolated struct AgentVerb: Sendable {
         readingVerbs, // ReadingVerbs.swift
         lookupVerbs, // LookupVerbs.swift
         ownerVerbs, // OwnerVerbs.swift
+        signInVerbs, // SignInVerbs.swift
     ].flatMap(\.self)
 
     static let named = Dictionary(uniqueKeysWithValues: all.map { ($0.name, $0) })

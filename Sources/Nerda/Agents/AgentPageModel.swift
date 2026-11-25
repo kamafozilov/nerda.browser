@@ -276,8 +276,8 @@ extension AgentPage {
         return try JSONDecoder().decode(Answer.self, from: Data(json.utf8))
     }
 
-    /// The page's frames, through WebKit's frame tree.
-    private static func frames(of page: WKWebView) async -> AgentFrame? {
+    /// The page's frames, through WebKit's frame tree; nil without it.
+    static func frames(of page: WKWebView) async -> AgentFrame? {
         // WebKit SPI: should `_frames:` go, frames from other sites are named
         // in the outline but not read; the page's own frames still are.
         let selector = NSSelectorFromString("_frames:")

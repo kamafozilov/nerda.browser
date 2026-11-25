@@ -226,8 +226,9 @@ enum Passwords {
         set { UserDefaults.standard.set(newValue.sorted(), forKey: "passwordsNeverSaved") }
     }
 
-    /// The rest, sent for by `starter`, once a document.
-    private static let source = #"""
+    /// The rest, sent for by `starter`, once a document; an agent's
+    /// `sign_in` runs it itself in a frame that hasn't sent for it yet.
+    static let source = #"""
         (() => {
             if (window.nerdaFill) return;
             const early = window.nerdaPasswordsEarly;
@@ -437,12 +438,19 @@ enum Passwords {
                 box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertReplacementText' }));
                 box.dispatchEvent(new Event('change', { bubbles: true }));
             };
-            // Into the boxes the caret was in, and only on the site it was picked
+            // A name box asked for alone, on a page with no password box yet.
+            const nameAsked = () => [...document.querySelectorAll('input')].find(nameAlone) ?? null;
+            // What the page's sign-in asks for, with no box picked, for an
+            // agent's sign_in: 'password' (with its name or not), 'name'
+            // when the name comes first on its own, else null.
+            window.nerdaSignInAsks = () => passwords().length ? 'password' : nameAsked() ? 'name' : null;
+            // Into the boxes the caret was in, else the page's first password
+            // box or name asked for alone, and only on the site it was picked
             // for, over https if it was listed for a page over https.
             window.nerdaFill = (user, password, site, secure) => {
                 if (location.hostname.toLowerCase().replace(/^www\./, '') !== site) return false;
                 if (secure && location.protocol !== 'https:') return false;
-                const box = field?.isConnected ? field : passwords()[0];
+                const box = field?.isConnected ? field : passwords()[0] ?? nameAsked();
                 if (!box) return false;
                 const passwordBox = box.type === 'password' ? box : passwordFor(box);
                 const nameBox = box.type === 'password' ? nameFor(box) : box;
