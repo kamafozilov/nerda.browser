@@ -18,6 +18,13 @@ final class AgentSession: Identifiable {
     /// Requests of its being done now: while there are any, it is at work,
     /// however long one takes.
     @ObservationIgnored fileprivate(set) var working = 0
+    /// The owner stopped it (`AgentSessions.stop`). Its agent is told so
+    /// once, after which its name starts a session afresh.
+    fileprivate(set) var stop: Stop?
+
+    enum Stop { case untold, told }
+
+    var isStopped: Bool { stop != nil }
 
     var id: AgentSessionName { name }
 
@@ -72,8 +79,10 @@ final class AgentSessions {
     }
 
     /// The session of that name, made on its first request.
+    /// A stopped session whose agent was told is done with: the name makes
+    /// another.
     func session(_ name: AgentSessionName) -> AgentSession {
-        if let session = all.first(where: { $0.name == name }) { return session }
+        if let session = all.first(where: { $0.name == name && $0.stop != .told }) { return session }
         let session = AgentSession(name: name, at: now())
         all.append(session)
         return session
@@ -98,7 +107,18 @@ final class AgentSessions {
     /// Its agent went away. No use of its tabs: their 15 minutes still count
     /// from the last request. A session never seen stays unmade.
     func detach(_ name: AgentSessionName) {
-        all.first { $0.name == name }?.isDetached = true
+        all.first { $0.name == name && $0.stop != .told }?.isDetached = true
+    }
+
+    /// The owner stopped the session: what its agent asks for next is
+    /// answered so (`AgentServer`), its tabs left as they are.
+    func stop(_ session: AgentSession) {
+        if session.stop == nil { session.stop = .untold }
+    }
+
+    /// The stopped session's agent was told: its next request starts anew.
+    func told(_ session: AgentSession) {
+        if session.isStopped { session.stop = .told }
     }
 
     /// Makes `tab` one of the session's Agent tabs, named.

@@ -53,6 +53,8 @@ final class Browser: NSObject {
             if selectedID != oldValue, Extensions.started { Extensions.shared.activated(self, from: oldValue) }
             // Its page may be the one to translate now.
             if selectedID != oldValue { translator.nudge() }
+            // Back on a tab of the owner's, an Agent tab watched goes back.
+            if selectedID != oldValue { watched = nil }
             sessionChanged()
         }
     }
@@ -172,6 +174,23 @@ final class Browser: NSObject {
     @ObservationIgnored private var sessionTimer: Timer?
     /// The window it is shown in, which closing its last tab closes; none in tests.
     @ObservationIgnored weak var window: NSWindow?
+
+    /// An Agent tab the owner watches in this window (from the Agent row),
+    /// shown over the selected tab until they go back to one of theirs. It
+    /// stays its Agent's: in its Agent browser's list, not this one's.
+    var watched: AgentTab? {
+        didSet {
+            guard oldValue?.tab !== watched?.tab else { return }
+            if let oldValue { oldValue.agents.watched.remove(oldValue.tab.id) }
+            if let watched { watched.agents.watched.insert(watched.tab.id) }
+        }
+    }
+
+    /// The Agent tab watched here, while it is open.
+    var watchedTab: Tab? {
+        guard let watched, watched.agents.tabs.contains(where: { $0 === watched.tab }) else { return nil }
+        return watched.tab
+    }
 
     /// The tab on screen, kept rather than looked up: what shows it then
     /// draws again when it changes, not on every change to the list, as
@@ -331,6 +350,7 @@ final class Browser: NSObject {
 
     /// The tab on screen, at once: a press and the click it ends in both ask.
     func select(_ id: Tab.ID) {
+        watched = nil
         if selectedID != id { selectedID = id }
     }
 

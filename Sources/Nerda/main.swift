@@ -412,8 +412,9 @@ private struct PageCard: View {
                     ZStack {
                         PageView(
                             tabs: browser.tabs,
-                            // Locked, no page shows, nor can be read out from under the lock.
-                            selected: browser.locked ? nil : browser.selected,
+                            // Locked, no page shows, nor can be read out from
+                            // under the lock; nor under an Agent tab watched.
+                            selected: browser.locked || browser.watchedTab != nil ? nil : browser.selected,
                             takesFocus: !browser.commandBarOpen
                         )
                         if let reader = browser.selected?.reader, !browser.locked {
@@ -470,6 +471,9 @@ private struct PageCard: View {
                     .background(Palette.ground)
                     .transition(.identity)
             }
+            if let watched = browser.watched, browser.watchedTab != nil, !browser.locked {
+                WatchedAgentTab(browser: browser, watched: watched)
+            }
         }
         // Another tab comes as it is, at once: a new tab's field and picture,
         // opened with the sidebar's slide, would otherwise slide into place too.
@@ -504,7 +508,8 @@ private struct PageCard: View {
         }
         .overlay(alignment: .bottom) {
             // An Agent tab shown here whose Agent waits on the owner.
-            if let tab = browser.selected, let request = AgentServer.shared.owner.handoff(on: tab), !browser.locked {
+            if let tab = browser.watchedTab ?? browser.selected, let request = AgentServer.shared.owner.handoff(on: tab),
+               !browser.locked {
                 HandoffBar(request: request, owner: AgentServer.shared.owner)
                     .padding(.bottom, 12)
                     .transition(Motion.moving(.opacity.combined(with: .move(edge: .bottom))))

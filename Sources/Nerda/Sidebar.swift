@@ -3,8 +3,9 @@ import SwiftUI
 /// The column down the left, on glass: pinned sites as tiles at the top, the
 /// bookmarks under them, then the tabs, newest first, under the button that
 /// opens another, and along the bottom, a newer Nerda when there is one
-/// (UpdateCard), the app's menu, AI chats and downloads. Pinned
-/// beside the page, or, while collapsed, brought out over it from the window's
+/// (UpdateCard), the agents at work (AgentRow), the app's menu, AI chats
+/// and downloads. Pinned beside the page, or, while collapsed, brought out
+/// over it from the window's
 /// edge. Tabs and tiles are dragged into another order; a tab dragged onto the
 /// tiles is pinned, a tile dragged down among the tabs unpinned. Either
 /// dragged onto the bookmarks is kept there; a bookmark dragged down among
@@ -261,6 +262,9 @@ struct Sidebar: View {
                     .padding(.top, 6)
                     .transition(Motion.moving(.move(edge: .bottom).combined(with: .opacity)))
             }
+
+            // Which agents are at work, or need the owner (AgentRow.swift).
+            AgentRow(browser: browser)
 
             HStack {
                 SidebarMenuButton(shown: $menuShown, incognito: browser.isPrivate, profile: browser.markedProfile)

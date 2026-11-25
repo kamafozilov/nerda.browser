@@ -93,6 +93,9 @@ final class OwnerRequests {
     @ObservationIgnored private let notifier: AgentNotifier
     /// When a notification not yet answered is shown once more.
     @ObservationIgnored var repeatAfter: Duration = .seconds(180)
+    /// Shows a request's tab in the owner's window, as its notification is
+    /// clicked (`AgentServer.show`).
+    @ObservationIgnored var show: (OwnerRequest) -> Void = { _ in }
 
     init(notifier: AgentNotifier) { self.notifier = notifier }
 
@@ -154,7 +157,15 @@ final class OwnerRequests {
         } else {
             opened = request
             NSApp.activate()
+            show(request)
         }
+    }
+
+    /// The session was stopped: what it waits on the owner for goes, and no
+    /// later call hears of it.
+    func withdraw(_ session: AgentSession) {
+        for request in waiting where request.session === session { end(request, .closed) }
+        untold.removeAll { $0.session === session }
     }
 
     /// The request's answer once it comes, or nil if `wait` runs out first.
