@@ -149,6 +149,24 @@ struct HiddenStartTests {
         #expect(app.quits == 0)
     }
 
+    /// Opening Nerda from the Dock after closing its windows brings a
+    /// window back, though the Agent window is up, off screen: only the
+    /// owner's windows count as shown.
+    @Test func reopeningCountsOnlyTheOwnersWindows() {
+        let agents = AgentWindow()
+        defer { agents.close() }
+        #expect(agents.isVisible)
+        #expect(!Windows.ownerShowsOne(among: [agents]))
+
+        let owner = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled],
+                             backing: .buffered, defer: false)
+        owner.isReleasedWhenClosed = false
+        #expect(!Windows.ownerShowsOne(among: [agents, owner]), "a window closed or never shown")
+        owner.orderBack(nil)
+        defer { owner.close() }
+        #expect(Windows.ownerShowsOne(among: [agents, owner]))
+    }
+
     @Test func aHiddenStartWithAgentsTurnedOffQuitsAtOnce() async throws {
         let harness = try AgentHarness()
         defer { harness.close() }
