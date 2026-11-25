@@ -158,9 +158,9 @@ private func weigh(_ tab: Nerda.Tab, megabytes: Int) async throws {
     let (browser, hidden) = try await browser(hidden: 3)
     hidden[0].lastSeen = .now
     let coordinator = coordinator(for: browser)
-    Speedups.overrides["PRESSURE_POLICY"] = false
+    Speedups.overrides[.pressurePolicy] = false
     coordinator.pressure(.warning)
-    Speedups.overrides["PRESSURE_POLICY"] = nil
+    Speedups.overrides[.pressurePolicy] = nil
     try await waitFor("Hidden tabs asleep") { hidden.allSatisfy(\.isAsleep) }
     #expect(browser.selected?.isAsleep == false)
 }
@@ -177,9 +177,9 @@ private func weigh(_ tab: Nerda.Tab, megabytes: Int) async throws {
     }
     hidden[0].lastSeen = .now.addingTimeInterval(-5 * 60 * 60)
     let coordinator = coordinator(for: browser)
-    Speedups.overrides["PRESSURE_POLICY"] = false
+    Speedups.overrides[.pressurePolicy] = false
     coordinator.check()
-    Speedups.overrides["PRESSURE_POLICY"] = nil
+    Speedups.overrides[.pressurePolicy] = nil
     try await waitFor("Revisited tab asleep") { hidden[0].isAsleep }
 }
 

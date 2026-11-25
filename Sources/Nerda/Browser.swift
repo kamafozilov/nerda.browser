@@ -145,8 +145,15 @@ final class Browser: NSObject {
     static let revisited = 15
     /// Between one pinned tab loading at launch and the next (Session).
     static let pinLoadGap: Duration = .milliseconds(500)
-    /// Pages' processes ending, to tell a page that keeps crashing (PageEnds.swift).
-    @ObservationIgnored var pageEnds = PageEnds()
+    /// Pages' processes ending, in every window, to tell a page that keeps
+    /// crashing (PageEnds.swift). Tests give a browser its own.
+    @ObservationIgnored var pageEnds = PageEnds.shared
+    /// The launch whose first page this window's may be. Tests give a
+    /// browser one of its own.
+    @ObservationIgnored var launch = Launch.current
+    /// Every window's browser, incognito ones too, while it lives.
+    private static let living = NSHashTable<Browser>.weakObjects()
+    static var all: [Browser] { living.allObjects }
     /// The address last loaded again for a redirect WebKit lost, so it is only tried once.
     @ObservationIgnored private var retried: URL?
     /// The sites left to http this session; an incognito window's its own.
@@ -212,6 +219,7 @@ final class Browser: NSObject {
         vault = profile.vault
         bookmarks = profile.bookmarks
         super.init()
+        Self.living.add(self)
         // Its tabs sleep by the rules for every window (SleepCoordinator).
         SleepCoordinator.shared.register(self)
         // What changes without telling (the page on screen scrolled, a page
@@ -1113,6 +1121,8 @@ extension Browser: WKNavigationDelegate {
     func webView(_ webView: WKWebView, renderingProgressDidChange events: UInt) {
         guard events & Recorder.paintEvents != 0, let tab = tab(for: webView) else { return }
         recorder.painted(tab, onScreen: tab.id == selectedID)
+        // The launch's first page: drawn, on screen.
+        if tab.id == selectedID { launch.mark("page") }
     }
 
     /// A server sending a tab with no page yet on to an extension's page
@@ -1129,7 +1139,6 @@ extension Browser: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        Launch.mark("page")
         tab(for: webView)?.pageDidLoad()
         if let tab = tab(for: webView) { recorder.arrived(tab) }
         tab(for: webView)?.checkReadable()
@@ -1318,14 +1327,11 @@ extension Browser: WKNavigationDelegate {
         if edited, let url = webView.url ?? tab.site {
             tab.failure = Tab.Failure(url: url, message: "The page crashed. Changes you made in it may not have been saved.")
         }
-        if pageEnds.heard == nil {
-            pageEnds.heard = { [weak self] batch in self?.pagesEnded(batch) }
-        }
-        pageEnds.ended(PageEnds.Ended(tab: tab, id: tab.id, reason: reason, edited: edited))
+        pageEnds.ended(PageEnds.Ended(browser: self, tab: tab, id: tab.id, reason: reason, edited: edited))
     }
 
-    /// The pages that ended in one moment, a tenth of a second on.
-    private func pagesEnded(_ batch: [(end: PageEnds.Ended, again: Bool)]) {
+    /// This window's pages that ended in one moment, a tenth of a second on.
+    func pagesEnded(_ batch: [(end: PageEnds.Ended, again: Bool)]) {
         for (end, again) in batch {
             guard let tab = end.tab, tabs.contains(where: { $0 === tab }), !tab.isAsleep, !end.edited else { continue }
             if again, let url = tab.page?.url ?? tab.site {

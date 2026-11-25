@@ -35,12 +35,18 @@ enum PageEnd: Int {
     }
 }
 
-/// Pages ending, gathered for a tenth of a second. Pages that end together
-/// went for something they share (WebKit's GPU or network process, or
-/// memory running out for all of them), and none of them is a page that
-/// keeps crashing. One page alone, three times in a minute, is.
+/// Pages ending, gathered for a tenth of a second, in every window at once
+/// (`shared`). Pages that end together went for something they share
+/// (WebKit's GPU or network process, or memory running out for all of
+/// them), and none of them is a page that keeps crashing. One page alone,
+/// three times in a minute, is.
 final class PageEnds {
+    /// The app's: one moment for every window's pages. Tests make their own.
+    static let shared = PageEnds()
+
     struct Ended {
+        /// The window's browser the page ended in, told once the moment is over.
+        weak var browser: Browser?
         weak var tab: Tab?
         let id: Tab.ID
         let reason: PageEnd?
@@ -49,13 +55,12 @@ final class PageEnds {
         let edited: Bool
     }
 
+    /// Ends this close together are one shared cause.
     static let together: TimeInterval = 0.1
-    static let window: TimeInterval = 60
+    /// A page ending alone `limit` times within this many seconds keeps crashing.
+    static let countedOver: TimeInterval = 60
     static let limit = 3
 
-    /// Hears, once the moment is over, every page that ended in it, each with
-    /// whether it now keeps ending.
-    var heard: (([(end: Ended, again: Bool)]) -> Void)?
     private var pending: [Ended] = []
     private var ends: [Tab.ID: [TimeInterval]] = [:]
     private let clock: () -> TimeInterval
@@ -79,9 +84,14 @@ final class PageEnds {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(Self.together))
             guard let self else { return }
-            let batch = pending
+            let batch = settle(pending)
             pending = []
-            heard?(settle(batch))
+            // Each window hears its own pages, each with whether it now keeps ending.
+            var browsers: [Browser] = []
+            for case let browser? in batch.map(\.end.browser) where !browsers.contains(where: { $0 === browser }) {
+                browsers.append(browser)
+            }
+            for browser in browsers { browser.pagesEnded(batch.filter { $0.end.browser === browser }) }
         }
     }
 
@@ -92,7 +102,7 @@ final class PageEnds {
         let alone = batch.count == 1
         return batch.map { end in
             guard alone, end.reason != .requested else { return (end: end, again: false) }
-            let recent = (ends[end.id] ?? []).filter { now - $0 < Self.window } + [now]
+            let recent = (ends[end.id] ?? []).filter { now - $0 < Self.countedOver } + [now]
             ends[end.id] = recent
             return (end: end, again: recent.count >= Self.limit)
         }

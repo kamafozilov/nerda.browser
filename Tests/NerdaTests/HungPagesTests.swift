@@ -173,6 +173,46 @@ struct HungPagesTests {
         try await waitFor("The hung process ended") { Processes.started(old) == nil }
     }
 
+    /// A mouse's Back button goes the same way out as Back in the menu.
+    @Test func theMouseBackButtonLeavesAHungPageAtOnce() async throws {
+        let hung = try await HungTab(server: HangServer(), after: ["/a"])
+        defer { hung.close() }
+        try await waitFor(timeout: .seconds(15)) { hung.tab.isHung }
+        let old = try #require(hung.tab.pid)
+        let page = try #require(hung.tab.page)
+        let click = CGEvent(mouseEventSource: nil, mouseType: .otherMouseDown,
+                            mouseCursorPosition: CGPoint(x: 10, y: 10), mouseButton: CGMouseButton(rawValue: 3)!)
+        page.otherMouseDown(with: try #require(click.flatMap(NSEvent.init(cgEvent:))))
+        try await waitFor { hung.tab.page?.title == "a" }
+        #expect(await answers(hung.tab))
+        try await waitFor("The hung process ended") { Processes.started(old) == nil }
+    }
+
+    /// WebKit's word alone is no hang: a page that still answers keeps its
+    /// process, and its changes are still asked about before they go.
+    @Test func aPageWebKitThinksBusyStillAsksBeforeItsChangesGo() async throws {
+        let server = try HangServer()
+        let browser = Browser(dataStore: .nonPersistent())
+        let tab = Nerda.Tab()
+        browser.add(tab)
+        tab.go(to: try await server.url("/a"))
+        try await waitFor { tab.page?.isLoading == false }
+        let page = try #require(tab.page)
+        let pid = try #require(tab.pid)
+        tab.hasUnsavedWork = true
+        browser.webProcessDidBecomeUnresponsive(page)
+        // With no window to ask in, the question is answered Stay.
+        browser.close(tab.id)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(browser.tabs.contains { $0 === tab })
+        tab.go(to: try await server.url("/b"))
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(tab.page === page)
+        #expect(tab.pid == pid)
+        #expect(tab.hasUnsavedWork)
+        #expect(page.url?.path == "/a")
+    }
+
     @Test func puttingAHungPageToSleepEndsItsProcess() async throws {
         let hung = try await HungTab(server: HangServer())
         defer { hung.close() }
@@ -247,7 +287,7 @@ struct HungPagesTests {
     }
 
     @Test func turningHangHandlingOffLeavesAHungPageAsWebKitDoes() async throws {
-        Speedups.overrides["HANG_HANDLING"] = false
+        Speedups.overrides[.hangHandling] = false
         HungPages.patience = 0.5
         defer {
             Speedups.overrides = [:]

@@ -9,7 +9,8 @@ import os
 /// first line), launched (AppKit done launching), window (the first pass
 /// of the run loop with the window in, its first frame sent), shown (the
 /// window server says it is on screen, which a window behind others never
-/// says) and page (the first page loaded, in any tab).
+/// says) and page (the first text or picture a page drew in the tab on
+/// screen, WebKit's first paint, as the Recorder times it).
 ///
 /// Every launch keeps its moments, a handful of numbers, with the five
 /// launches before it; a feedback report carries them (`report`,
@@ -18,12 +19,13 @@ import os
 /// "launch"), each moment an event on it.
 ///
 /// Work the first window doesn't need waits (`later`) until the first
-/// page has loaded, or the window is up when there is no page to wait for,
-/// and then runs one piece per turn of the run loop, never while something
-/// is dragged or scrolled. NERDA_LAUNCH_LATER=0 runs it where it is asked
+/// page shows, until the window is up when there is no page to wait for,
+/// or three seconds after the window when the page never draws, and then
+/// runs one piece per turn of the run loop, never while something is
+/// dragged or scrolled. NERDA_LAUNCH_LATER=0 runs it where it is asked
 /// for instead, to time a launch with and without it (`Speedups`).
 enum Launch {
-    static let signposter = OSSignposter(subsystem: Bundle.main.bundleIdentifier ?? "dev.nerda.browser", category: "launch")
+    static let signposter = OSSignposter(subsystem: Logger.subsystem, category: "launch")
 
     /// This launch's record: Nerda's own once `start()` has run, kept with
     /// the launches before it. Tests make records of their own.
@@ -41,7 +43,7 @@ enum Launch {
     static func stage<T>(_ name: String, _ body: () throws -> T) rethrows -> T { try current.stage(name, body) }
 
     static func later(_ name: String, _ work: @escaping () -> Void) {
-        guard Speedups.isOn("LAUNCH_LATER") else { return current.stage("later " + name, work) }
+        guard Speedups.isOn(.launchLater) else { return current.stage("later " + name, work) }
         current.later(name, work)
     }
 
@@ -125,7 +127,7 @@ enum Launch {
             return try body()
         }
 
-        /// `work`, once the first page is in: one piece per turn of the run
+        /// `work`, once the first page shows: one piece per turn of the run
         /// loop, in the order asked for. Once the launch is over, on the
         /// next turn.
         func later(_ name: String, _ work: @escaping () -> Void) {

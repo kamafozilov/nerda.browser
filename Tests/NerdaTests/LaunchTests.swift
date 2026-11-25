@@ -41,6 +41,24 @@ struct LaunchTests {
         return (UserDefaults(suiteName: suite)!, suite)
     }
 
+    /// The launch's page is the first drawn in the tab on screen: a page
+    /// loaded out of sight isn't it.
+    @Test func theFirstPageIsTheFirstDrawnOnScreen() async throws {
+        let launch = Launch.Record()
+        let browser = Browser(dataStore: .nonPersistent())
+        browser.launch = launch
+        browser.add(Nerda.Tab())
+        let hidden = Nerda.Tab()
+        browser.add(hidden, inBackground: true)
+        hidden.webView.loadHTMLString("<h1>Hidden</h1><p>Some text to draw.</p>", baseURL: URL(string: "https://hidden.example/"))
+        try await waitFor { hidden.webView.url?.host == "hidden.example" && !hidden.webView.isLoading }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(!launch.moments.contains { $0.name == "page" }, "loaded out of sight")
+        let shown = browser.open(URL(string: "about:blank")!)
+        shown.webView.loadHTMLString("<h1>Shown</h1><p>Some text to draw.</p>", baseURL: URL(string: "https://shown.example/"))
+        try await waitFor { launch.moments.contains { $0.name == "page" } }
+    }
+
     @Test func aLaunchKeepsEachMomentOnceFromTheProcessStart() {
         let launch = Launch.Record()
         launch.mark("main")

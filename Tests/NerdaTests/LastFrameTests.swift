@@ -48,7 +48,7 @@ struct LastFrameTests {
         try await waitFor("A resized") { a.webView.bounds.size != size }
         browser.select(a.id)
         try await waitFor("A back") { a.webView.lastArrival != nil }
-        #expect(a.webView.lastArrival == .live(because: "size"))
+        #expect(a.webView.lastArrival == .live(because: .size))
     }
 
     @Test func aZoomedPageGetsTheLivePage() async throws {
@@ -57,7 +57,7 @@ struct LastFrameTests {
         a.webView.pageZoom = 1.25
         browser.select(a.id)
         try await waitFor("A back") { a.webView.lastArrival != nil }
-        #expect(a.webView.lastArrival == .live(because: "zoom"))
+        #expect(a.webView.lastArrival == .live(because: .zoom))
     }
 
     @Test func anotherAppearanceGetsTheLivePage() async throws {
@@ -67,7 +67,7 @@ struct LastFrameTests {
         window.appearance = NSAppearance(named: dark ? .aqua : .darkAqua)
         browser.select(a.id)
         try await waitFor("A back") { a.webView.lastArrival != nil }
-        #expect(a.webView.lastArrival == .live(because: "appearance"))
+        #expect(a.webView.lastArrival == .live(because: .appearance))
     }
 
     @Test func aPageThatWentElsewhereGetsTheLivePage() async throws {
@@ -77,17 +77,31 @@ struct LastFrameTests {
         try await waitFor("A elsewhere") { a.webView.url?.host == "elsewhere.example" }
         browser.select(a.id)
         try await waitFor("A back") { a.webView.lastArrival != nil }
-        #expect(a.webView.lastArrival == .live(because: "address"))
+        #expect(a.webView.lastArrival == .live(because: .address))
     }
 
-    /// A page that scrolled itself out of sight: its frame, if put up at
-    /// all, goes as soon as the page says where it is.
+    /// A page that scrolled itself out of sight says so as it scrolls: its
+    /// frame is never put up.
     @Test func aPageScrolledOutOfSightGetsTheLivePage() async throws {
         let (browser, window, a, _) = try await twoTabs()
         defer { window.close() }
         _ = try await a.webView.evaluateJavaScript("scrollTo(0, 800); scrollY")
+        try await waitFor("A's frame no longer holds") { !a.webView.keepsLastFrame }
         browser.select(a.id)
-        try await waitFor("A live") { a.webView.lastArrival == .live(because: "scroll") }
+        try await waitFor("A back") { a.webView.lastArrival != nil }
+        #expect(a.webView.lastArrival == .live(because: .scroll))
+        #expect(!a.webView.showsLastFrame)
+    }
+
+    /// One that grew out of sight, its scroll height changed, likewise.
+    @Test func aPageThatGrewOutOfSightGetsTheLivePage() async throws {
+        let (browser, window, a, _) = try await twoTabs()
+        defer { window.close() }
+        _ = try await a.webView.evaluateJavaScript("document.body.style.height = '6000px'; 0")
+        try await waitFor("A's frame no longer holds") { !a.webView.keepsLastFrame }
+        browser.select(a.id)
+        try await waitFor("A back") { a.webView.lastArrival != nil }
+        #expect(a.webView.lastArrival == .live(because: .scroll))
         #expect(!a.webView.showsLastFrame)
     }
 
@@ -100,12 +114,12 @@ struct LastFrameTests {
         try await waitFor("A asleep") { a.isAsleep }
         browser.select(a.id)
         try await waitFor("A back") { a.page?.lastArrival != nil }
-        #expect(a.page?.lastArrival == .live(because: "none"))
+        #expect(a.page?.lastArrival == .live(because: .none))
     }
 
     @Test func theSwitchTurnsItOff() async throws {
-        Speedups.overrides["LAST_FRAME"] = false
-        defer { Speedups.overrides["LAST_FRAME"] = nil }
+        Speedups.overrides[.lastFrame] = false
+        defer { Speedups.overrides[.lastFrame] = nil }
         let browser = Browser(dataStore: .nonPersistent())
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -121,6 +135,6 @@ struct LastFrameTests {
         #expect(!a.webView.keepsLastFrame)
         browser.select(a.id)
         try await waitFor("A back") { a.webView.lastArrival != nil }
-        #expect(a.webView.lastArrival == .live(because: "off"))
+        #expect(a.webView.lastArrival == .live(because: .off))
     }
 }
