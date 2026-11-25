@@ -159,8 +159,11 @@ final class Tab: Identifiable {
     /// The address last put in history, so a page is counted once per visit,
     /// not again when it wakes or reloads.
     @ObservationIgnored private var recorded: URL?
-    /// When the page's process last died, to tell a page that keeps crashing.
-    @ObservationIgnored var crashed: Date?
+    /// Why the page's process last ended, when WebKit said (PageEnds.swift).
+    @ObservationIgnored var ended: PageEnd?
+    /// Set just before Nerda ends the page's process itself, for not
+    /// answering: that end is no crash, and is not counted as one.
+    @ObservationIgnored var endingOnPurpose = false
     /// How many of the page's own print sheets (`window.print()`) in a row
     /// were cancelled, and when the last was (see `Browser.printFrame`).
     @ObservationIgnored var printCancels: (count: Int, last: Date)?
