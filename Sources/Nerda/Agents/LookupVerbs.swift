@@ -198,7 +198,7 @@ nonisolated struct ToolGroup: Hashable, Sendable {
     static let history = ToolGroup(name: "history", summary: "search the pages the user visited")
     static let bookmarks = ToolGroup(name: "bookmarks", summary: "read the user's bookmarks")
     static let profiles = ToolGroup(name: "profiles", summary: "find the profile signed in to a site, to open tabs there")
-    static let skills = ToolGroup(name: "skills", summary: "read a Site skill, what is known to work on a site, and save one")
+    static let skills = ToolGroup(name: "skills", summary: "save a Site skill, what you found works on a site, for the next agent")
 
     /// Every group, in the order `more_tools` names them. A ticket adding a
     /// group adds it here.

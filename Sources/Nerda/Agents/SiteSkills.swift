@@ -265,8 +265,9 @@ final class SiteSkills {
     }
 }
 
-/// Reading Site skills, and saving one with the owner's approval. A group
-/// of its own (`more_tools`); the hint on a covered site names `skill`.
+/// Reading Site skills, and saving one with the owner's approval. `skill`,
+/// which the hint on a covered site names, is listed from the start;
+/// `skill_save` is the skills group (`more_tools`).
 nonisolated extension AgentVerb {
     static let skillVerbs: [AgentVerb] = [skill, skillSave]
 
@@ -277,7 +278,7 @@ nonisolated extension AgentVerb {
             before. The first answer on a site that has one names it. Without a name, lists them all.
             """,
         arguments: [.string("name", "The skill's name, such as github", required: false)],
-        readOnly: true, group: .skills
+        readOnly: true
     ) { call in
         let skills = call.server.skills
         guard let name = call.optionalString("name")?.trimmingCharacters(in: .whitespaces), !name.isEmpty else {

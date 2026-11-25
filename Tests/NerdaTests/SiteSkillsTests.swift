@@ -85,17 +85,23 @@ struct SiteSkillsTests {
         #expect(missing.text.contains("shop"))
     }
 
-    /// The skills tools are a group of their own, out of the lean list
-    /// until an agent asks for them.
-    @Test func theSkillToolsAreAGroup() async throws {
+    /// `skill`, which the hint on a covered site names, is in the list
+    /// from the start, so an agent can read the skill at once;
+    /// `skill_save` is a group of its own, out of the lean list until an
+    /// agent asks for it.
+    @Test func skillIsListedAndSavingIsAGroup() async throws {
         let harness = try AgentHarness()
         defer { harness.close() }
         let agent = try await harness.agent()
         let names = { try await agent.tools().compactMap { $0["name"]?.string } }
-        #expect(try await !names().contains("skill"))
-        _ = try await agent.call("more_tools", ["group": "skills"])
         #expect(try await names().contains("skill"))
+        #expect(try await !names().contains("skill_save"))
+        _ = try await agent.call("more_tools", ["group": "skills"])
         #expect(try await names().contains("skill_save"))
+        let instructions = try await agent.request("initialize", [
+            "protocolVersion": "2025-06-18", "capabilities": [:], "clientInfo": ["name": "claude-code", "version": "1.0"],
+        ])["result"]?["instructions"]?.string ?? ""
+        #expect(instructions.contains("skill"))
     }
 
     /// `skill_save` puts the whole skill on a card for the owner and saves
