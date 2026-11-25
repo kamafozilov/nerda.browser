@@ -122,7 +122,8 @@ enum AgentPage {
         return "<page-text>\(text)</page-text>"
     }
 
-    private static func isComplete(_ tab: Tab) async -> Bool {
+    /// Whether the tab's page's document has loaded (`readyState` complete).
+    static func isComplete(_ tab: Tab) async -> Bool {
         guard let page = tab.page else { return false }
         return (try? await page.callAsyncJavaScript("return document.readyState", contentWorld: world)) as? String == "complete"
     }
