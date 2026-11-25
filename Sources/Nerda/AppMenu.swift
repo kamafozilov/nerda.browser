@@ -243,6 +243,8 @@ final class AppMenu: NSObject {
             // An agent's key the page left alone is the agent's, not the
             // owner's: `AgentInput` keeps it from the browser's keys.
             if MainActor.assumeIsolated({ AgentInput.isAgents(event) }) { return event }
+            // ⌘. and ⌘↩ take over and hand back an Agent tab watched here.
+            if MainActor.assumeIsolated({ AgentServer.ownerKey(event) }) { return nil }
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             // Only in a browser's window: in the Vault ⌃Tab is its own, and
             // the tabs of a window behind it are out of sight.

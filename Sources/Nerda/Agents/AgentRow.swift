@@ -320,7 +320,7 @@ private struct SessionBlock: View {
                 RequestLine(request: request, owner: server.owner)
             }
             ForEach(tabs, id: \.ref) { tab in
-                AgentTabRow(tab: tab, watched: browser.watchedTab === tab.tab) {
+                AgentTabRow(tab: tab, watched: browser.watchedTab === tab.tab, taken: tab.isTaken) {
                     server.watch(tab, in: browser)
                     dismiss()
                 }
@@ -376,6 +376,8 @@ private struct AgentTabRow: View {
     let tab: AgentTab
     /// On screen in this window now.
     let watched: Bool
+    /// The owner took it over.
+    let taken: Bool
     let open: () -> Void
 
     @State private var hovering = false
@@ -397,6 +399,11 @@ private struct AgentTabRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 Spacer(minLength: 0)
+                if taken {
+                    Text("Yours")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.orange)
+                }
                 Image(systemName: "eye")
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.muted)
@@ -446,18 +453,23 @@ private struct PanelButton: View {
 
 /// An Agent tab the owner watches in their window (`Browser.watched`): its
 /// page in place of their tab's, under a line saying whose it is, with the
-/// way back to their own tab. The agent carries on in it meanwhile.
+/// way back to their own tab. The agent carries on in it meanwhile, until
+/// the owner takes it over (AgentTakeOver.swift), which the line says, with
+/// the way to hand it back; or they keep it as a tab of their own.
 struct WatchedAgentTab: View {
     let browser: Browser
     let watched: AgentTab
 
+    private var server: AgentServer { watched.agents.browser.agentServer ?? .shared }
+
     var body: some View {
+        let taken = watched.isTaken
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "sparkles")
+                Image(systemName: taken ? "hand.raised.fill" : "sparkles")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color.accentColor)
-                Text(owner)
+                    .foregroundStyle(taken ? Color.orange : Color.accentColor)
+                Text(taken ? "You have \(owner)" : owner)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Palette.ink)
                 Text([watched.tab.title, watched.tab.url.flatMap(History.site(of:))].compactMap(\.self)
@@ -467,6 +479,17 @@ struct WatchedAgentTab: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 8)
+                if taken {
+                    PanelButton(title: "Hand Back  ⌘↩", prominent: true) { server.handBack(watched) }
+                        .help("Give the tab back to the agent, to carry on in it")
+                } else {
+                    PanelButton(title: "Take Over  ⌘.") { server.takeOver(watched) }
+                        .help("Take the tab: the agent waits until you hand it back")
+                }
+                if server.canKeep(watched, in: browser) {
+                    PanelButton(title: "Keep as My Tab") { server.keep(watched, in: browser) }
+                        .help("Make it one of your tabs; the agent no longer has it")
+                }
                 PanelButton(title: "Back to Your Tab") { browser.watched = nil }
                     .help("Leave the agent's tab and go back to yours")
             }

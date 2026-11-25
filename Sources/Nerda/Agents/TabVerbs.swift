@@ -49,7 +49,10 @@ nonisolated extension AgentVerb {
     ) { call in
         let tabs = call.server.sessions.tabs(of: call.session)
         guard !tabs.isEmpty else { return "No Agent tabs open. Open one with open." }
-        return tabs.map { "\($0.ref)  \($0.tab.title)  \($0.tab.url?.absoluteString ?? "")" }.joined(separator: "\n")
+        return tabs.map { tab in
+            let line = "\(tab.ref)  \(tab.tab.title)  \(tab.tab.url?.absoluteString ?? "")"
+            return tab.isTaken ? line + "  (the user took it over: leave it until they hand it back)" : line
+        }.joined(separator: "\n")
     }
 
     static let close = AgentVerb(

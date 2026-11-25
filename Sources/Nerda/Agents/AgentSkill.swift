@@ -76,6 +76,9 @@ nonisolated enum AgentSkill {
             - "a different version": Nerda was updated and not reopened. Ask the user to quit \
             and reopen Nerda.
             - Use only the tabs you opened; other agents' tabs are not yours to touch.
+            - The user may take over one of your tabs ("The user took over tab t1"): leave it be, \
+            carry on in another tab or wait, and try it again later; it works again once they hand \
+            it back. A tab they kept as their own is no longer yours.
 
             """
     }
