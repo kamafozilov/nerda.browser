@@ -16,13 +16,13 @@ struct AgentTakeOverTests {
     @Test func theOwnersClickInAWatchedAgentTabTakesItOver() async throws {
         let harness = try AgentHarness()
         defer { harness.close() }
-        let url = try await harness.pages.serve("/shop", "<title>Shop</title><button>Buy</button>")
+        let url = try await harness.pages.serve("/shop", "<title>Shop</title><button>Add to basket</button>")
         let agent = try await harness.agent()
         _ = try await agent.call("open", ["url": AgentJSON(url)])
         let (owner, window, page) = try await watch(harness)
         defer { window.close() }
 
-        let ref = try #require(AgentClickTests.ref(of: "button \"Buy\"", in: try await agent.call("snapshot", ["tab": "t1"]).text))
+        let ref = try #require(AgentClickTests.ref(of: "button \"Add to basket\"", in: try await agent.call("snapshot", ["tab": "t1"]).text))
         let clicked = try await agent.call("click", ["tab": "t1", "ref": .string(ref)])
         #expect(!clicked.isError, "\(clicked.text)")
         #expect(!(try await agent.call("text", ["tab": "t1"]).isError))
