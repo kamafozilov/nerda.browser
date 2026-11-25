@@ -103,6 +103,8 @@ nonisolated struct AgentError: Error, Sendable, Equatable {
         /// The step waits on the owner (a Handoff, a question); the agent
         /// tells them, and asks again.
         case needsUser = "needs_user"
+        /// The owner stopped the Agent session from the Agent row.
+        case stopped
     }
 
     let code: Code

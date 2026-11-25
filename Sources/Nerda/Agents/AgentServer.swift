@@ -30,6 +30,11 @@ final class AgentServer {
     private var switchWatch: NSObjectProtocol?
     /// Cleanup's sweep, once a minute of awake time.
     private var sweeping: Task<Void, Never>?
+    /// Requests being done now, by session, to end when the owner stops it.
+    private var inFlight: [UUID: (session: AgentSession, task: Task<AgentReply, Never>)] = [:]
+    /// The owner's window a clicked notification shows its Agent tab in:
+    /// the one they used last.
+    var ownerWindow: () -> Browser? = { Windows.lastUsed?.browser }
 
     /// `now` is awake time (`AgentSessions.now`); tests move their own.
     init(socket: URL, callers: AgentCallers = .nerdas, defaults: UserDefaults = .standard,
@@ -47,6 +52,7 @@ final class AgentServer {
         approvals = AgentApprovals(defaults: defaults, ask: ask)
         listProfiles = profiles
         self.makeBrowser = makeBrowser
+        owner.show = { [weak self] in self?.show($0) }
     }
 
     /// The owner's profiles, Personal first. Incognito is none of them.
@@ -175,8 +181,29 @@ final class AgentServer {
         if !verb.forAnyCaller, let refusal = refusal(for: access) { return .failed(refusal) }
         let session = sessions.began(name)
         defer { sessions.finished(session) }
+        if session.isStopped { return stopped(session) }
         let call = AgentCall(server: self, session: session, arguments: request.args, deadline: .now + verb.deadline)
-        return await Self.done(verb, call)
+        let reply = await Self.done(verb, call)
+        return session.isStopped ? stopped(session) : reply
+    }
+
+    /// The owner stopped the session from the Agent row: what it is doing
+    /// now ends, what it waits on the owner for goes, and it is told so,
+    /// now or on its next request. Its tabs stay, for the owner.
+    func stop(_ session: AgentSession) {
+        sessions.stop(session)
+        owner.withdraw(session)
+        for (_, request) in inFlight where request.session === session { request.task.cancel() }
+    }
+
+    /// The stopped session's answer, which its agent hears once.
+    private func stopped(_ session: AgentSession) -> AgentReply {
+        sessions.told(session)
+        return .failed(AgentError(.stopped, """
+            stopped: The user stopped you in Nerda. Stop this task and tell the user; don't use Nerda for \
+            it again unless they ask you to. Your tabs were left to them; if they ask you to go on, start \
+            again with open.
+            """))
     }
 
     /// Why a caller with `access` gets status only, nil when it gets more.
@@ -227,6 +254,9 @@ final class AgentServer {
             work.cancel()
         }
         defer { timer.cancel() }
+        let id = UUID()
+        call.server.inFlight[id] = (call.session, work)
+        defer { call.server.inFlight[id] = nil }
         return await work.value
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import WebKit
 
 /// Where Agent tabs live (GLOSSARY.md): a browser of the profile's own
@@ -6,9 +7,13 @@ import WebKit
 /// session file and adds nothing to history (`Browser.isForAgents`), and its
 /// pages are in a window of their own, off screen (`AgentWindow`), never in
 /// one of the owner's.
+@Observable
 final class AgentBrowser {
     let browser: Browser
     let window = AgentWindow()
+    /// Agent tabs the owner watches in a window of theirs
+    /// (`Browser.watched`): their pages are there, not here.
+    var watched: Set<Tab.ID> = []
 
     init(profile: Profile = .main, dataStore: WKWebsiteDataStore? = nil) {
         browser = Browser(profile: profile, dataStore: dataStore, forAgents: true)
@@ -28,6 +33,12 @@ final class AgentBrowser {
         browser.close(id)
     }
 
+    /// The awake tabs' pages but those watched in the window now, as when
+    /// a window of the owner's lets one go.
+    func holdPagesNow() {
+        window.hold(browser.tabs.filter { !$0.isAsleep && !watched.contains($0.id) }.compactMap(\.page))
+    }
+
     /// Every tab closed and the window let go of.
     func close() {
         browser.closeAll()
@@ -36,10 +47,11 @@ final class AgentBrowser {
     }
 
     /// The awake tabs' pages in the window, as tabs open, close, sleep and
-    /// wake: a page in no window is one WebKit treats as hidden.
+    /// wake, and as the owner stops watching one: a page in no window is
+    /// one WebKit treats as hidden.
     private func holdPages() {
         withObservationTracking {
-            window.hold(browser.tabs.filter { !$0.isAsleep }.compactMap(\.page))
+            holdPagesNow()
         } onChange: { [weak self] in
             Task { @MainActor in self?.holdPages() }
         }
