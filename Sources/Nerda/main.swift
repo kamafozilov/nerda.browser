@@ -488,7 +488,11 @@ private struct PageCard: View {
             }
         }
         .overlay(alignment: .top) {
-            if let offer = browser.passwordOffer, offer.tab == browser.selectedID {
+            if let tab = browser.selected, tab.asksAboutHang, !browser.locked {
+                HungPageCard(tab: tab)
+                    .padding(.top, 12)
+                    .transition(Motion.moving(.opacity.combined(with: .move(edge: .top))))
+            } else if let offer = browser.passwordOffer, offer.tab == browser.selectedID {
                 VaultOfferCard(browser: browser, offer: offer)
                     .padding(.top, 12)
                     .transition(Motion.moving(.opacity.combined(with: .move(edge: .top))))
@@ -855,6 +859,7 @@ extension Browser {
     func closeSelectedTab(discarding: Bool = false) {
         if commandBarOpen { return hideCommandBar() }
         guard let selected else { return }
+        selected.letGoHung()
         if selected.isPinned {
             if selected.hasUnsavedWork, !discarding, let page = selected.page {
                 Task {
@@ -918,6 +923,8 @@ let menu = Launch.stage("menu") {
 }
 if Edition.updates { Launch.later("updates") { Updater.shared.start() } }
 Feedback.shared.start()
+// Every window's pages out of sight, looked at once a minute for one stuck in a loop.
+HungPages.start()
 
 let window = Launch.stage("window") { BrowserWindow(browser: browser) }
 Windows.regular = window

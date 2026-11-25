@@ -376,6 +376,7 @@ final class Browser: NSObject {
     func close(_ id: Tab.ID, discarding: Bool = false) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let tab = tabs[index]
+        tab.letGoHung()
         if tab.hasUnsavedWork, !discarding {
             guard let page = tab.page, closing.insert(id).inserted else { return }
             // The question waits for its tab to be on screen (`ask`), as
