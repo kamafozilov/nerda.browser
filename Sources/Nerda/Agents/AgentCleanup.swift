@@ -28,10 +28,11 @@ extension AgentSessions {
     }
 
     /// Whether cleanup leaves the tab alone: it holds something typed that
-    /// would be lost (`Tab.hasUnsavedWork`), or the owner keeps it
-    /// (`ownerKeeps`). Looked at again each sweep, so a tab closes once
+    /// would be lost (`Tab.hasUnsavedWork`), the owner keeps it
+    /// (`ownerKeeps`), or an Agent waits on the owner there
+    /// (`waitsOnOwner`). Looked at again each sweep, so a tab closes once
     /// what kept it is dealt with.
     func isKept(_ tab: AgentTab) -> Bool {
-        tab.tab.hasUnsavedWork || ownerKeeps(tab)
+        tab.tab.hasUnsavedWork || ownerKeeps(tab) || waitsOnOwner(tab)
     }
 }

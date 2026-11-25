@@ -63,6 +63,9 @@ final class AgentSessions {
     /// it alone (`isKept`). Take over (#145) answers it for a tab the owner
     /// has taken or kept; until then no tab is.
     @ObservationIgnored var ownerKeeps: (AgentTab) -> Bool = { _ in false }
+    /// Whether an Agent waits on the owner in the tab (a Handoff, a
+    /// question), so cleanup leaves it for the owner to come to.
+    @ObservationIgnored var waitsOnOwner: (AgentTab) -> Bool = { _ in false }
 
     init(now: @escaping () -> SuspendingClock.Instant = { .now }) {
         self.now = now

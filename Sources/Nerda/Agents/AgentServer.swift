@@ -38,6 +38,7 @@ final class AgentServer {
         self.socket = socket
         owner = OwnerRequests(notifier: notifier)
         sessions = AgentSessions(now: now)
+        sessions.waitsOnOwner = { [owner] tab in owner.handoff(on: tab.tab) != nil }
         self.callers = callers
         self.defaults = defaults
         approvals = AgentApprovals(defaults: defaults, ask: ask)

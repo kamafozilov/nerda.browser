@@ -242,6 +242,25 @@ struct HandoffTests {
         #expect(harness.server.owner.waiting.isEmpty)
     }
 
+    /// A Handoff the owner hasn't come to keeps its tab past cleanup, even
+    /// once its agent stopped asking; it closes once the owner is done.
+    @Test func cleanupKeepsATabWaitingOnTheOwner() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        let url = try await harness.pages.serve("/page", "<title>Page</title>")
+        let agent = try await harness.agent(client: "codex-mcp-client", waits: Self.quick)
+        _ = try await agent.call("open", ["url": AgentJSON(url)])
+        _ = try await agent.call("handoff", ["tab": "t1", "reason": "Confirm the address"])
+
+        harness.clock.advance(by: .seconds(60 * 60))
+        harness.server.cleanUp()
+        #expect(harness.agents?.tabs.count == 1)
+
+        harness.server.owner.done(try #require(harness.server.owner.waiting.first))
+        harness.server.cleanUp()
+        #expect(harness.agents?.tabs.isEmpty == true)
+    }
+
     /// The command line's exit codes: 3 while the owner is needed, apart
     /// from failing (1), Nerda unreachable (2) and timing out (124).
     @Test func theCommandLineExitsThreeWhileTheOwnerIsNeeded() {
