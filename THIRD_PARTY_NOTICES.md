@@ -217,5 +217,6 @@ Licensed under the Apache License, Version 2.0
 
 Adapted in Nerda:
 
+- Sources/Nerda/PageEnds.swift
 - Sources/Nerda/Recorder.swift
 - Sources/Nerda/Watchdog.swift
