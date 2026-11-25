@@ -112,26 +112,73 @@ nonisolated struct AgentError: Error, Sendable, Equatable {
 nonisolated extension AgentWire {
     /// Sends one request to the app listening at `socket` and answers what
     /// it said, or why nothing came back: the shim's and the command line's
-    /// way in alike.
-    static func send(_ request: AgentRequest, to socket: URL) async -> AgentReply {
+    /// way in alike. With a `launcher` and Nerda closed, Nerda is started
+    /// hidden first (`AgentLauncher`), by `start` (the shim's shares one
+    /// start among the calls that find it closed together), and the request
+    /// sent once it answers.
+    static func send(_ request: AgentRequest, to socket: URL, launcher: AgentLauncher? = nil,
+                     start: @Sendable (AgentLauncher) async -> Bool = { await $0.started() }) async -> AgentReply {
         let verb = request.verb
-        let deadline = AgentVerb.named[verb]?.deadline ?? AgentWire.deadline
+        let timeout = (AgentVerb.named[verb]?.deadline ?? deadline) + .seconds(5)
+        guard let data = try? JSONEncoder().encode(request) else {
+            return .failed(AgentError(.invalid, "The arguments to \(verb) couldn't be sent."))
+        }
         do {
-            let data = try JSONEncoder().encode(request)
-            let answer = try await AgentSocket.request(data, to: socket.path, timeout: deadline + .seconds(5))
-            if let version = (try? AgentJSON(data: answer))?["v"]?.int, version != request.v {
-                return .reopen(app: version, shim: request.v)
-            }
-            return try JSONDecoder().decode(AgentReply.self, from: answer)
+            return try await answer(to: data, at: socket, timeout: timeout, wire: request.v)
         } catch AgentSocket.Failure.unreachable {
-            return .failed(AgentError(.unreachable, """
-                Nerda isn't running, or agents are turned off in its Settings › Security & Privacy. \
-                Ask the user to open Nerda.
-                """))
-        } catch AgentSocket.Failure.timedOut {
-            return .failed(AgentError(.timedOut, "Nerda didn't answer \(verb) in time."))
+            guard let launcher else { return .failed(unreachable) }
+            guard await start(launcher) else {
+                return .failed(launcher.app() == .open ? agentsOff : notStarted)
+            }
+            // Unreachable means nothing was sent: trying again does it once.
+            let end = ContinuousClock.now + launcher.wait
+            while true {
+                do {
+                    return try await answer(to: data, at: socket, timeout: timeout, wire: request.v)
+                } catch AgentSocket.Failure.unreachable where ContinuousClock.now < end {
+                    try? await Task.sleep(for: launcher.poll)
+                } catch AgentSocket.Failure.unreachable {
+                    return .failed(notStarted)
+                } catch {
+                    return failure(error, verb: verb)
+                }
+            }
         } catch {
-            return .failed(AgentError(.failed, "Nerda's answer to \(verb) couldn't be read: \(error)"))
+            return failure(error, verb: verb)
         }
     }
+
+    private static func answer(to data: Data, at socket: URL, timeout: Duration, wire: Int) async throws -> AgentReply {
+        let answer = try await AgentSocket.request(data, to: socket.path, timeout: timeout)
+        if let version = (try? AgentJSON(data: answer))?["v"]?.int, version != wire {
+            return .reopen(app: version, shim: wire)
+        }
+        return try JSONDecoder().decode(AgentReply.self, from: answer)
+    }
+
+    private static func failure(_ error: any Error, verb: String) -> AgentReply {
+        switch error {
+        case AgentSocket.Failure.timedOut:
+            .failed(AgentError(.timedOut, "Nerda didn't answer \(verb) in time."))
+        case AgentSocket.Failure.unreachable:
+            .failed(unreachable)
+        default:
+            .failed(AgentError(.failed, "Nerda's answer to \(verb) couldn't be read: \(error)"))
+        }
+    }
+
+    private static let unreachable = AgentError(.unreachable, """
+        Nerda isn't running, or agents are turned off in its Settings › Security & Privacy. \
+        Ask the user to open Nerda.
+        """)
+
+    private static let agentsOff = AgentError(.unreachable, """
+        Agents are turned off in Nerda's Settings › Security & Privacy. \
+        Ask the user to turn on Agents can use Nerda there.
+        """)
+
+    private static let notStarted = AgentError(.unreachable, """
+        Nerda didn't start, or agents are turned off in its Settings › Security & Privacy. \
+        Ask the user to open Nerda.
+        """)
 }

@@ -45,7 +45,8 @@ nonisolated enum AgentCommandLine {
         let finished = DispatchSemaphore(value: 0)
         let result = OSAllocatedUnfairLock(initialState: Outcome(status: failed))
         Task.detached {
-            let outcome = await run(arguments, environment: ProcessInfo.processInfo.environment, socket: AgentWire.socket)
+            let outcome = await run(arguments, environment: ProcessInfo.processInfo.environment,
+                                    socket: AgentWire.socket, launcher: .thisApp)
             result.withLock { $0 = outcome }
             finished.signal()
         }
@@ -57,8 +58,10 @@ nonisolated enum AgentCommandLine {
     }
 
     /// One run with `arguments` (the verb first), in a shell with
-    /// `environment`, against the app at `socket`.
-    static func run(_ arguments: [String], environment: [String: String], socket: URL) async -> Outcome {
+    /// `environment`, against the app at `socket`. With Nerda closed,
+    /// `launcher` starts it hidden first, as for the shim; nil to only say so.
+    static func run(_ arguments: [String], environment: [String: String], socket: URL,
+                    launcher: AgentLauncher? = nil) async -> Outcome {
         guard let first = arguments.first else { return Outcome(status: failed, errors: usage) }
         if ["--help", "-h", "help"].contains(first) { return Outcome(status: done, output: usage) }
         guard let verb = AgentVerb.named[first] else {
@@ -70,7 +73,7 @@ nonisolated enum AgentCommandLine {
         catch { return Outcome(status: failed, errors: "\(error.message)\nusage: nerda-browser \(synopsis(of: verb))\n") }
 
         let request = AgentRequest(verb: verb.name, session: session(in: environment), args: parsed)
-        let reply = await AgentWire.send(request, to: socket)
+        let reply = await AgentWire.send(request, to: socket, launcher: launcher)
         let text = reply.text.hasSuffix("\n") || reply.text.isEmpty ? reply.text : reply.text + "\n"
         return reply.ok ? Outcome(status: done, output: text) : Outcome(status: status(of: reply), errors: text)
     }

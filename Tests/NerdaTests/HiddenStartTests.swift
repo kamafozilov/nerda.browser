@@ -4,10 +4,10 @@ import os
 import Testing
 @testable import Nerda
 
-/// Nerda started hidden when an agent needs it (#133): the shim starting it
-/// when nothing answers, and the hidden launch's life after. Never the real
-/// Nerda: a stand-in launcher starts the test's own agent server, and the
-/// hidden launch's app (its Dock tile, showing, quitting) is a stand-in too.
+/// Nerda started hidden when an agent needs it (#133): the shim and the
+/// `nerda-browser` command starting it when nothing answers, and the hidden
+/// launch's life after. Never the real Nerda: a stand-in launcher starts the
+/// test's own agent server, and the hidden launch's app (its Dock tile, showing, quitting) is a stand-in too.
 @MainActor
 struct HiddenStartTests {
     // MARK: The shim starting Nerda
@@ -69,6 +69,36 @@ struct HiddenStartTests {
         #expect(answer.isError)
         #expect(answer.text.contains("Ask the user to open Nerda"), "\(answer.text)")
         #expect(nerda.opens == 1)
+    }
+
+    // MARK: The command starting Nerda
+
+    @Test func theCommandWithNerdaClosedStartsItHiddenAndSucceeds() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        let url = try await harness.pages.serve("/news", "<title>News</title><p>Fresh today</p>")
+        harness.server.stop()
+        let nerda = StandInNerda(server: harness.server)
+
+        let opened = await AgentCommandLine.run(["open", url.absoluteString], environment: ["NERDA_BROWSER_SESSION": "script-1"],
+                                                socket: harness.socket, launcher: nerda.launcher())
+
+        #expect(opened.status == AgentCommandLine.done, "\(opened.errors)")
+        #expect(opened.output.contains("Fresh today"))
+        #expect(nerda.opens == 1)
+    }
+
+    @Test func theCommandWithNerdaOpenAndAgentsTurnedOffExitsUnreachable() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        harness.server.stop()
+        let nerda = StandInNerda(server: harness.server, app: .open)
+
+        let listed = await AgentCommandLine.run(["tabs"], environment: [:], socket: harness.socket, launcher: nerda.launcher())
+
+        #expect(listed.status == AgentCommandLine.unreachable)
+        #expect(listed.errors.contains("turned off"), "\(listed.errors)")
+        #expect(nerda.opens == 0)
     }
 
     // MARK: The hidden launch
@@ -133,7 +163,7 @@ struct HiddenStartTests {
     }
 }
 
-/// Nerda as the shim's launcher sees it, without starting any real app:
+/// Nerda as the shim's (or the command's) launcher sees it, without starting any real app:
 /// closed until opened, then starting until its server (the test's own)
 /// listens a moment later.
 private final class StandInNerda: Sendable {

@@ -1,8 +1,9 @@
 import AppKit
 import os
 
-/// How the shim (`AgentMCP`) starts Nerda when an agent calls and nothing
-/// answers on the socket: hidden, in the background (`HiddenStart`), never
+/// How the shim (`AgentMCP`) and the command (`AgentCommandLine`) start
+/// Nerda when an agent calls and nothing answers on the socket
+/// (`AgentWire.send`): hidden, in the background (`HiddenStart`), never
 /// made active, never shown, never hidden as an app. Running already, with
 /// agents turned off, it is left as it is: opening it again would bring its
 /// window back.

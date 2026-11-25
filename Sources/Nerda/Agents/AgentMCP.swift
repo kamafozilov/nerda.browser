@@ -92,33 +92,7 @@ actor AgentMCP {
     /// answers.
     func call(_ verb: String, arguments: [String: AgentJSON]) async -> AgentReply {
         let request = AgentRequest(v: wire, verb: verb, session: AgentSessionName(client: client, id: sessionID), args: arguments)
-        let deadline = AgentVerb.named[verb]?.deadline ?? AgentWire.deadline
-        guard let data = try? JSONEncoder().encode(request) else {
-            return .failed(AgentError(.invalid, "The arguments to \(verb) couldn't be sent."))
-        }
-        do {
-            return try await send(data, timeout: deadline + .seconds(5))
-        } catch AgentSocket.Failure.unreachable {
-            guard let launcher else { return .failed(Self.unreachable) }
-            guard await started(launcher) else {
-                return .failed(launcher.app() == .open ? Self.agentsOff : Self.notStarted)
-            }
-            // Unreachable means nothing was sent: trying again does it once.
-            let end = ContinuousClock.now + launcher.wait
-            while true {
-                do {
-                    return try await send(data, timeout: deadline + .seconds(5))
-                } catch AgentSocket.Failure.unreachable where ContinuousClock.now < end {
-                    try? await Task.sleep(for: launcher.poll)
-                } catch AgentSocket.Failure.unreachable {
-                    return .failed(Self.notStarted)
-                } catch {
-                    return Self.failure(error, verb: verb)
-                }
-            }
-        } catch {
-            return Self.failure(error, verb: verb)
-        }
+        return await AgentWire.send(request, to: socket, launcher: launcher) { await self.started($0) }
     }
 
     /// `more_tools`, done here: the list it changes is this shim's. A group
@@ -138,14 +112,6 @@ actor AgentMCP {
         }
     }
 
-    private func send(_ data: Data, timeout: Duration) async throws -> AgentReply {
-        let answer = try await AgentSocket.request(data, to: socket.path, timeout: timeout)
-        if let version = (try? AgentJSON(data: answer))?["v"]?.int, version != wire {
-            return .reopen(app: version, shim: wire)
-        }
-        return try JSONDecoder().decode(AgentReply.self, from: answer)
-    }
-
     /// Nerda started, once for all the calls that find it closed together.
     private func started(_ launcher: AgentLauncher) async -> Bool {
         if let starting { return await starting.value }
@@ -154,32 +120,6 @@ actor AgentMCP {
         defer { starting = nil }
         return await task.value
     }
-
-    private static func failure(_ error: any Error, verb: String) -> AgentReply {
-        switch error {
-        case AgentSocket.Failure.timedOut:
-            .failed(AgentError(.timedOut, "Nerda didn't answer \(verb) in time."))
-        case AgentSocket.Failure.unreachable:
-            .failed(unreachable)
-        default:
-            .failed(AgentError(.failed, "Nerda's answer to \(verb) couldn't be read: \(error)"))
-        }
-    }
-
-    private static let unreachable = AgentError(.unreachable, """
-        Nerda isn't running, or agents are turned off in its Settings › Security & Privacy. \
-        Ask the user to open Nerda.
-        """)
-
-    private static let agentsOff = AgentError(.unreachable, """
-        Agents are turned off in Nerda's Settings › Security & Privacy. \
-        Ask the user to turn on Agents can use Nerda there.
-        """)
-
-    private static let notStarted = AgentError(.unreachable, """
-        Nerda didn't start, or agents are turned off in its Settings › Security & Privacy. \
-        Ask the user to open Nerda.
-        """)
 
     /// Tells the app this shim's agent went away, so its session detaches
     /// (`AgentWire.detach`). Unanswered or not, the shim is done.
