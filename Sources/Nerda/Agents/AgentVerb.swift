@@ -21,7 +21,7 @@ nonisolated struct AgentVerb: Sendable {
     var deadline = AgentWire.deadline
     /// The group of tools it is listed in once an agent asks for it
     /// (`more_tools`); nil for the page verbs, always listed.
-    var group: AgentGroup?
+    var group: ToolGroup?
     /// Waits on the owner (a Handoff, a question): the shim asks again and
     /// again, with progress, while its client waits (`AgentMCP.Waits`), and
     /// passes each request how long to wait in `wait`.

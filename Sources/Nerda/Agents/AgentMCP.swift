@@ -130,12 +130,12 @@ actor AgentMCP {
     /// added is announced, so the client asks for the list again.
     private func moreTools(_ arguments: [String: AgentJSON]) -> AgentReply {
         do {
-            let group = try AgentGroup.named(arguments["group"]?.string)
+            let group = try ToolGroup.named(arguments["group"]?.string)
             if let group, groups.insert(group.name).inserted {
                 let changed: AgentJSON = ["jsonrpc": "2.0", "method": "notifications/tools/list_changed"]
                 notify(changed.line)
             }
-            return .done(AgentGroup.describe(group))
+            return .done(ToolGroup.describe(group))
         } catch let error as AgentError {
             return .failed(error)
         } catch {
