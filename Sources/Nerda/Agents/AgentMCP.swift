@@ -16,6 +16,12 @@ actor AgentMCP {
 
     /// Where each harness puts its session id, first found first:
     /// Nerda's own (for scripts), Claude Code's, Codex's thread's.
+    /// `CODEX_THREAD_ID` is unverified: it is what Codex is believed to
+    /// export to the MCP servers it starts, not checked against Codex. If it
+    /// is absent, each start of the shim under Codex is a session of its own
+    /// (`sessionID`), so tabs opened by an earlier shim aren't reachable
+    /// from the next one until Codex exports it or the agent sets
+    /// `NERDA_BROWSER_SESSION`.
     static let sessionVariables = ["NERDA_BROWSER_SESSION", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"]
 
     private let socket: URL
