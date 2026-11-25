@@ -135,8 +135,6 @@ final class Browser: NSObject {
     static let heavy: UInt64 = 500 << 20
     /// Between one pinned tab loading at launch and the next (Session).
     static let pinLoadGap: Duration = .milliseconds(500)
-    @ObservationIgnored private var sleepTimer: Timer?
-    @ObservationIgnored private var memoryPressure: (any DispatchSourceMemoryPressure)?
     /// The address last loaded again for a redirect WebKit lost, so it is only tried once.
     @ObservationIgnored private var retried: URL?
     /// The sites left to http this session; an incognito window's its own.
@@ -202,14 +200,8 @@ final class Browser: NSObject {
         vault = profile.vault
         bookmarks = profile.bookmarks
         super.init()
-        // Checked each minute, loosely, so the system can fold it in with other wake-ups.
-        sleepTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                if let after = TabSleep.current.interval { self?.sleepIdleTabs(unseenFor: after) }
-                self?.sleepIdleTabs(unseenFor: Self.heavyAfter, pinsToo: true, over: Self.heavy)
-            }
-        }
-        sleepTimer?.tolerance = 15
+        // Its tabs sleep by the rules for every window (SleepCoordinator).
+        SleepCoordinator.shared.register(self)
         // What changes without telling (the page on screen scrolled, a page
         // changing its own address) is saved every few seconds, and only if it
         // did change. Not while another app is in front: it was saved as Nerda
@@ -218,24 +210,11 @@ final class Browser: NSObject {
             MainActor.assumeIsolated { if NSApp?.isActive == true { self?.saveSession(waiting: false) } }
         }
         sessionTimer?.tolerance = 3
-        // When the Mac runs short of memory, every tab out of sight sleeps at
-        // once; when it runs out, as in Safari, pinned ones too.
-        memoryPressure = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
-        memoryPressure?.setEventHandler { [weak self] in
-            MainActor.assumeIsolated {
-                let critical = self?.memoryPressure?.data.contains(.critical) == true
-                // No picture for the hover card: it takes memory there is none of.
-                self?.sleepIdleTabs(unseenFor: 0, pinsToo: critical, picturing: false)
-            }
-        }
-        memoryPressure?.activate()
     }
 
     /// An incognito window's browser goes with its window.
     isolated deinit {
-        sleepTimer?.invalidate()
         sessionTimer?.invalidate()
-        memoryPressure?.cancel()
     }
 
     /// Tabs out of sight at least this long, and not busy (playing, on a call),
