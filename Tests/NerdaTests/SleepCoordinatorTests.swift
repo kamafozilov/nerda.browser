@@ -23,8 +23,10 @@ private func coordinator(for browsers: Browser...) -> SleepCoordinator {
     return coordinator
 }
 
-/// A memory warning puts every tab out of sight to sleep at once, in every
-/// window, but not the tab on screen nor pinned ones.
+/// With the pressure policy off (NERDA_PRESSURE_POLICY=0; MemoryPressureTests
+/// has the policy), a memory warning puts every tab out of sight to sleep at
+/// once, in every window, but not the tab on screen nor pinned ones. The
+/// switch is read as pressure comes, so it is set only around that call.
 @MainActor
 @Test func aMemoryWarningSleepsHiddenTabsInEveryWindow() async throws {
     let first = try await browser(tabs: 3)
@@ -34,20 +36,27 @@ private func coordinator(for browsers: Browser...) -> SleepCoordinator {
     let hidden = (first.tabs + second.tabs).filter { !$0.isPinned && $0.id != first.selectedID && $0.id != second.selectedID }
     #expect(hidden.count == 2)
 
-    coordinator(for: first, second).pressure(.warning)
+    let coordinator = coordinator(for: first, second)
+    Speedups.overrides["PRESSURE_POLICY"] = false
+    coordinator.pressure(.warning)
+    Speedups.overrides["PRESSURE_POLICY"] = nil
     try await waitFor("Hidden tabs asleep") { hidden.allSatisfy(\.isAsleep) }
     #expect(!pinned.isAsleep)
     #expect(first.selected?.isAsleep == false && second.selected?.isAsleep == false)
 }
 
-/// Critical pressure puts pinned tabs out of sight to sleep too, as in Safari.
+/// With the pressure policy off, critical pressure puts pinned tabs out of
+/// sight to sleep too, as in Safari.
 @MainActor
 @Test func criticalPressureSleepsPinnedTabsToo() async throws {
     let browser = try await browser(tabs: 2)
     let pinned = browser.tabs.first { $0.id != browser.selectedID }!
     pinned.isPinned = true
 
-    coordinator(for: browser).pressure(.critical)
+    let coordinator = coordinator(for: browser)
+    Speedups.overrides["PRESSURE_POLICY"] = false
+    coordinator.pressure(.critical)
+    Speedups.overrides["PRESSURE_POLICY"] = nil
     try await waitFor("Pinned tab asleep") { pinned.isAsleep }
     #expect(browser.selected?.isAsleep == false)
 }

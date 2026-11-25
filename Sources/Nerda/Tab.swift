@@ -54,7 +54,10 @@ final class Tab: Identifiable {
     var home: URL?
     /// The page is making sound now: its tab shows a speaker, which mutes it.
     private(set) var playsAudio = false {
-        didSet { if playsAudio != oldValue, Extensions.started { Extensions.shared.changed(self, .playingAudio) } }
+        didSet {
+            if oldValue, !playsAudio { lastHeard = .now }
+            if playsAudio != oldValue, Extensions.started { Extensions.shared.changed(self, .playingAudio) }
+        }
     }
     /// Its sound is off (the speaker on its tab, Mute Tab, or an extension)
     /// until turned on again, asleep and awake.
@@ -115,6 +118,12 @@ final class Tab: Identifiable {
     @ObservationIgnored var dataStore = WKWebsiteDataStore.default()
     /// When the tab was last on screen, so it sleeps only once it has been away a while.
     @ObservationIgnored var lastSeen = Date.now
+    /// How many times it was gone to: one gone back to often is kept awake
+    /// (SleepCoordinator).
+    @ObservationIgnored var switchCount = 0
+    /// When its page last stopped making sound, so memory pressure leaves a
+    /// song between tracks alone (SleepCoordinator).
+    @ObservationIgnored var lastHeard: Date?
     /// The page, while awake.
     @ObservationIgnored private(set) var page: WKWebView? {
         didSet {

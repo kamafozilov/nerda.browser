@@ -36,6 +36,7 @@ final class Browser: NSObject {
                 left.lastSeen = .now
                 left.pageMoved()
             }
+            if selectedID != oldValue { selected?.switchCount += 1 }
             if let selected {
                 recent.removeAll { $0 === selected }
                 recent.append(selected)
@@ -138,6 +139,10 @@ final class Browser: NSObject {
     /// again in a second or two.
     static let heavyAfter: TimeInterval = 10 * 60
     static let heavy: UInt64 = 500 << 20
+    /// A tab gone to more than this many times is one you keep coming back
+    /// to (a mail, a chat): the idle timer leaves it awake, as Chrome's
+    /// Memory Saver does.
+    static let revisited = 15
     /// Between one pinned tab loading at launch and the next (Session).
     static let pinLoadGap: Duration = .milliseconds(500)
     /// Pages' processes ending, to tell a page that keeps crashing (PageEnds.swift).
@@ -227,10 +232,13 @@ final class Browser: NSObject {
     /// Tabs out of sight at least this long, and not busy (playing, on a call),
     /// sleep; of those, only the ones taking more than `size`, if given.
     /// Pinned ones only with `pinsToo`: being always ready is what they are for.
-    func sleepIdleTabs(unseenFor age: TimeInterval, pinsToo: Bool = false, over size: UInt64 = 0, picturing: Bool = true) {
+    /// With `sparingRevisited`, not one gone to more than `revisited` times.
+    func sleepIdleTabs(unseenFor age: TimeInterval, pinsToo: Bool = false, over size: UInt64 = 0,
+                       picturing: Bool = true, sparingRevisited: Bool = false) {
         let cutoff = Date.now.addingTimeInterval(-age)
         for tab in tabs where tab.id != selectedID && (pinsToo || !tab.isPinned) && !tab.isAsleep
-            && tab.lastSeen <= cutoff && (size == 0 || (tab.memory ?? 0) > size) {
+            && tab.lastSeen <= cutoff && (size == 0 || (tab.memory ?? 0) > size)
+            && !(sparingRevisited && tab.switchCount > Self.revisited) {
             Task {
                 // Asked of the page, so it may have come on screen in the meantime.
                 guard await !tab.isBusy(), tab.id != selectedID else { return }
