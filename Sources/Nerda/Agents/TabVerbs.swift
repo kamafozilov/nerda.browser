@@ -24,10 +24,10 @@ nonisolated extension AgentVerb {
             Open an address in a new Agent tab, signed in as the user is, out of their sight. \
             Answers the tab's name, title and address, and the start of the page's text.
             """,
-        arguments: [.string("url", "The address to open, such as https://example.com")]
+        arguments: [.string("url", "The address to open, such as https://example.com"), .profile]
     ) { call in
         let url = try call.url()
-        let agents = call.server.agents(for: .main)
+        let agents = call.server.agents(for: try call.profile())
         let tab = call.server.sessions.add(agents.open(url), in: agents, to: call.session)
         return try await AgentPage.arrived(tab, by: call.deadline)
     }

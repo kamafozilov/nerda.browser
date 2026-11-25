@@ -9,8 +9,15 @@ final class AgentSession: Identifiable {
     let name: AgentSessionName
     /// Its Agent tabs, oldest first.
     fileprivate(set) var tabs: [AgentTab] = []
-    /// When it last asked for something.
-    fileprivate(set) var lastUsed = ContinuousClock.now
+    /// When it last asked for something, or last had an answer, in awake
+    /// time (`AgentSessions.now`).
+    fileprivate(set) var lastUsed: SuspendingClock.Instant
+    /// Its agent went away (the MCP client closed the shim's input) and
+    /// hasn't asked for anything since. Its tabs stay until cleanup.
+    fileprivate(set) var isDetached = false
+    /// Requests of its being done now: while there are any, it is at work,
+    /// however long one takes.
+    @ObservationIgnored fileprivate(set) var working = 0
 
     var id: AgentSessionName { name }
 
@@ -23,7 +30,10 @@ final class AgentSession: Identifiable {
         return name.client
     }
 
-    fileprivate init(name: AgentSessionName) { self.name = name }
+    fileprivate init(name: AgentSessionName, at now: SuspendingClock.Instant) {
+        self.name = name
+        lastUsed = now
+    }
 }
 
 /// One Agent tab (GLOSSARY.md): a tab of an Agent browser, with the short
@@ -46,16 +56,46 @@ final class AgentSessions {
     /// Names of tabs closed, and how, to answer with what happened rather
     /// than "no tab".
     @ObservationIgnored private var ended: [String: String] = [:]
+    /// Awake time: it stands still while the Mac sleeps, so a night's sleep
+    /// is no time unused. Tests move it by hand.
+    @ObservationIgnored let now: () -> SuspendingClock.Instant
+    /// Whether the owner holds an Agent tab as their own, so cleanup leaves
+    /// it alone (`isKept`). Take over (#145) answers it for a tab the owner
+    /// has taken or kept; until then no tab is.
+    @ObservationIgnored var ownerKeeps: (AgentTab) -> Bool = { _ in false }
+
+    init(now: @escaping () -> SuspendingClock.Instant = { .now }) {
+        self.now = now
+    }
 
     /// The session of that name, made on its first request.
     func session(_ name: AgentSessionName) -> AgentSession {
-        let session = all.first { $0.name == name } ?? {
-            let session = AgentSession(name: name)
-            all.append(session)
-            return session
-        }()
-        session.lastUsed = .now
+        if let session = all.first(where: { $0.name == name }) { return session }
+        let session = AgentSession(name: name, at: now())
+        all.append(session)
         return session
+    }
+
+    /// The session of that name starting a request: a use, and at work (and
+    /// no longer detached) until `finished`.
+    func began(_ name: AgentSessionName) -> AgentSession {
+        let session = session(name)
+        session.working += 1
+        session.isDetached = false
+        session.lastUsed = now()
+        return session
+    }
+
+    /// A request of the session's answered: a use too, as a long wait ends.
+    func finished(_ session: AgentSession) {
+        session.working -= 1
+        session.lastUsed = now()
+    }
+
+    /// Its agent went away. No use of its tabs: their 15 minutes still count
+    /// from the last request. A session never seen stays unmade.
+    func detach(_ name: AgentSessionName) {
+        all.first { $0.name == name }?.isDetached = true
     }
 
     /// Makes `tab` one of the session's Agent tabs, named.
@@ -85,11 +125,12 @@ final class AgentSessions {
         throw AgentError(.noTab, "There is no tab \(ref). See yours with tabs.")
     }
 
-    /// Closes the session's tab, keeping why for later questions about it.
-    func close(_ tab: AgentTab, in session: AgentSession) {
+    /// Closes the session's tab, keeping `why` for later questions about
+    /// it. What was typed there goes too: the agent asked, or cleanup found
+    /// nothing typed to keep.
+    func close(_ tab: AgentTab, in session: AgentSession, why: String? = nil) {
         session.tabs.removeAll { $0.ref == tab.ref }
-        ended[tab.ref] = "Tab \(tab.ref) was closed."
-        // The agent asked: what it typed there is its own to let go.
+        ended[tab.ref] = why ?? "Tab \(tab.ref) was closed."
         tab.agents.browser.close(tab.tab.id, discarding: true)
     }
 

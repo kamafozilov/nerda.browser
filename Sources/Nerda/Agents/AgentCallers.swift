@@ -6,9 +6,10 @@ import Security
 /// runs as the owner's user (else it gets no answer at all), then its audit
 /// token, then its code signature against a requirement, Nerda's own
 /// designated one in a release build, so Nerda's own `nerda-browser` (the
-/// app's binary in another mode) gets in and other programs get status only
-/// (#132 asks the owner about those). A token's verdict is kept, as signature
-/// checks cost.
+/// app's binary in another mode) gets in. Another signed program is told
+/// apart by its own designated requirement (`AgentProgram`), for the owner
+/// to allow or not (`AgentApprovals`); an unsigned one gets status only. A
+/// token's verdict is kept, as signature checks cost.
 nonisolated final class AgentCallers: Sendable {
     /// What a caller may do.
     enum Access: Sendable, Equatable {
@@ -16,6 +17,8 @@ nonisolated final class AgentCallers: Sendable {
         case full
         /// Only `status`: what Nerda is and whether agents are on.
         case statusOnly
+        /// Another signed program: status only, unless the owner allows it.
+        case unknown(AgentProgram)
     }
 
     private let requirement: Requirement?
@@ -68,9 +71,15 @@ nonisolated final class AgentCallers: Sendable {
         guard let requirement else { return .full }
         guard let token = connection.token else { return .statusOnly }
         if let known = verdicts.withLock({ $0[token] }) { return known }
-        let access: Access = Self.code(of: token).map { requirement.isMet(by: $0) } == true ? .full : .statusOnly
+        let access = Self.code(of: token).map { verdict(on: $0) } ?? .statusOnly
         verdicts.withLock { $0[token] = access }
         return access
+    }
+
+    /// What running `code` may do.
+    func verdict(on code: SecCode) -> Access {
+        guard let requirement, !requirement.isMet(by: code) else { return .full }
+        return AgentProgram(code).map(Access.unknown) ?? .statusOnly
     }
 
     /// The running code of the process behind an audit token.

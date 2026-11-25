@@ -23,12 +23,18 @@ final class AgentHarness {
     let server: AgentServer
     /// Settings of the test's own, for the switch that lets agents in.
     let defaults: UserDefaults
+    /// The server's awake time, moved by hand (`advance(by:)`).
+    let clock = AgentTestClock()
     private let defaultsName: String
     var socket: URL { server.socket }
 
     /// `callers` decides who may do more than ask for status; by default
-    /// every program of this user, as in development builds.
-    init(callers: AgentCallers = .anyone) throws {
+    /// every program of this user, as in development builds. `ask` is the
+    /// owner asked about another program; by default they never answer.
+    /// `profiles` are the profiles beside Personal agents may choose
+    /// (`temporaryProfile`), so a test never reads the owner's.
+    init(callers: AgentCallers = .anyone, ask: @escaping AgentApprovals.Ask = { _ in nil },
+         profiles: [Profile] = []) throws {
         // Short: a socket's path has room for 103 bytes.
         folder = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "na-" + UUID().uuidString.prefix(8))
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -36,7 +42,9 @@ final class AgentHarness {
         defaultsName = "nerda.agents.tests." + UUID().uuidString
         defaults = try #require(UserDefaults(suiteName: defaultsName))
         // Every profile's Agent tabs on a store of their own, kept in memory.
-        server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults) { profile in
+        let clock = clock
+        server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults,
+                             profiles: { [.main] + profiles }, now: { clock.now }, ask: ask) { profile in
             AgentBrowser(profile: profile, dataStore: .nonPersistent())
         }
         server.start()
@@ -47,11 +55,14 @@ final class AgentHarness {
 
     /// An MCP client connected to the server through the shim, as Claude
     /// Code or Codex would be, already past `initialize`. `session` is the
-    /// harness's session id (Claude Code's, Codex's thread's).
+    /// harness's session id (Claude Code's, Codex's thread's); `launcher`
+    /// starts Nerda when nothing answers, never the real one in tests.
     func agent(client: String = "claude-code", session: String = "session-1",
-               wire: Int = AgentWire.version) async throws -> AgentTestClient {
-        let mcp = AgentMCP(socket: socket, environment: ["CLAUDE_CODE_SESSION_ID": session], wire: wire)
-        let agent = AgentTestClient(mcp: mcp)
+               wire: Int = AgentWire.version, launcher: AgentLauncher? = nil) async throws -> AgentTestClient {
+        let notifications = AgentTestNotifications()
+        let mcp = AgentMCP(socket: socket, environment: ["CLAUDE_CODE_SESSION_ID": session], wire: wire,
+                           launcher: launcher, notify: { notifications.append($0) })
+        let agent = AgentTestClient(mcp: mcp, notifications: notifications)
         let reply = try await agent.request("initialize", [
             "protocolVersion": "2025-06-18",
             "capabilities": [:],
@@ -71,9 +82,20 @@ final class AgentHarness {
     }
 }
 
+/// Awake time that only moves when a test moves it, so cleanup's 15
+/// minutes pass at once.
+@MainActor
+final class AgentTestClock {
+    private(set) var now = SuspendingClock.now
+
+    func advance(by duration: Duration) { now = now.advanced(by: duration) }
+}
+
 /// One MCP client's side of the conversation with the shim.
 struct AgentTestClient {
     let mcp: AgentMCP
+    /// What the shim sent between replies (progress, a changed tool list).
+    let notifications: AgentTestNotifications
     private static let ids = Counter()
 
     /// A JSON-RPC request and its whole reply (`result` or `error`).
@@ -98,6 +120,27 @@ struct AgentTestClient {
     func tools() async throws -> [AgentJSON] {
         try #require(try await request("tools/list")["result"]?["tools"]?.array)
     }
+}
+
+/// The notifications a shim sent its client, by method, in order.
+final class AgentTestNotifications: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+
+    func append(_ line: String) { lock.withLock { lines.append(line) } }
+
+    var methods: [String] {
+        lock.withLock { lines }.compactMap { try? AgentJSON(line: $0)["method"]?.string }
+    }
+}
+
+/// A profile beside Personal, its files in a temporary folder: its history
+/// and bookmarks are its own, never the owner's.
+@MainActor
+func temporaryProfile(_ name: String = "Test") throws -> Profile {
+    let folder = FileManager.default.temporaryDirectory.appending(path: "nerda-profile-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    return Profile(name: name, symbol: "person", color: .blue, root: folder)
 }
 
 private final class Counter: @unchecked Sendable {
