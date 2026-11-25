@@ -47,10 +47,11 @@ final class AgentHarness {
 
     /// An MCP client connected to the server through the shim, as Claude
     /// Code or Codex would be, already past `initialize`. `session` is the
-    /// harness's session id (Claude Code's, Codex's thread's).
+    /// harness's session id (Claude Code's, Codex's thread's); `launcher`
+    /// starts Nerda when nothing answers, never the real one in tests.
     func agent(client: String = "claude-code", session: String = "session-1",
-               wire: Int = AgentWire.version) async throws -> AgentTestClient {
-        let mcp = AgentMCP(socket: socket, environment: ["CLAUDE_CODE_SESSION_ID": session], wire: wire)
+               wire: Int = AgentWire.version, launcher: AgentLauncher? = nil) async throws -> AgentTestClient {
+        let mcp = AgentMCP(socket: socket, environment: ["CLAUDE_CODE_SESSION_ID": session], wire: wire, launcher: launcher)
         let agent = AgentTestClient(mcp: mcp)
         let reply = try await agent.request("initialize", [
             "protocolVersion": "2025-06-18",
