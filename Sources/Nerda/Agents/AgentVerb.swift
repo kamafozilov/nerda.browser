@@ -37,6 +37,7 @@ nonisolated struct AgentVerb: Sendable {
         [status],
         tabVerbs, // TabVerbs.swift
         screenshotVerbs, // ScreenshotVerbs.swift
+        readingVerbs, // ReadingVerbs.swift
         lookupVerbs, // LookupVerbs.swift
         ownerVerbs, // OwnerVerbs.swift
     ].flatMap(\.self)

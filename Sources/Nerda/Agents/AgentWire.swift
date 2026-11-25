@@ -96,6 +96,8 @@ nonisolated struct AgentError: Error, Sendable, Equatable {
         case noTab = "no_tab"
         /// Another Agent session's tab.
         case notYours = "not_yours"
+        /// The element a ref named is gone: take a new snapshot.
+        case staleRef = "stale_ref"
         /// The page couldn't be opened.
         case failed
         /// The deadline passed first.
