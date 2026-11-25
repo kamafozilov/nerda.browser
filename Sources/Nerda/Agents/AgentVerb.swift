@@ -40,6 +40,7 @@ nonisolated struct AgentVerb: Sendable {
         readingVerbs, // ReadingVerbs.swift
         actingVerbs, // ActingVerbs.swift
         dialogVerbs, // AgentDialogs.swift
+        fileVerbs, // FileVerbs.swift
         lookupVerbs, // LookupVerbs.swift
         ownerVerbs, // OwnerVerbs.swift
         signInVerbs, // SignInVerbs.swift

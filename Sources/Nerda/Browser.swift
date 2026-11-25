@@ -85,6 +85,9 @@ final class Browser: NSObject {
     }
     /// Where this window's downloads go instead of `Downloads.folder` (tests).
     @ObservationIgnored var downloadFolder: URL?
+    /// An Agent browser's: the folder under `downloadFolder` where a tab's
+    /// downloads go, its Agent session's (`AgentDownloads`).
+    @ObservationIgnored var agentDownloadsFolder: (Tab) -> String? = { _ in nil }
     /// Where this window's tab operations are timed: the app's one record,
     /// or a test's own.
     @ObservationIgnored var recorder = Recorder.shared
@@ -802,6 +805,8 @@ extension Browser: WKUIDelegate {
 
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
                  initiatedByFrame frame: WKFrameInfo) async -> [URL]? {
+        // An Agent tab's panel never shows: the agent's staged files answer it.
+        if isForAgents { return AgentUploads.panel(on: tab(for: webView), multiple: parameters.allowsMultipleSelection) }
         guard let window = await window(showing: webView) else { return nil }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = parameters.allowsMultipleSelection
@@ -1105,6 +1110,7 @@ extension Browser: WKNavigationDelegate {
 
     private func track(_ download: WKDownload) {
         download.delegate = self
+        if isForAgents { AgentDownloads.started(download, in: self) }
         withAnimation(.slide) { downloads.insert(Download(download), at: 0) }
     }
 
@@ -1422,7 +1428,7 @@ extension Browser: WKDownloadDelegate {
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                   suggestedFilename: String) async -> URL? {
         if let item = item(for: download), item.isResuming, let file = item.file { return file }
-        guard let file = await whereToSave(suggestedFilename) else {
+        guard let file = await whereToSave(suggestedFilename, for: download) else {
             withAnimation(.slide) { downloads.removeAll { $0.task === download } }
             return nil
         }
@@ -1431,7 +1437,9 @@ extension Browser: WKDownloadDelegate {
     }
 
     /// The file a download named so goes to; nil when the question is cancelled.
-    private func whereToSave(_ name: String) async -> URL? {
+    /// An Agent tab's goes to its session's folder, never asked.
+    private func whereToSave(_ name: String, for download: WKDownload? = nil, from tab: Tab? = nil) async -> URL? {
+        if isForAgents { return AgentDownloads.destination(for: download, named: name, from: tab, in: self) }
         if downloadFolder == nil, Downloads.asks, let window {
             let panel = NSSavePanel()
             panel.directoryURL = Downloads.folder
@@ -1451,7 +1459,7 @@ extension Browser: WKDownloadDelegate {
     func saveData(_ webView: WKWebView, data: Data?, suggestedFilename: String?, mimeType: String?, originatingURL: URL?) {
         guard let data else { return }
         Task {
-            guard let file = await whereToSave(suggestedFilename ?? "") else { return }
+            guard let file = await whereToSave(suggestedFilename ?? "", from: tab(for: webView)) else { return }
             let item = Download(saving: file, size: Int64(data.count))
             withAnimation(.slide) { downloads.insert(item, at: 0) }
             do {
@@ -1465,6 +1473,7 @@ extension Browser: WKDownloadDelegate {
     }
 
     func downloadDidFinish(_ download: WKDownload) {
+        if isForAgents { AgentDownloads.finished(download, in: self) }
         guard let item = item(for: download) else { return }
         item.finish()
         if let file = item.file {
@@ -1473,6 +1482,7 @@ extension Browser: WKDownloadDelegate {
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        if isForAgents { AgentDownloads.failed(download, error, in: self) }
         item(for: download)?.fail(error, resumeData: resumeData)
     }
 

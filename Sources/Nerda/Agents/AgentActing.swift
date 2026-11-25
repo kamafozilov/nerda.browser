@@ -118,7 +118,8 @@ extension AgentPage {
         await settle(tab, until: min(.now + settleAtMost, call.deadline - .seconds(1)))
         let opened = adoptNewTabs(of: agentTab, besides: tabsBefore, for: call)
         var notices = opened.map { "notice: opened a new tab \($0.ref): \($0.tab.url?.absoluteString ?? "") (snapshot \($0.ref) reads it)" }
-        notices += AgentNotices.take(from: tab).map { "notice: " + $0 }
+        let downloading = await AgentDownloads.settle(tab, until: min(.now + AgentDownloads.waitAtMost, call.deadline - .seconds(1)))
+        notices += (AgentNotices.take(from: tab) + downloading).map { "notice: " + $0 }
 
         if AgentNotices.held(tab) != nil {
             return ([did] + header(agentTab) + notices + ["", "The page waits on its dialog: nothing in it can be read or done until the dialog is answered with dialog."])

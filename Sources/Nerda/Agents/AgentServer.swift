@@ -122,6 +122,7 @@ final class AgentServer {
         if let made = agentBrowsers[ObjectIdentifier(profile)] { return made }
         let made = makeBrowser(profile)
         made.browser.agentServer = self
+        made.browser.agentDownloadsFolder = { [weak sessions] in sessions?.downloadsFolder(for: $0) }
         agentBrowsers[ObjectIdentifier(profile)] = made
         return made
     }
