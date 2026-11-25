@@ -222,3 +222,4 @@ Adapted in Nerda:
 - Sources/Nerda/Recorder.swift
 - Sources/Nerda/Watchdog.swift
 - Sources/Nerda/LastFrame.swift
+- Sources/Nerda/HungPages.swift
