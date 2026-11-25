@@ -261,13 +261,23 @@ struct HandoffTests {
         #expect(harness.agents?.tabs.isEmpty == true)
     }
 
-    /// The command line's exit codes: 3 while the owner is needed, apart
-    /// from failing (1), Nerda unreachable (2) and timing out (124).
-    @Test func theCommandLineExitsThreeWhileTheOwnerIsNeeded() {
-        #expect(AgentReply.done("ok").exitCode == 0)
-        #expect(AgentReply.failed(AgentError(.needsUser, "Ask the user")).exitCode == 3)
-        #expect(AgentReply.failed(AgentError(.failed, "No")).exitCode == 1)
-        #expect(AgentReply.failed(AgentError(.unreachable, "Closed")).exitCode == 2)
-        #expect(AgentReply.failed(AgentError(.timedOut, "Slow")).exitCode == 124)
+    /// The `nerda-browser` command waits on the owner as long as `wait`
+    /// says, then exits 3 with needs_user, apart from failing (1): the
+    /// owner was told, and a script can run it again.
+    @Test func theCommandLineExitsThreeWhileTheOwnerIsNeeded() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        let url = try await harness.pages.serve("/sign-in", "<title>Sign in</title><input type=password>")
+        let agent = try await harness.agent(session: "claude-7")
+        _ = try await agent.call("open", ["url": AgentJSON(url)])
+
+        let shell = ["CLAUDE_CODE_SESSION_ID": "claude-7"]
+        let handoff = await AgentCommandLine.run(["handoff", "t1", "Sign in to the test site", "--json", #"{"wait": 0.2}"#],
+                                                 environment: shell, socket: harness.socket)
+        #expect(handoff.status == 3, "\(handoff.errors)")
+        #expect(handoff.output.isEmpty)
+        #expect(handoff.errors.contains("needs_user"))
+        #expect(harness.server.owner.waiting.count == 1)
+        #expect(harness.notifier.posted.count == 1)
     }
 }
