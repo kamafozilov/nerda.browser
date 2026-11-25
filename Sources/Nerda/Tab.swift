@@ -1322,6 +1322,7 @@ struct PageView: NSViewRepresentable {
             slot.stage.resized = { [weak selected] in selected?.resize(width: $0.width, height: $0.height) }
             if slot.isHidden { slot.isHidden = false }
             if page.isHidden { page.isHidden = false }
+            if arriving { slot.lastFrame.arrive(page, on: slot.stage, in: slot) }
             guard arriving, takesFocus, !keepsKeyboard else { continue }
             if let window, focused != nil {
                 window.makeFirstResponder(page)
@@ -1334,6 +1335,7 @@ struct PageView: NSViewRepresentable {
         // With no page on screen (a new tab, the settings), the keyboard
         // leaves the one hidden behind: Space would pause its video unseen.
         if shown == nil, focused != nil { window?.makeFirstResponder(nil) }
+        for slot in slots where slot.page !== shown && !slot.isHidden { slot.lastFrame.leave(slot.page, on: slot.stage) }
         for page in pages where page !== shown && !page.isHidden { page.isHidden = true }
         for slot in slots where slot.page !== shown && !slot.isHidden { slot.isHidden = true }
     }
@@ -1341,9 +1343,11 @@ struct PageView: NSViewRepresentable {
 
 /// A page's place in the card: its stage, and WebKit's inspector when docked
 /// under it, which WebKit puts here, beside the stage. They hide together.
-private final class PageSlot: NSView {
+/// Its last frame stands over the page as it comes back (LastFrame.swift).
+final class PageSlot: NSView {
     let page: WKWebView
     let stage = PageStage()
+    let lastFrame = LastFrame()
 
     init(_ page: WKWebView, frame: CGRect) {
         self.page = page
