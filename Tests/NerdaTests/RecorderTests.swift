@@ -122,8 +122,8 @@ struct RecorderTests {
     @Test func theSwitchTurnsTheRecordOff() async throws {
         let (browser, recorder) = recordedBrowser()
         do {
-            Speedups.overrides["RECORDER"] = false
-            defer { Speedups.overrides["RECORDER"] = nil }
+            Speedups.overrides[.recorder] = false
+            defer { Speedups.overrides[.recorder] = nil }
             browser.newTab()
             recorder.record(.firstPaint, seconds: 0.1)
         }

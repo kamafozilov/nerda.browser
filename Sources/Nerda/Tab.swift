@@ -1220,7 +1220,7 @@ final class Tab: Identifiable {
     /// suspended, as before. NERDA_HIDDEN_RUN=0 leaves WebKit's own, to time
     /// switches with and without (`Speedups`).
     static var hiddenPolicy: WKPreferences.InactiveSchedulingPolicy {
-        guard Speedups.isOn("HIDDEN_RUN") else { return webKitsHiddenPolicy }
+        guard Speedups.isOn(.hiddenRun) else { return webKitsHiddenPolicy }
         return LowPowerMode.isOn ? .suspend : .none
     }
 

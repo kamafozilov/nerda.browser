@@ -64,7 +64,7 @@ final class SleepCoordinator {
     /// `Browser.heavy` after `Browser.heavyAfter`, pinned or not.
     func check() {
         let after = TabSleep.current.interval
-        let sparing = Speedups.isOn("PRESSURE_POLICY")
+        let sparing = Speedups.isOn(.pressurePolicy)
         for browser in browsers.allObjects {
             if let after { browser.sleepIdleTabs(unseenFor: after, sparingRevisited: sparing) }
             browser.sleepIdleTabs(unseenFor: Browser.heavyAfter, pinsToo: true, over: Browser.heavy)
@@ -77,7 +77,7 @@ final class SleepCoordinator {
     /// heaviest tab that may sleep goes, then one more each `lookEvery`
     /// until it ends, so as few tabs as possible load again.
     func pressure(_ level: MemoryPressure) {
-        guard Speedups.isOn("PRESSURE_POLICY") else { return sleepAll(level) }
+        guard Speedups.isOn(.pressurePolicy) else { return sleepAll(level) }
         self.level = level
         guard level == .critical else {
             relief?.cancel()

@@ -104,8 +104,8 @@ struct LastFrameTests {
     }
 
     @Test func theSwitchTurnsItOff() async throws {
-        Speedups.overrides["LAST_FRAME"] = false
-        defer { Speedups.overrides["LAST_FRAME"] = nil }
+        Speedups.overrides[.lastFrame] = false
+        defer { Speedups.overrides[.lastFrame] = nil }
         let browser = Browser(dataStore: .nonPersistent())
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)

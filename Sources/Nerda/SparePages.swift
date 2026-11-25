@@ -10,7 +10,7 @@ import WebKit
 /// is taken. None in Low Power Mode, nor for an incognito window, whose
 /// store is in memory. NERDA_SPARE_PAGE=0 turns it off for one run.
 enum SparePages {
-    static var isOn: Bool { Speedups.isOn("SPARE_PAGE") }
+    static var isOn: Bool { Speedups.isOn(.sparePage) }
 
     /// How long after one is taken the next is made: the tab that took it
     /// gets the time to load first.

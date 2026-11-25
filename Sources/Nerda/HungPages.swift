@@ -55,7 +55,7 @@ struct Hang {
 }
 
 enum HungPages {
-    static var isOn: Bool { Speedups.isOn("HANG_HANDLING") }
+    static var isOn: Bool { Speedups.isOn(.hangHandling) }
     /// How long a page has to answer a ping.
     static var patience: TimeInterval = 2
     /// From WebKit's word (itself three seconds after the reach) to the card.

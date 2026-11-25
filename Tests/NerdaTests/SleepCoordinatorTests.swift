@@ -37,9 +37,9 @@ private func coordinator(for browsers: Browser...) -> SleepCoordinator {
     #expect(hidden.count == 2)
 
     let coordinator = coordinator(for: first, second)
-    Speedups.overrides["PRESSURE_POLICY"] = false
+    Speedups.overrides[.pressurePolicy] = false
     coordinator.pressure(.warning)
-    Speedups.overrides["PRESSURE_POLICY"] = nil
+    Speedups.overrides[.pressurePolicy] = nil
     try await waitFor("Hidden tabs asleep") { hidden.allSatisfy(\.isAsleep) }
     #expect(!pinned.isAsleep)
     #expect(first.selected?.isAsleep == false && second.selected?.isAsleep == false)
@@ -54,9 +54,9 @@ private func coordinator(for browsers: Browser...) -> SleepCoordinator {
     pinned.isPinned = true
 
     let coordinator = coordinator(for: browser)
-    Speedups.overrides["PRESSURE_POLICY"] = false
+    Speedups.overrides[.pressurePolicy] = false
     coordinator.pressure(.critical)
-    Speedups.overrides["PRESSURE_POLICY"] = nil
+    Speedups.overrides[.pressurePolicy] = nil
     try await waitFor("Pinned tab asleep") { pinned.isAsleep }
     #expect(browser.selected?.isAsleep == false)
 }

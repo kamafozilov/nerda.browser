@@ -151,13 +151,13 @@ struct HiddenPagesTests {
     /// suspended out of sight. The switch is read as each page is made, so
     /// it is set only around that, and the next page runs again.
     @Test func theSwitchLeavesWebKitsOwn() throws {
-        defer { Speedups.overrides["HIDDEN_RUN"] = nil; LowPowerMode.forced = nil }
+        defer { Speedups.overrides[.hiddenRun] = nil; LowPowerMode.forced = nil }
         LowPowerMode.forced = false
         let browser = Browser(dataStore: .nonPersistent())
-        Speedups.overrides["HIDDEN_RUN"] = false
+        Speedups.overrides[.hiddenRun] = false
         browser.open(URL(string: "about:blank")!)
         let off = try #require(browser.tabs.last).webView.configuration.preferences.inactiveSchedulingPolicy
-        Speedups.overrides["HIDDEN_RUN"] = nil
+        Speedups.overrides[.hiddenRun] = nil
         #expect(off == WKPreferences().inactiveSchedulingPolicy)
 
         browser.open(URL(string: "about:blank")!)

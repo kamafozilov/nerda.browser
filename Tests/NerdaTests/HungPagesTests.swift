@@ -247,7 +247,7 @@ struct HungPagesTests {
     }
 
     @Test func turningHangHandlingOffLeavesAHungPageAsWebKitDoes() async throws {
-        Speedups.overrides["HANG_HANDLING"] = false
+        Speedups.overrides[.hangHandling] = false
         HungPages.patience = 0.5
         defer {
             Speedups.overrides = [:]

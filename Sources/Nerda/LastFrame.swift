@@ -20,7 +20,7 @@ import WebKit
 /// frame goes with its page. `NERDA_LAST_FRAME=0` turns it off for a run.
 /// Each `PageSlot` has one.
 final class LastFrame {
-    static var isOn: Bool { Speedups.isOn("LAST_FRAME") }
+    static var isOn: Bool { Speedups.isOn(.lastFrame) }
 
     /// What a frame was drawn for. It stands in only for exactly this.
     struct Key: Equatable {

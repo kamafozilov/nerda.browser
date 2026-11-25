@@ -96,15 +96,15 @@ struct SparePageTests {
     @Test func theSwitchTurnsTheSpareOff() async throws {
         try await withSpare { store, browser in
             let spare = try #require(SparePages.page(for: store))
-            Speedups.overrides["SPARE_PAGE"] = false
+            Speedups.overrides[.sparePage] = false
             let tab = browser.open(URL(string: "about:blank")!)
-            Speedups.overrides["SPARE_PAGE"] = nil
+            Speedups.overrides[.sparePage] = nil
             #expect(tab.page !== spare)
         }
         let other = WKWebsiteDataStore(forIdentifier: UUID())
-        Speedups.overrides["SPARE_PAGE"] = false
+        Speedups.overrides[.sparePage] = false
         SparePages.keep(for: other, in: 0)
-        Speedups.overrides["SPARE_PAGE"] = nil
+        Speedups.overrides[.sparePage] = nil
         try await Task.sleep(for: .milliseconds(300))
         #expect(SparePages.page(for: other) == nil)
         SparePages.drop(for: other)

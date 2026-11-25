@@ -41,7 +41,7 @@ enum Launch {
     static func stage<T>(_ name: String, _ body: () throws -> T) rethrows -> T { try current.stage(name, body) }
 
     static func later(_ name: String, _ work: @escaping () -> Void) {
-        guard Speedups.isOn("LAUNCH_LATER") else { return current.stage("later " + name, work) }
+        guard Speedups.isOn(.launchLater) else { return current.stage("later " + name, work) }
         current.later(name, work)
     }
 
