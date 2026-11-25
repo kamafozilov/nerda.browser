@@ -14,6 +14,9 @@ final class OwnerRequest: Identifiable {
     enum Kind: Equatable {
         case handoff(Step)
         case question(choices: [String])
+        /// A page's confirm or prompt its agent left unanswered
+        /// (`AgentDialog`), with the dialog's buttons as choices.
+        case dialog(choices: [String])
     }
 
     enum Answer: Equatable {
@@ -53,7 +56,12 @@ final class OwnerRequest: Identifiable {
 
     var isHandoff: Bool { if case .handoff = kind { true } else { false } }
 
-    var choices: [String] { if case .question(let choices) = kind { choices } else { [] } }
+    var choices: [String] {
+        switch kind {
+        case .question(let choices), .dialog(let choices): choices
+        case .handoff: []
+        }
+    }
 
     /// What the owner is told, after the agent's name: "needs you to sign in".
     var asking: String {
@@ -64,6 +72,7 @@ final class OwnerRequest: Identifiable {
         case .handoff(.passkey): "needs your passkey"
         case .handoff(.other): "needs you"
         case .question: "asks you"
+        case .dialog: "needs you to answer a page"
         }
     }
 
@@ -130,6 +139,19 @@ final class OwnerRequests {
         }) { return same }
         return begin(OwnerRequest(session: session, tab: tab, kind: .question(choices: choices), text: question,
                                   canSkip: false, site: nil))
+    }
+
+    /// A page's dialog its agent left unanswered, put to the owner: always
+    /// a new request, as the same words may well be asked again.
+    func dialog(_ text: String, choices: [String], on tab: AgentTab, for session: AgentSession) -> OwnerRequest {
+        begin(OwnerRequest(session: session, tab: tab, kind: .dialog(choices: choices), text: text, canSkip: false, site: nil))
+    }
+
+    /// The request is no longer needed: withdrawn if still open, and told to
+    /// no later call.
+    func drop(_ request: OwnerRequest) {
+        end(request, .closed)
+        untold.removeAll { $0 === request }
     }
 
     /// The owner's Done.

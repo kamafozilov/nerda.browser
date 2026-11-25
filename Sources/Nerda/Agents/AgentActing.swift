@@ -97,10 +97,15 @@ extension AgentPage {
     /// arguments, then `return try await AgentPage.act(tab, for: call) { …
     /// return "typed into e7" }`; what it finds out on the way it posts to
     /// `AgentNotices`.
-    static func act(_ agentTab: AgentTab, for call: AgentCall, _ action: () async throws -> String) async throws -> String {
+    ///
+    /// `answeringDialog`: the action answers the dialog holding the page
+    /// (the `dialog` verb), so the page can't be read before it: the answer
+    /// is the whole outline, or the new page after a navigation.
+    static func act(_ agentTab: AgentTab, for call: AgentCall, answeringDialog: Bool = false,
+                    _ action: () async throws -> String) async throws -> String {
         let tab = agentTab.tab
-        if let held = AgentNotices.held(tab) {
-            throw AgentError(.failed, "Tab \(agentTab.ref)'s page waits on a dialog (\(held)), so it can't be acted on until that is answered.")
+        if !answeringDialog, let held = AgentNotices.held(tab) {
+            throw AgentError(.failed, "Tab \(agentTab.ref)'s page waits on a dialog (\(held)), so it can't be acted on until that is answered with dialog.")
         }
         let soon = ContinuousClock.now + .seconds(2)
         let before = await unlessHeld(tab, by: soon) { try await read(agentTab) }
@@ -117,12 +122,14 @@ extension AgentPage {
         notices += (AgentNotices.take(from: tab) + downloading).map { "notice: " + $0 }
 
         if AgentNotices.held(tab) != nil {
-            return ([did] + header(agentTab) + notices + ["", "The page waits on its dialog: nothing in it can be read or done until the dialog is answered."])
+            return ([did] + header(agentTab) + notices + ["", "The page waits on its dialog: nothing in it can be read or done until the dialog is answered with dialog."])
                 .joined(separator: "\n")
         }
         let after = await unlessHeld(tab, by: .now + .seconds(3)) { try await read(agentTab) } ?? AgentReading()
-        let navigated = await unlessHeld(tab, by: .now + .seconds(1)) { try await documentMark(of: tab) } != document
-            || !sameDocument(address, tab.url)
+        let navigated = answeringDialog
+            ? !sameDocument(address, tab.url)
+            : await unlessHeld(tab, by: .now + .seconds(1)) { try await documentMark(of: tab) } != document
+                || !sameDocument(address, tab.url)
         if navigated {
             return await shown(agentTab, after, did: did, notices: notices, text: true)
         }

@@ -39,6 +39,9 @@ final class AgentServer {
     /// The owner's window a clicked notification shows its Agent tab in:
     /// the one they used last.
     var ownerWindow: () -> Browser? = { Windows.lastUsed?.browser }
+    /// How long a page's confirm or prompt waits for its agent's answer
+    /// before it goes to the owner (`raised`); tests set less.
+    var dialogsReachOwnerAfter: Duration = .seconds(120)
 
     /// `now` is awake time (`AgentSessions.now`); tests move their own.
     init(socket: URL, callers: AgentCallers = .nerdas, defaults: UserDefaults = .standard,
@@ -118,6 +121,7 @@ final class AgentServer {
     func agents(for profile: Profile) -> AgentBrowser {
         if let made = agentBrowsers[ObjectIdentifier(profile)] { return made }
         let made = makeBrowser(profile)
+        made.browser.agentServer = self
         made.browser.agentDownloadsFolder = { [weak sessions] in sessions?.downloadsFolder(for: $0) }
         agentBrowsers[ObjectIdentifier(profile)] = made
         return made

@@ -228,6 +228,9 @@ final class Browser: NSObject {
     /// The browser of Agent tabs (AgentBrowser): it keeps no history and no
     /// session, and has no window of the owner's.
     let isForAgents: Bool
+    /// An Agent browser's server, told of its pages' popups and dialogs
+    /// (`AgentServer.opened`, `raised`); nil for the owner's browsers.
+    @ObservationIgnored weak var agentServer: AgentServer?
     /// Where the pinned sites and bookmarks show: not in incognito, nor in a secondary window.
     var keepsPins: Bool { !isPrivate && !isSecondary }
     /// The profile its window is marked with: none with Personal alone, nor in incognito.
@@ -505,8 +508,14 @@ final class Browser: NSObject {
     }
 
     func confirmDiscarding(on page: WKWebView) async -> Bool {
-        await ask("Leave this page?", "Changes you made may not be saved.", over: page,
-                  buttons: ["Stay", "Leave"]) == .alertSecondButtonReturn
+        // An Agent tab leaves: its agent asked to go, and nobody is there to
+        // ask. Its agent hears of it.
+        if isForAgents {
+            if let tab = tab(for: page) { AgentNotices.post(AgentDialog.leftAnyway, on: tab) }
+            return true
+        }
+        return await ask("Leave this page?", "Changes you made may not be saved.", over: page,
+                         buttons: ["Stay", "Leave"]) == .alertSecondButtonReturn
     }
 
     /// Closing the window closes its tabs, as Safari does: nothing keeps
@@ -726,6 +735,8 @@ extension Browser: WKUIDelegate {
         }
         let tab = Tab(configuration: configuration, opener: opener)
         withAnimation(.slide) { add(tab, inBackground: ask == .behind) }
+        // An Agent tab's popup is its session's Agent tab too.
+        agentServer?.opened(tab, by: opener)
         return tab.webView
     }
 
@@ -761,30 +772,31 @@ extension Browser: WKUIDelegate {
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo) async {
-        let held = agentDialog("an alert", message, on: webView)
-        defer { held?.end() }
+        // An Agent tab's is accepted at once, and told to its agent.
+        if isForAgents {
+            if let tab = tab(for: webView) { AgentNotices.post("accepted an alert: \(AgentDialog.quoted(message))", on: tab) }
+            return
+        }
         _ = await ask(Self.says(frame), message, over: webView)
     }
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo) async -> Bool {
-        let held = agentDialog("a confirm dialog", message, on: webView)
-        defer { held?.end() }
+        if isForAgents, let tab = tab(for: webView) {
+            return await AgentDialog.raise(.confirm, message, by: Self.says(frame), on: tab, page: webView, in: self) != .cancel
+        }
         return await ask(Self.says(frame), message, over: webView, buttons: ["OK", "Cancel"]) == .alertFirstButtonReturn
-    }
-
-    /// An Agent tab's dialog, told to its agent and holding its page
-    /// (`AgentNotices.hold`) until answered; nil for the owner's tabs.
-    private func agentDialog(_ kind: String, _ message: String, on webView: WKWebView) -> AgentNotices.Hold? {
-        guard isForAgents else { return nil }
-        let words = String(message.replacing(/\s+/, with: " ").prefix(300))
-        return AgentNotices.hold(tab(for: webView), "raised \(kind): \(String(reflecting: words))")
     }
 
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String,
                  defaultText: String?, initiatedByFrame frame: WKFrameInfo) async -> String? {
-        let held = agentDialog("a prompt", prompt, on: webView)
-        defer { held?.end() }
+        // An Agent tab's waits for its agent's answer (`AgentDialog`).
+        if isForAgents, let tab = tab(for: webView) {
+            let answer = await AgentDialog.raise(.prompt(defaultText: defaultText ?? ""), prompt, by: Self.says(frame),
+                                                 on: tab, page: webView, in: self)
+            if case .ok(let text) = answer { return text ?? "" }
+            return nil
+        }
         let field = NSTextField(string: defaultText ?? "")
         field.frame.size.width = 280
         let answer = await ask(Self.says(frame), prompt, over: webView, buttons: ["OK", "Cancel"], accessory: field, focus: field)
