@@ -416,7 +416,7 @@ final class Tab: Identifiable {
             page.observe(\.title) { [weak self] page, _ in
                 MainActor.assumeIsolated {
                     self?.pageTitle = page.title ?? ""
-                    if self?.isPrivate == false, let url = page.url, let title = page.title { self?.history.name(url, title) }
+                    if self?.keepsHistory == true, let url = page.url, let title = page.title { self?.history.name(url, title) }
                 }
             },
             page.observe(\.isLoading) { [weak self] page, _ in
@@ -824,7 +824,7 @@ final class Tab: Identifiable {
     /// Puts the page's address in history, once it is really there: loaded,
     /// not just asked for (a mistyped address that fails is not a visit).
     func recordVisit() {
-        guard !isPrivate, let page, let url = page.url, url != recorded,
+        guard keepsHistory, let page, let url = page.url, url != recorded,
               page.backForwardList.currentItem?.url == url else { return }
         recorded = url
         history.visit(url, title: page.title ?? "")
@@ -832,6 +832,9 @@ final class Tab: Identifiable {
 
     /// Its window's profile's; Personal's for a tab in no window (tests).
     private var history: History { (delegate as? Browser)?.profile.history ?? .shared }
+    /// Neither an incognito tab nor an Agent tab adds to it: what an agent
+    /// opens is not the owner's browsing.
+    private var keepsHistory: Bool { !isPrivate && (delegate as? Browser)?.isForAgents != true }
 
     /// `url` failed for want of a network: opened again in `page` once the
     /// Mac is back online, if the tab is still open and still says why.

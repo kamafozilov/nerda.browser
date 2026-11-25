@@ -203,6 +203,9 @@ final class Browser: NSObject {
     /// display: tabs only. The profile's pinned sites and bookmarks stay in
     /// its own window, rather than each have a page in every window.
     let isSecondary: Bool
+    /// The browser of Agent tabs (AgentBrowser): it keeps no history and no
+    /// session, and has no window of the owner's.
+    let isForAgents: Bool
     /// Where the pinned sites and bookmarks show: not in incognito, nor in a secondary window.
     var keepsPins: Bool { !isPrivate && !isSecondary }
     /// The profile its window is marked with: none with Personal alone, nor in incognito.
@@ -210,9 +213,10 @@ final class Browser: NSObject {
     /// What its fields suggest from: the profile's history, or in incognito, nothing of it.
     var history: History { isPrivate ? History.empty : profile.history }
 
-    init(profile: Profile = .main, dataStore: WKWebsiteDataStore? = nil, secondary: Bool = false) {
+    init(profile: Profile = .main, dataStore: WKWebsiteDataStore? = nil, secondary: Bool = false, forAgents: Bool = false) {
         self.profile = profile
         isSecondary = secondary
+        isForAgents = forAgents
         let dataStore = dataStore ?? profile.dataStore
         self.dataStore = dataStore
         siteSettings = dataStore.isPersistent ? profile.siteSettings : SiteSettings(defaults: nil)
@@ -409,7 +413,8 @@ final class Browser: NSObject {
         }
         // With nothing left, the window goes, as in other browsers: an
         // incognito one, and incognito with it. Without a window, a new tab.
-        if tabs.isEmpty {
+        // Agent tabs have no window to close, and nothing to show a new tab.
+        if tabs.isEmpty, !isForAgents {
             if downloads.contains(where: \.needsSession) { add(Tab()) }
             else if let window { window.close() }
             else { add(Tab()) }
