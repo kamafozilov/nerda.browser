@@ -72,8 +72,12 @@ actor AgentMCP {
             // Every tool can be called, listed or not: a group only decides
             // what the list shows.
             let reply = name == AgentVerb.moreTools.name ? moreTools(arguments) : await call(name, arguments: arguments)
+            var content: [AgentJSON] = [["type": "text", "text": .string(reply.text)]]
+            if let jpeg = reply.jpeg {
+                content.append(["type": "image", "data": .string(jpeg.base64EncodedString()), "mimeType": "image/jpeg"])
+            }
             return Self.result(id: id, [
-                "content": [["type": "text", "text": .string(reply.text)]],
+                "content": .array(content),
                 "isError": .bool(!reply.ok),
             ]).line
         default:

@@ -112,10 +112,11 @@ final class SleepCoordinator {
     /// Whether memory pressure may put `tab` to sleep. Never the tab on
     /// screen, the last five used in its window (what you go back and forth
     /// between), one seen in the last ten minutes, one heard in the last
-    /// minute, or one with changes not sent. Pinned tabs no differently.
+    /// minute, one with changes not sent, or an Agent tab its agent is at
+    /// work in. Pinned tabs no differently.
     private func mayRelieve(_ tab: Tab, in browser: Browser) -> Bool {
         let now = Date.now
-        return tab.id != browser.selectedID && !tab.isAsleep && !tab.hasUnsavedWork && !tab.playsAudio
+        return tab.id != browser.selectedID && !tab.isAsleep && !tab.hasUnsavedWork && !tab.playsAudio && !tab.isKeptAwake
             && now.timeIntervalSince(tab.lastSeen) >= Self.seenGrace
             && tab.lastHeard.map { now.timeIntervalSince($0) >= Self.heardGrace } ?? true
             && !browser.recent.lazy.filter { $0.id != browser.selectedID }.suffix(Self.keepRecent).contains { $0 === tab }
