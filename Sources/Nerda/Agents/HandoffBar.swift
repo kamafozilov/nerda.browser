@@ -2,13 +2,15 @@ import SwiftUI
 
 /// The line at the foot of an Agent tab's page while its Agent waits on the
 /// owner there: what it asks, with Done (and Skip, when optional) for a
-/// Handoff, or the choices for a question.
+/// Handoff, or the choices for a question. A payment has no button here:
+/// only its sheet and Touch ID approve it.
 struct HandoffBar: View {
     let request: OwnerRequest
     let owner: OwnerRequests
 
     var body: some View {
-        OfferBar(icon: request.isHandoff ? "hand.raised" : "questionmark.bubble", title: request.title,
+        OfferBar(icon: request.isHandoff ? "hand.raised" : request.kind == .payment ? "creditcard" : "questionmark.bubble",
+                 title: request.title,
                  detail: request.text) {
             if request.isHandoff {
                 if request.canSkip { Button("Skip") { owner.skip(request) } }

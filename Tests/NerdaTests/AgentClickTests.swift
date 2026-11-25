@@ -39,7 +39,7 @@ struct AgentClickTests {
         let url = try await harness.pages.serve("/banner", """
             <title>Shop</title>
             <script>window.clicks = []; document.addEventListener('click', (e) => clicks.push(e.target.id));</script>
-            <button id=buy style="margin: 200px">Buy</button>
+            <button id=buy style="margin: 200px">Add to basket</button>
             <div id=banner style="position: fixed; inset: 0; background: white">
               <p>We use cookies</p>
               <button id=accept onclick="banner.remove()">Accept all</button>
@@ -49,7 +49,7 @@ struct AgentClickTests {
         let agent = try await harness.agent()
         _ = try await agent.call("open", ["url": AgentJSON(url)])
         let outline = try await agent.call("snapshot", ["tab": "t1"]).text
-        let buy = try #require(Self.ref(of: #"button "Buy""#, in: outline), "\(outline)")
+        let buy = try #require(Self.ref(of: #"button "Add to basket""#, in: outline), "\(outline)")
         let accept = try #require(Self.ref(of: #"button "Accept all""#, in: outline), "\(outline)")
         let reject = try #require(Self.ref(of: #"button "Reject all""#, in: outline), "\(outline)")
 
@@ -201,7 +201,7 @@ struct AgentClickTests {
             <title>Widget</title>
             <script>window.clicks = []; document.addEventListener('click', (e) => clicks.push((e.isTrusted ? 'trusted ' : 'script ') + e.target.id));</script>
             <div style="height: 900px"></div>
-            <button id=pay>Pay now</button>
+            <button id=pay>Choose plan</button>
             """)
         let widget = try await harness.pages.url("/widget", host: "localhost")
         let url = try await harness.pages.serve("/shop", """
@@ -214,9 +214,9 @@ struct AgentClickTests {
         var outline = ""
         try await waitFor {
             outline = try await agent.call("snapshot", ["tab": "t1"]).text
-            return outline.contains("Pay now")
+            return outline.contains("Choose plan")
         }
-        let pay = try #require(Self.ref(of: #"button "Pay now""#, in: outline), "\(outline)")
+        let pay = try #require(Self.ref(of: #"button "Choose plan""#, in: outline), "\(outline)")
         #expect(pay.hasPrefix("f"))
 
         let answer = try await agent.call("click", ["tab": "t1", "ref": .string(pay)])

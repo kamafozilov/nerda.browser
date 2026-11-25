@@ -10,8 +10,9 @@ import WebKit
 /// document, or a frame of the same site), a guard is set up in it and
 /// frozen (`AgentEvalGuard`): password and card values read as `••••`, and
 /// the ways of running code in the page's own world, where they don't, are
-/// refused. Its parts are listed in `AgentEvalGuard.parts`, so a later rule
-/// (holding a payment press for the owner's approval, #148) is one more.
+/// refused, and so is pressing a payment (`AgentEvalGuard.payments`), which
+/// only `click` and `press` hold for the owner's Touch ID. Its parts are
+/// listed in `AgentEvalGuard.parts`.
 ///
 /// The guard is no sandbox. WebKit runs a `javascript:` address set
 /// through `location` in the page's own world, with no navigation policy
@@ -77,8 +78,9 @@ enum AgentEval {
 /// `guard.matches`, `guard.tag`, `guard.attribute`, index loops, never
 /// iterators or array methods.
 nonisolated enum AgentEvalGuard {
-    /// What the guard is made of, in order. #148 adds its payment part here.
-    static let parts = [passwords, pageScript, frames]
+    /// What the guard is made of, in order: payments first, to weigh
+    /// presses with values and keys as they are (`AgentPayments.weigher`).
+    static let parts = [payments, passwords, pageScript, frames]
 
     static var body: String {
         """

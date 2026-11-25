@@ -44,8 +44,11 @@ final class AgentHarness {
     /// `approveSkill` is the owner looking at a Site skill's card; by
     /// default they never answer. The owner's Site skills are read from and
     /// saved in the harness's temporary folder, never the data folder.
+    /// `approvePayment` is the owner looking at a payment's sheet; by
+    /// default they never answer, and no sheet or Touch ID prompt shows.
     init(callers: AgentCallers = .anyone, ask: @escaping AgentApprovals.Ask = { _ in nil },
-         approveSkill: @escaping SiteSkills.Approve = { _ in nil }, profiles: [Profile] = []) throws {
+         approveSkill: @escaping SiteSkills.Approve = { _ in nil },
+         approvePayment: @escaping AgentPayments.Approve = { _ in nil }, profiles: [Profile] = []) throws {
         // Short: a socket's path has room for 103 bytes.
         folder = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "na-" + UUID().uuidString.prefix(8))
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -60,7 +63,8 @@ final class AgentHarness {
         self.vault = vault
         server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults,
                              profiles: { [.main] + profiles }, notifier: notifier, now: { clock.now }, ask: ask,
-                             skills: SiteSkills(folder: folder.appending(path: "Skills"), approve: approveSkill)) { profile in
+                             skills: SiteSkills(folder: folder.appending(path: "Skills"), approve: approveSkill),
+                             approvePayment: approvePayment) { profile in
             let agents = AgentBrowser(profile: profile, dataStore: .nonPersistent())
             agents.browser.vault = vault
             // Downloads under the test's folder, never the owner's Downloads.
