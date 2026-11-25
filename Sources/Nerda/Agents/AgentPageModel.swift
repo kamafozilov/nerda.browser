@@ -56,7 +56,11 @@ struct AgentFrame {
     init?(_ node: NSObject) {
         guard node.responds(to: NSSelectorFromString("info")), let info = node.value(forKey: "info") as? WKFrameInfo else { return nil }
         self.info = info
-        children = (node.value(forKey: "childFrames") as? [NSObject] ?? []).compactMap(AgentFrame.init)
+        // Private, like `info`: without it the frame is read on its own,
+        // its frames left out.
+        let childFrames = NSSelectorFromString("childFrames")
+        children = node.responds(to: childFrames)
+            ? (node.value(forKey: "childFrames") as? [NSObject] ?? []).compactMap(AgentFrame.init) : []
     }
 
     /// The frame at `path` down from here, by index in each frame's children.
