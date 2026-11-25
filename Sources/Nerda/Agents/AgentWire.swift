@@ -25,6 +25,11 @@ nonisolated enum AgentWire {
     /// have their own.
     static var socket: URL { socket(in: Edition.folder) }
 
+    /// What the shim sends, in place of a verb, when its MCP client closes
+    /// its input: the agent went away, and its session detaches. Not a verb
+    /// agents see or call.
+    static let detach = "detach"
+
     static func socket(in folder: URL) -> URL { folder.appending(path: "agents.sock") }
 }
 

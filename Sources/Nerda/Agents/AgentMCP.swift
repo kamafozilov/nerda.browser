@@ -121,6 +121,14 @@ actor AgentMCP {
         }
     }
 
+    /// Tells the app this shim's agent went away, so its session detaches
+    /// (`AgentWire.detach`). Unanswered or not, the shim is done.
+    func detach() async {
+        let request = AgentRequest(v: wire, verb: AgentWire.detach, session: AgentSessionName(client: client, id: sessionID))
+        guard let data = try? JSONEncoder().encode(request) else { return }
+        _ = try? await AgentSocket.request(data, to: socket.path, timeout: .seconds(2))
+    }
+
     // MARK: stdio
 
     /// Runs as the MCP server on stdin and stdout until stdin closes. Calls
@@ -141,8 +149,15 @@ actor AgentMCP {
                 pending.leave()
             }
         }
-        // The client closed stdin: what it already asked is still answered.
+        // The client closed stdin: what it already asked is still answered,
+        // and then its session detaches.
         pending.wait()
+        let detached = DispatchSemaphore(value: 0)
+        Task.detached {
+            await mcp.detach()
+            detached.signal()
+        }
+        detached.wait()
         exit(0)
     }
 

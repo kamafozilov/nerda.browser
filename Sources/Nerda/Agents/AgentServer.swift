@@ -14,7 +14,7 @@ final class AgentServer {
     static let isOnKey = "agentsCanUseNerda"
 
     let socket: URL
-    let sessions = AgentSessions()
+    let sessions: AgentSessions
     private let callers: AgentCallers
     private let defaults: UserDefaults
     private let makeBrowser: (Profile) -> AgentBrowser
@@ -24,11 +24,16 @@ final class AgentServer {
     private var agentBrowsers: [ObjectIdentifier: AgentBrowser] = [:]
     private var listener: AgentSocket.Listener?
     private var switchWatch: NSObjectProtocol?
+    /// Cleanup's sweep, once a minute of awake time.
+    private var sweeping: Task<Void, Never>?
 
+    /// `now` is awake time (`AgentSessions.now`); tests move their own.
     init(socket: URL, callers: AgentCallers = .nerdas, defaults: UserDefaults = .standard,
          profiles: @escaping () -> [Profile] = { Profiles.shared.all },
+         now: @escaping () -> SuspendingClock.Instant = { .now },
          makeBrowser: @escaping (Profile) -> AgentBrowser = { AgentBrowser(profile: $0) }) {
         self.socket = socket
+        sessions = AgentSessions(now: now)
         self.callers = callers
         self.defaults = defaults
         listProfiles = profiles
@@ -45,8 +50,17 @@ final class AgentServer {
     var isListening: Bool { listener != nil }
 
     /// Listens while the switch is on, from now on, following it as it is
-    /// turned off and on.
+    /// turned off and on; and cleans up finished sessions' tabs, switch or
+    /// not.
     func start() {
+        if sweeping == nil {
+            sweeping = Task { [weak self] in
+                // The suspending clock stands still while the Mac sleeps.
+                while (try? await Task.sleep(for: AgentSessions.sweepEvery, tolerance: .seconds(10), clock: .suspending)) != nil {
+                    self?.cleanUp()
+                }
+            }
+        }
         if switchWatch == nil {
             switchWatch = NotificationCenter.default.addObserver(
                 forName: UserDefaults.didChangeNotification, object: defaults, queue: .main
@@ -59,11 +73,17 @@ final class AgentServer {
 
     /// Stops listening for good; tabs already open stay.
     func stop() {
+        sweeping?.cancel()
+        sweeping = nil
         if let switchWatch { NotificationCenter.default.removeObserver(switchWatch) }
         switchWatch = nil
         listener?.close()
         listener = nil
     }
+
+    /// Closes finished sessions' Agent tabs (`AgentSessions.cleanUp`), as
+    /// the sweep does each minute.
+    func cleanUp() { sessions.cleanUp() }
 
     /// The Agent browsers made so far.
     var browsers: [AgentBrowser] { Array(agentBrowsers.values) }
@@ -124,6 +144,11 @@ final class AgentServer {
         guard let request = try? JSONDecoder().decode(AgentRequest.self, from: line) else {
             return .failed(AgentError(.invalid, "Nerda couldn't read that request."))
         }
+        let name = request.session ?? AgentSessionName(client: "unknown", id: "unknown")
+        if request.verb == AgentWire.detach {
+            if access == .full { sessions.detach(name) }
+            return .done("")
+        }
         guard let verb = AgentVerb.named[request.verb] else {
             return .failed(AgentError(.unknown, "Nerda has no \(request.verb). Ask the user to update Nerda."))
         }
@@ -133,7 +158,8 @@ final class AgentServer {
                 Use the nerda-browser command or MCP server that Nerda's setup installed.
                 """))
         }
-        let session = sessions.session(request.session ?? AgentSessionName(client: "unknown", id: "unknown"))
+        let session = sessions.began(name)
+        defer { sessions.finished(session) }
         let call = AgentCall(server: self, session: session, arguments: request.args, deadline: .now + verb.deadline)
         return await Self.done(verb, call)
     }
