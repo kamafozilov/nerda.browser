@@ -19,6 +19,9 @@ nonisolated struct AgentVerb: Sendable {
     var forAnyCaller = false
     /// How long it may take before the answer is "timed out".
     var deadline = AgentWire.deadline
+    /// The group of tools it is listed in once an agent asks for it
+    /// (`more_tools`); nil for the page verbs, always listed.
+    var group: AgentGroup?
     /// Does it on the main thread, for the session asking, with its
     /// arguments; the text is what the agent is shown. Throws an
     /// `AgentError` to fail with one.
@@ -29,6 +32,7 @@ nonisolated struct AgentVerb: Sendable {
     static let all: [AgentVerb] = [
         [status],
         tabVerbs, // TabVerbs.swift
+        lookupVerbs, // LookupVerbs.swift
     ].flatMap(\.self)
 
     static let named = Dictionary(uniqueKeysWithValues: all.map { ($0.name, $0) })

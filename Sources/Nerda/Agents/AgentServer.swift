@@ -20,6 +20,8 @@ final class AgentServer {
     private let callers: AgentCallers
     private let defaults: UserDefaults
     private let makeBrowser: (Profile) -> AgentBrowser
+    /// The owner's profiles agents may choose from, Personal first.
+    private let listProfiles: () -> [Profile]
     /// Each profile's Agent browser, made on its first Agent tab.
     private var agentBrowsers: [ObjectIdentifier: AgentBrowser] = [:]
     private var listener: AgentSocket.Listener?
@@ -29,6 +31,7 @@ final class AgentServer {
 
     /// `now` is awake time (`AgentSessions.now`); tests move their own.
     init(socket: URL, callers: AgentCallers = .nerdas, defaults: UserDefaults = .standard,
+         profiles: @escaping () -> [Profile] = { Profiles.shared.all },
          now: @escaping () -> SuspendingClock.Instant = { .now },
          ask: @escaping AgentApprovals.Ask = AgentApprovals.sheet,
          makeBrowser: @escaping (Profile) -> AgentBrowser = { AgentBrowser(profile: $0) }) {
@@ -37,8 +40,12 @@ final class AgentServer {
         self.callers = callers
         self.defaults = defaults
         approvals = AgentApprovals(defaults: defaults, ask: ask)
+        listProfiles = profiles
         self.makeBrowser = makeBrowser
     }
+
+    /// The owner's profiles, Personal first. Incognito is none of them.
+    var profiles: [Profile] { listProfiles() }
 
     /// Whether agents may use Nerda (the Settings switch).
     var isOn: Bool { defaults.object(forKey: Self.isOnKey) as? Bool ?? true }
