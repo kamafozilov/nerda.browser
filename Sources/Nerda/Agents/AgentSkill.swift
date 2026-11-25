@@ -66,6 +66,9 @@ nonisolated enum AgentSkill {
             - For a step only a person can do (signing in, a one-time code, a captcha, a passkey), \
             call `handoff` rather than trying it yourself. An answer starting needs_user (exit 3) \
             means the user hasn't come yet: tell them Nerda is waiting for them, then call it again.
+            - A press that pays (a pay button, a form with card details) waits for the user's Touch ID: \
+            on needs_user tell them Nerda asks them to approve the payment, then press it again. Never \
+            look for another way to pay; eval refuses it.
             - A page's header may name a Site skill (`skill: github …`): what is known to work on \
             that site. Read it with `skill` before you go on. When you find what works on a site \
             the next agent should know, offer it with `skill_save`; the user approves it first.

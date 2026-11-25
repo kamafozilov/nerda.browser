@@ -13,12 +13,16 @@ nonisolated extension AgentVerb {
             then the mouse's own click. An element covered by another (a cookie banner, a dialog) isn't \
             clicked: the answer names the covering element's buttons, to close it first. Waits for the page \
             to settle, then answers with what came, went or changed, by ref, or the new page after a \
-            navigation, and says when a new tab opened or a dialog came up.
+            navigation, and says when a new tab opened or a dialog came up. A click that pays (a pay \
+            button, or sending a form with card fields) waits for the user's Touch ID: answered needs_user \
+            until they approve it, then call click again to keep waiting.
             """,
-        arguments: [.tab, .string("ref", "The element to click, as snapshot named it, such as e12")]
+        arguments: [.tab, .string("ref", "The element to click, as snapshot named it, such as e12")],
+        waitsForOwner: true
     ) { call in
         let tab = try call.tab()
         let ref = try call.string("ref")
+        try await call.server.payments.clear(.element(ref), on: tab, for: call, again: "click on \(ref)")
         return try await AgentPage.act(tab, for: call) {
             try await AgentPage.click(ref, in: tab)
         }

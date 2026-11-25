@@ -23,6 +23,8 @@ final class AgentServer {
     let awake = AgentAwake()
     /// Site skills: Nerda's own and the owner's.
     let skills: SiteSkills
+    /// Payments agents pressed, held for the owner's Touch ID.
+    let payments: AgentPayments
     private let callers: AgentCallers
     private let defaults: UserDefaults
     private let makeBrowser: (Profile) -> AgentBrowser
@@ -50,6 +52,7 @@ final class AgentServer {
          now: @escaping () -> SuspendingClock.Instant = { .now },
          ask: @escaping AgentApprovals.Ask = AgentApprovals.sheet,
          skills: SiteSkills = SiteSkills(folder: Edition.folder.appending(path: "Skills")),
+         approvePayment: @escaping AgentPayments.Approve = AgentPayments.sheet,
          makeBrowser: @escaping (Profile) -> AgentBrowser = { AgentBrowser(profile: $0) }) {
         self.socket = socket
         owner = OwnerRequests(notifier: notifier)
@@ -57,6 +60,7 @@ final class AgentServer {
         sessions.waitsOnOwner = { [owner] tab in owner.handoff(on: tab.tab) != nil }
         self.callers = callers
         self.skills = skills
+        payments = AgentPayments(owner: owner, approve: approvePayment)
         self.defaults = defaults
         approvals = AgentApprovals(defaults: defaults, ask: ask)
         listProfiles = profiles

@@ -160,13 +160,17 @@ final class AgentApprovals {
     /// not one already showing a sheet; once there is one.
     static func ownersWindow() async -> NSWindow {
         while true {
-            let window = NSApp.orderedWindows.first {
-                guard let window = $0 as? BrowserWindow else { return false }
-                return window.isVisible && !window.browser.isPrivate && window.attachedSheet == nil
-            }
-            if let window { return window }
+            if let window = ownersWindowNow { return window }
             // A rare wait (no window yet, as after a hidden start), cheaply looked at.
             try? await Task.sleep(for: .seconds(1))
+        }
+    }
+
+    /// The owner's window `ownersWindow()` waits for, if there is one now.
+    static var ownersWindowNow: NSWindow? {
+        NSApp.orderedWindows.first {
+            guard let window = $0 as? BrowserWindow else { return false }
+            return window.isVisible && !window.browser.isPrivate && window.attachedSheet == nil
         }
     }
 }

@@ -17,6 +17,9 @@ final class OwnerRequest: Identifiable {
         /// A page's confirm or prompt its agent left unanswered
         /// (`AgentDialog`), with the dialog's buttons as choices.
         case dialog(choices: [String])
+        /// A payment its agent pressed, held for the owner's Touch ID on a
+        /// sheet over their window (`AgentPayments`): nothing here answers it.
+        case payment
     }
 
     enum Answer: Equatable {
@@ -59,7 +62,7 @@ final class OwnerRequest: Identifiable {
     var choices: [String] {
         switch kind {
         case .question(let choices), .dialog(let choices): choices
-        case .handoff: []
+        case .handoff, .payment: []
         }
     }
 
@@ -73,6 +76,7 @@ final class OwnerRequest: Identifiable {
         case .handoff(.other): "needs you"
         case .question: "asks you"
         case .dialog: "needs you to answer a page"
+        case .payment: "wants to pay"
         }
     }
 
@@ -147,6 +151,12 @@ final class OwnerRequests {
         begin(OwnerRequest(session: session, tab: tab, kind: .dialog(choices: choices), text: text, canSkip: false, site: nil))
     }
 
+    /// A payment the agent pressed, for the owner to approve on its sheet:
+    /// always a new request, as the hold it belongs to is.
+    func payment(_ text: String, on tab: AgentTab, for session: AgentSession) -> OwnerRequest {
+        begin(OwnerRequest(session: session, tab: tab, kind: .payment, text: text, canSkip: false, site: nil))
+    }
+
     /// The request is no longer needed: withdrawn if still open, and told to
     /// no later call.
     func drop(_ request: OwnerRequest) {
@@ -154,8 +164,12 @@ final class OwnerRequests {
         untold.removeAll { $0 === request }
     }
 
-    /// The owner's Done.
-    func done(_ request: OwnerRequest) { end(request, .done) }
+    /// The owner's Done. A payment isn't done this way: only its sheet
+    /// and Touch ID approve it.
+    func done(_ request: OwnerRequest) {
+        guard request.kind != .payment else { return }
+        end(request, .done)
+    }
 
     /// The owner's Skip, for an optional Handoff.
     func skip(_ request: OwnerRequest) {

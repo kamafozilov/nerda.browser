@@ -29,20 +29,24 @@ nonisolated extension AgentVerb {
         summary: """
             Click at a point of an Agent tab's screenshot, in its pixels from the top left, \
             as a person would. For pages with nothing else to click by, such as a canvas or a map. \
-            Answers as click does: what the click changed.
+            Answers as click does: what the click changed. A click that pays waits for the user's Touch ID, \
+            as click does.
             """,
         arguments: [
             .tab,
             .integer("x", "Pixels from the screenshot's left edge", required: true),
             .integer("y", "Pixels from the screenshot's top edge", required: true),
             .boolean("full", "The point is in a full-resolution screenshot"),
-        ]
+        ],
+        waitsForOwner: true
     ) { call in
         let tab = try call.tab()
         guard let x = call.arguments["x"]?.number, let y = call.arguments["y"]?.number else {
             throw AgentError(.invalid, "Give x and y as numbers: pixels in the screenshot.")
         }
         let full = call.arguments["full"]?.bool ?? false
+        try await call.server.payments.clear(.point(CGPoint(x: x, y: y), full: full), on: tab, for: call,
+                                             again: "click_at at \(Int(x)), \(Int(y))")
         return try await AgentPage.act(tab, for: call) {
             try AgentShot.click(tab, at: CGPoint(x: x, y: y), full: full)
             return "clicked \(tab.ref) at \(Int(x)), \(Int(y)) of the screenshot"

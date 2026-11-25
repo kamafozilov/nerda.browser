@@ -38,17 +38,21 @@ nonisolated extension AgentVerb {
             Name it as Enter, Tab, Escape, Backspace, Delete, ArrowDown, PageDown, F5 or a character, with \
             modifiers before it: Meta+a (⌘A), Shift+Tab, Control+Alt+k. Goes to the element with the \
             keyboard's focus, or to ref, focused first. Enter in a form's field sends the form. Answers with \
-            what came, went or changed.
+            what came, went or changed. Enter or Space that pays (on a pay button, or sending a form with \
+            card fields) waits for the user's Touch ID, as click does.
             """,
         arguments: [
             .tab,
             .string("key", "The key, such as Enter, ArrowDown, a or Meta+a"),
             .string("ref", "The element to focus first, as snapshot named it, such as e7", required: false),
-        ]
+        ],
+        waitsForOwner: true
     ) { call in
         let tab = try call.tab()
         let key = try AgentInput.Key(try call.string("key"))
         let ref = call.optionalString("ref")
+        try await call.server.payments.clear(.key(key, ref: ref), on: tab, for: call,
+                                             again: "press \(key.name)" + (ref.map { " on \($0)" } ?? ""))
         return try await AgentPage.act(tab, for: call) {
             try await AgentPage.press(key, on: ref, in: tab)
         }
