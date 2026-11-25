@@ -1355,22 +1355,35 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
 
 // MARK: - Reliability
 
-/// A page whose process dies is loaded again; if it dies again straight
-/// away, it stops, and says so, instead of reloading for ever.
+/// A page whose process dies is loaded again, and again; the third time
+/// within a minute it stops, and says so, instead of reloading for ever.
 @MainActor
-@Test func aPageThatKeepsCrashingStops() {
+@Test func aPageThatKeepsCrashingStops() async throws {
     let browser = Browser()
+    var now: TimeInterval = 1000
+    browser.pageEnds = PageEnds(clock: { now })
     browser.open(somewhere)
     let tab = browser.tabs[0]
-    browser.webViewWebContentProcessDidTerminate(tab.webView)
+    // Ended once loaded: a page whose process is gone commits nothing more.
+    func end() async throws {
+        try await waitFor { tab.page?.isLoading == false }
+        browser.webViewWebContentProcessDidTerminate(tab.webView)
+        try await waitFor { !browser.pageEnds.gathering }
+    }
+    try await end()
     #expect(tab.failure == nil)
-    browser.webViewWebContentProcessDidTerminate(tab.webView)
+    now += 20
+    try await end()
+    #expect(tab.failure == nil)
+    now += 20
+    try await end()
     #expect(tab.failure?.url.host == "example.com")
+    #expect(tab.failure?.message == "The page crashed each time it was opened.")
 
-    // Much later, a crash is a one-off again.
+    // A minute after the last, a crash is a one-off again.
     tab.failure = nil
-    tab.crashed = .now.addingTimeInterval(-120)
-    browser.webViewWebContentProcessDidTerminate(tab.webView)
+    now += 61
+    try await end()
     #expect(tab.failure == nil)
 }
 
@@ -1391,13 +1404,13 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
 
 /// A page out of sight that crashes sleeps, and loads when next shown.
 @MainActor
-@Test func aCrashedTabOutOfSightWaitsToBeShown() {
+@Test func aCrashedTabOutOfSightWaitsToBeShown() async throws {
     let browser = Browser()
     browser.open(somewhere)
     browser.open(somewhere)
     let hidden = browser.tabs[1]
     browser.webViewWebContentProcessDidTerminate(hidden.webView)
-    #expect(hidden.isAsleep)
+    try await waitFor { hidden.isAsleep }
     #expect(hidden.failure == nil)
 }
 
@@ -1406,13 +1419,16 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
 /// for ⌘R. With what was typed gone, closing it no longer asks.
 @MainActor
 @Test(arguments: [true, false])
-func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) {
+func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) async throws {
     let browser = Browser()
     browser.open(somewhere)
     browser.open(somewhere)
     let tab = browser.tabs[onScreen ? 0 : 1]
+    try await waitFor { tab.page?.isLoading == false }
     tab.hasUnsavedWork = true
     browser.webViewWebContentProcessDidTerminate(tab.webView)
+    #expect(tab.failure?.url.host == "example.com")
+    try await waitFor { !browser.pageEnds.gathering }
     #expect(tab.failure?.url.host == "example.com")
     #expect(!tab.isAsleep)
     #expect(!tab.hasUnsavedWork)
