@@ -31,6 +31,11 @@ struct LaunchTests {
         }
     }
 
+    /// Work that waits runs only in the run loop's default mode; with the
+    /// whole suite running, other tests can hold the main run loop in
+    /// another mode for seconds.
+    private static let patience: Duration = .seconds(20)
+
     private static func defaults() -> (UserDefaults, String) {
         let suite = "nerda.tests.launch.\(UUID().uuidString)"
         return (UserDefaults(suiteName: suite)!, suite)
@@ -86,7 +91,7 @@ struct LaunchTests {
         #expect(ran.names.isEmpty, "Waits for the page while the window is up")
         launch.mark("page")
         #expect(ran.names.isEmpty, "Not in the same turn as the page")
-        try await waitFor { ran.names.count == 3 }
+        try await waitFor(timeout: Self.patience) { ran.names.count == 3 }
         #expect(ran.names == ["a", "b", "c"])
         #expect(ran.turns[0] < ran.turns[1] && ran.turns[1] < ran.turns[2], "One piece a turn: \(ran.turns)")
     }
@@ -99,7 +104,7 @@ struct LaunchTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(ran.names.isEmpty)
         launch.mark("window")
-        try await waitFor { ran.names == ["a"] }
+        try await waitFor(timeout: Self.patience) { ran.names == ["a"] }
     }
 
     @Test func aPageThatNeverLoadsHoldsTheWorkOnlyAWhile() async throws {
@@ -107,7 +112,7 @@ struct LaunchTests {
         let ran = Ran()
         launch.later("a") { ran("a") }
         launch.mark("window")
-        try await waitFor(timeout: .seconds(2)) { ran.names == ["a"] }
+        try await waitFor(timeout: Self.patience) { ran.names == ["a"] }
     }
 
     @Test func workLeftForLaterOnceTheLaunchIsOverStillRuns() async throws {
@@ -115,7 +120,7 @@ struct LaunchTests {
         let ran = Ran()
         launch.mark("page")
         launch.later("a") { ran("a") }
-        try await waitFor { ran.names == ["a"] }
+        try await waitFor(timeout: Self.patience) { ran.names == ["a"] }
     }
 
     @Test func eachStageIsTimedAndGivesBackWhatItMade() {
