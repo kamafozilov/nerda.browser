@@ -14,6 +14,7 @@ nonisolated extension Logger {
     static let bookmarks = Logger(subsystem: subsystem, category: "bookmarks")
     static let extensions = Logger(subsystem: subsystem, category: "extensions")
     static let history = Logger(subsystem: subsystem, category: "history")
+    static let pages = Logger(subsystem: subsystem, category: "pages")
     static let passwords = Logger(subsystem: subsystem, category: "passwords")
     static let profiles = Logger(subsystem: subsystem, category: "profiles")
     static let session = Logger(subsystem: subsystem, category: "session")
