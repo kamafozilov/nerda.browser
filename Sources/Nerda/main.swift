@@ -502,6 +502,14 @@ private struct PageCard: View {
                     .transition(Motion.moving(.opacity.combined(with: .move(edge: .top))))
             }
         }
+        .overlay(alignment: .bottom) {
+            // An Agent tab shown here whose Agent waits on the owner.
+            if let tab = browser.selected, let request = AgentServer.shared.owner.handoff(on: tab), !browser.locked {
+                HandoffBar(request: request, owner: AgentServer.shared.owner)
+                    .padding(.bottom, 12)
+                    .transition(Motion.moving(.opacity.combined(with: .move(edge: .bottom))))
+            }
+        }
         .overlay(alignment: .topLeading) {
             if let choices = browser.passwordChoices, choices.tab == browser.selectedID, !browser.commandBarOpen {
                 PasswordChoicesView(browser: browser, choices: choices)

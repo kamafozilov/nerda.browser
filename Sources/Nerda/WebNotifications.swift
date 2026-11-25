@@ -55,6 +55,13 @@ enum WebNotifications {
         UNUserNotificationCenter.current().delegate = delegate
     }
 
+    /// Clicks on Nerda's own notifications (an Agent's, `MacAgentNotifier`)
+    /// come back here even where sites' notifications can't be had.
+    static func listen() {
+        guard Bundle.main.bundleIdentifier != nil, UNUserNotificationCenter.current().delegate == nil else { return }
+        UNUserNotificationCenter.current().delegate = delegate
+    }
+
     /// Another profile's store, as it is made, hands its service workers'
     /// notifications over too.
     static func watch(_ store: WKWebsiteDataStore) {
@@ -256,8 +263,14 @@ enum WebNotifications {
         }
 
         nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-            guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
             let info = response.notification.request.content.userInfo
+            // An Agent's: the notification itself, or one of a question's choices.
+            if let request = info[MacAgentNotifier.key] as? String {
+                let action = response.actionIdentifier
+                await MainActor.run { AgentServer.shared.owner.clicked(request, action: action) }
+                return
+            }
+            guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
             let web = (info["webNotification"] as? String).flatMap(UInt64.init)
             nonisolated(unsafe) let worker = info["workerNotification"] as? [String: Any]
             let site = (info["site"] as? String).flatMap(URL.init(string:))

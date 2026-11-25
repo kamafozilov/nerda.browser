@@ -23,6 +23,9 @@ final class AgentHarness {
     let server: AgentServer
     /// Settings of the test's own, for the switch that lets agents in.
     let defaults: UserDefaults
+    /// What Nerda would have shown the owner as notifications: tests post
+    /// none of the Mac's.
+    let notifier = RecordingNotifier()
     /// The server's awake time, moved by hand (`advance(by:)`).
     let clock = AgentTestClock()
     private let defaultsName: String
@@ -44,7 +47,7 @@ final class AgentHarness {
         // Every profile's Agent tabs on a store of their own, kept in memory.
         let clock = clock
         server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults,
-                             profiles: { [.main] + profiles }, now: { clock.now }, ask: ask) { profile in
+                             profiles: { [.main] + profiles }, notifier: notifier, now: { clock.now }, ask: ask) { profile in
             AgentBrowser(profile: profile, dataStore: .nonPersistent())
         }
         server.start()
@@ -57,11 +60,13 @@ final class AgentHarness {
     /// Code or Codex would be, already past `initialize`. `session` is the
     /// harness's session id (Claude Code's, Codex's thread's); `launcher`
     /// starts Nerda when nothing answers, never the real one in tests.
+    /// `waits` are how long the shim waits on the owner.
     func agent(client: String = "claude-code", session: String = "session-1",
-               wire: Int = AgentWire.version, launcher: AgentLauncher? = nil) async throws -> AgentTestClient {
+               wire: Int = AgentWire.version, launcher: AgentLauncher? = nil,
+               waits: AgentMCP.Waits = AgentMCP.Waits()) async throws -> AgentTestClient {
         let notifications = AgentTestNotifications()
         let mcp = AgentMCP(socket: socket, environment: ["CLAUDE_CODE_SESSION_ID": session], wire: wire,
-                           launcher: launcher, notify: { notifications.append($0) })
+                           launcher: launcher, waits: waits, notify: { notifications.append($0) })
         let agent = AgentTestClient(mcp: mcp, notifications: notifications)
         let reply = try await agent.request("initialize", [
             "protocolVersion": "2025-06-18",
@@ -109,8 +114,13 @@ struct AgentTestClient {
     }
 
     /// A tool called, and the text it answered, with whether it failed.
-    func call(_ tool: String, _ arguments: [String: AgentJSON] = [:]) async throws -> (text: String, isError: Bool) {
-        let reply = try await request("tools/call", ["name": .string(tool), "arguments": .object(arguments)])
+    /// With `progressToken`, as Claude Code calls: the shim may send
+    /// progress while the call waits (`notifications`).
+    func call(_ tool: String, _ arguments: [String: AgentJSON] = [:],
+              progressToken: AgentJSON? = nil) async throws -> (text: String, isError: Bool) {
+        var params: [String: AgentJSON] = ["name": .string(tool), "arguments": .object(arguments)]
+        if let progressToken { params["_meta"] = ["progressToken": progressToken] }
+        let reply = try await request("tools/call", .object(params))
         let result = try #require(reply["result"], "No result: \(reply.line)")
         let text = result["content"]?.array?.compactMap { $0["text"]?.string }.joined(separator: "\n") ?? ""
         return (text, result["isError"]?.bool ?? false)
@@ -122,16 +132,19 @@ struct AgentTestClient {
     }
 }
 
-/// The notifications a shim sent its client, by method, in order.
+/// The notifications a shim sent its client, in order.
 final class AgentTestNotifications: @unchecked Sendable {
     private let lock = NSLock()
-    private var lines: [String] = []
+    private var lines: [AgentJSON] = []
 
-    func append(_ line: String) { lock.withLock { lines.append(line) } }
-
-    var methods: [String] {
-        lock.withLock { lines }.compactMap { try? AgentJSON(line: $0)["method"]?.string }
+    func append(_ line: String) {
+        if let json = try? AgentJSON(line: line) { lock.withLock { lines.append(json) } }
     }
+
+    var all: [AgentJSON] { lock.withLock { lines } }
+    var methods: [String] { all.compactMap { $0["method"]?.string } }
+    /// The `notifications/progress` among them.
+    var progress: [AgentJSON] { all.filter { $0["method"] == "notifications/progress" } }
 }
 
 /// A profile beside Personal, its files in a temporary folder: its history
@@ -141,6 +154,15 @@ func temporaryProfile(_ name: String = "Test") throws -> Profile {
     let folder = FileManager.default.temporaryDirectory.appending(path: "nerda-profile-" + UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     return Profile(name: name, symbol: "person", color: .blue, root: folder)
+}
+
+/// Stands in for the Mac's notifications: keeps what would be shown.
+@MainActor
+final class RecordingNotifier: AgentNotifier {
+    private(set) var posted: [AgentNotice] = []
+    private(set) var withdrawn: [String] = []
+    func post(_ notice: AgentNotice) { posted.append(notice) }
+    func withdraw(_ id: String) { withdrawn.append(id) }
 }
 
 private final class Counter: @unchecked Sendable {

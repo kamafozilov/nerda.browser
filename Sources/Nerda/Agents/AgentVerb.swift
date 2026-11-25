@@ -22,6 +22,10 @@ nonisolated struct AgentVerb: Sendable {
     /// The group of tools it is listed in once an agent asks for it
     /// (`more_tools`); nil for the page verbs, always listed.
     var group: AgentGroup?
+    /// Waits on the owner (a Handoff, a question): the shim asks again and
+    /// again, with progress, while its client waits (`AgentMCP.Waits`), and
+    /// passes each request how long to wait in `wait`.
+    var waitsForOwner = false
     /// Does it on the main thread, for the session asking, with its
     /// arguments; the text is what the agent is shown. Throws an
     /// `AgentError` to fail with one.
@@ -33,6 +37,7 @@ nonisolated struct AgentVerb: Sendable {
         [status],
         tabVerbs, // TabVerbs.swift
         lookupVerbs, // LookupVerbs.swift
+        ownerVerbs, // OwnerVerbs.swift
     ].flatMap(\.self)
 
     static let named = Dictionary(uniqueKeysWithValues: all.map { ($0.name, $0) })

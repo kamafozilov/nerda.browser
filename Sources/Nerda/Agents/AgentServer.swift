@@ -17,6 +17,8 @@ final class AgentServer {
     let sessions: AgentSessions
     /// Which other programs the owner let in.
     let approvals: AgentApprovals
+    /// What agents wait on the owner for: Handoffs and questions.
+    let owner: OwnerRequests
     private let callers: AgentCallers
     private let defaults: UserDefaults
     private let makeBrowser: (Profile) -> AgentBrowser
@@ -32,11 +34,14 @@ final class AgentServer {
     /// `now` is awake time (`AgentSessions.now`); tests move their own.
     init(socket: URL, callers: AgentCallers = .nerdas, defaults: UserDefaults = .standard,
          profiles: @escaping () -> [Profile] = { Profiles.shared.all },
+         notifier: AgentNotifier = MacAgentNotifier(),
          now: @escaping () -> SuspendingClock.Instant = { .now },
          ask: @escaping AgentApprovals.Ask = AgentApprovals.sheet,
          makeBrowser: @escaping (Profile) -> AgentBrowser = { AgentBrowser(profile: $0) }) {
         self.socket = socket
+        owner = OwnerRequests(notifier: notifier)
         sessions = AgentSessions(now: now)
+        sessions.waitsOnOwner = { [owner] tab in owner.handoff(on: tab.tab) != nil }
         self.callers = callers
         self.defaults = defaults
         approvals = AgentApprovals(defaults: defaults, ask: ask)
