@@ -185,6 +185,11 @@ extension AgentPage {
         guard let page = agentTab.tab.page else {
             throw AgentError(.failed, "Tab \(agentTab.ref) has no page loaded. Open an address in it with navigate.")
         }
+        // A page held by its dialog runs no script: a read would wait for as
+        // long as the dialog is up.
+        if let held = AgentNotices.held(agentTab.tab) {
+            throw AgentError(.failed, "Tab \(agentTab.ref)'s page waits on a dialog (\(held)): answer it with dialog first.")
+        }
         return page
     }
 
