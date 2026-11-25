@@ -40,11 +40,31 @@ private func end(_ tabs: [Nerda.Tab], in browser: Browser, reason: PageEnd? = ni
     }
 }
 
+/// The same holds across windows: pages of two windows ending together
+/// went for one cause, which no window alone could tell.
+@MainActor
+@Test func pagesOfTwoWindowsEndingTogetherAreNotCrashing() async throws {
+    let one = Browser(dataStore: .nonPersistent())
+    let two = Browser(dataStore: .nonPersistent())
+    let a = one.open(somewhere)
+    let b = two.open(somewhere)
+    for _ in 0..<3 {
+        for tab in [a, b] { try await waitFor { tab.webView.isLoading == false } }
+        one.webViewWebContentProcessDidTerminate(a.webView)
+        two.webViewWebContentProcessDidTerminate(b.webView)
+        try await waitFor { !one.pageEnds.gathering && !two.pageEnds.gathering }
+    }
+    #expect(a.failure == nil)
+    #expect(b.failure == nil)
+}
+
 /// Why a page ended is kept, and a page that keeps running out of memory
 /// says that, not that it crashed.
 @MainActor
 @Test func aPageThatKeepsRunningOutOfMemorySaysSo() async throws {
     let browser = Browser(dataStore: .nonPersistent())
+    // Its own, so no other test's page ends in the same moment.
+    browser.pageEnds = PageEnds()
     let tab = browser.open(somewhere)
     try await end([tab], in: browser, reason: .memory)
     #expect(tab.ended == .memory)

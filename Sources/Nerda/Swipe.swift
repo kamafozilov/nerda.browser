@@ -215,7 +215,7 @@ class SwipingWebView: WKWebView {
     /// with them, and Logi Options+, which sends a mouse's back and forward
     /// buttons this way: positive to go back, as Safari and Chrome read it.
     override func swipe(with event: NSEvent) {
-        if event.deltaX > 0, canGoBack { goBack() } else if event.deltaX < 0, canGoForward { goForward() } else { super.swipe(with: event) }
+        if event.deltaX > 0, canGoBack { step(back: true) } else if event.deltaX < 0, canGoForward { step(back: false) } else { super.swipe(with: event) }
     }
 
     /// A click or a key in a page that stopped answering asks about it again
@@ -230,11 +230,21 @@ class SwipingWebView: WKWebView {
         super.keyDown(with: event)
     }
 
+    /// Back or Forward by the tab, as from the menu, so a page that stopped
+    /// answering is ended first (HungPages.swift); a page of no tab's by WebKit.
+    private func step(back: Bool) {
+        if let tab = (navigationDelegate as? Browser)?.tab(for: self) {
+            back ? tab.goBack() : tab.goForward()
+        } else {
+            _ = back ? goBack() : goForward()
+        }
+    }
+
     /// A mouse's back and forward buttons: buttons 3 and 4, as mice send them.
     override func otherMouseDown(with event: NSEvent) {
         switch event.buttonNumber {
-        case 3 where canGoBack: goBack()
-        case 4 where canGoForward: goForward()
+        case 3 where canGoBack: step(back: true)
+        case 4 where canGoForward: step(back: false)
         default: super.otherMouseDown(with: event)
         }
     }
@@ -260,7 +270,7 @@ class SwipingWebView: WKWebView {
         opening = nil
         guard let swipe else { return }
         self.swipe = nil
-        if going { _ = swipe.back ? goBack() : goForward() }
+        if going { step(back: swipe.back) }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.15
             arrow.animator().alphaValue = 0

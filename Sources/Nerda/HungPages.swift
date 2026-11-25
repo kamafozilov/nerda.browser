@@ -65,7 +65,7 @@ enum HungPages {
     /// How often pages out of sight are looked at, and the share of a core
     /// over that time that has a page pinged.
     static let lookEvery: TimeInterval = 60
-    static let spinning = 0.25
+    static let busyShare = 0.25
 
     private static var watch: Timer?
 
@@ -158,7 +158,7 @@ extension Browser {
             let seconds = Processes.seconds(usage.ri_user_time + usage.ri_system_time)
             defer { tab.hang.cpu = (pid, now, seconds) }
             guard let last = tab.hang.cpu, last.pid == pid, now > last.at,
-                  (seconds - last.seconds) / now.timeIntervalSince(last.at) >= HungPages.spinning else { continue }
+                  (seconds - last.seconds) / now.timeIntervalSince(last.at) >= HungPages.busyShare else { continue }
             ping(tab)
         }
     }
@@ -194,17 +194,21 @@ extension Tab {
     /// tab is left asleep, its history kept, so whatever comes next (a reload,
     /// an address, Back) wakes a fresh page at once. Other tabs whose pages
     /// shared the process were held by the same loop, and come back as after
-    /// any end that isn't a crash (`endingOnPurpose`). False, and nothing
-    /// done, for a page WebKit hasn't said has stopped answering.
+    /// any end that isn't a crash (`endingOnPurpose`), in whichever window.
+    /// False, and nothing done, for a page not known hung: WebKit's word
+    /// alone may be a page busy for a moment, which still answers, and is
+    /// asked about its changes as any page is.
     @discardableResult
     func letGoHung() -> Bool {
-        guard hang.reported != nil || hang.hung, let page else { return false }
+        guard hang.hung, let page else { return false }
         let pid = self.pid
         Logger.pages.notice("A page that stopped answering was ended")
         hang = Hang()
         asksAboutHang = false
-        if let pid, let browser = delegate as? Browser {
-            for other in browser.tabs where other !== self && other.pid == pid { other.endingOnPurpose = true }
+        if let pid {
+            for browser in Browser.all {
+                for other in browser.tabs where other !== self && other.pid == pid { other.endingOnPurpose = true }
+            }
         }
         sleep(discarding: true)
         page.endProcess()
