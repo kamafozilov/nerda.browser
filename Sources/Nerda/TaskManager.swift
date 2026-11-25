@@ -216,6 +216,14 @@ enum Processes {
         return pid
     }
 
+    /// When a process began, to tell it from a later one given its number.
+    static func started(_ pid: pid_t) -> UInt64? {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+        return info.pbi_start_tvsec &* 1_000_000 &+ info.pbi_start_tvusec
+    }
+
     static func kind(of pid: pid_t) -> String {
         var name = [CChar](repeating: 0, count: 256)
         proc_name(pid, &name, UInt32(name.count))

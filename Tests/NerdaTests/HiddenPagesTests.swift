@@ -6,12 +6,14 @@ import WebKit
 
 /// Serves a page that hears a stream of events, ten a second, as a chat or
 /// a dashboard hears its server, and keeps the time of each one heard and
-/// each tick of its own 100 ms timer.
-@MainActor
-private final class StreamServer {
+/// each tick of its own 100 ms timer. On a queue of its own, so a busy main
+/// thread in other tests never holds the stream up.
+private final class StreamServer: @unchecked Sendable {
     let listener: NWListener
+    private let queue = DispatchQueue(label: "HiddenPagesTests.stream")
+    private let timer: DispatchSourceTimer
+    /// Only on `queue`.
     private var streams: [NWConnection] = []
-    private var timer: Timer?
 
     static let page = """
         <script>
@@ -25,41 +27,42 @@ private final class StreamServer {
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
-        listener.newConnectionHandler = { [weak self] connection in
-            connection.start(queue: .main)
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, _, _ in
-                MainActor.assumeIsolated {
-                    guard let self else { connection.cancel(); return }
-                    let request = String(decoding: data ?? Data(), as: UTF8.self)
-                    if request.hasPrefix("GET /events") {
-                        let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\n"
-                        connection.send(content: Data(head.utf8), completion: .contentProcessed { _ in })
-                        self.streams.append(connection)
-                    } else {
-                        let body = Data(Self.page.utf8)
-                        let head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
-                        connection.send(content: Data(head.utf8) + body, completion: .contentProcessed { _ in connection.cancel() })
-                    }
+        timer = DispatchSource.makeTimerSource(queue: queue)
+        listener.newConnectionHandler = { [unowned self] connection in
+            connection.start(queue: queue)
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [unowned self] data, _, _, _ in
+                let request = String(decoding: data ?? Data(), as: UTF8.self)
+                if request.hasPrefix("GET /events") {
+                    let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\n"
+                    connection.send(content: Data(head.utf8), completion: .contentProcessed { _ in })
+                    streams.append(connection)
+                } else {
+                    let body = Data(Self.page.utf8)
+                    let head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
+                    connection.send(content: Data(head.utf8) + body, completion: .contentProcessed { _ in connection.cancel() })
                 }
             }
         }
-        listener.start(queue: .main)
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                for stream in self?.streams ?? [] { stream.send(content: Data("data: news\n\n".utf8), completion: .contentProcessed { _ in }) }
-            }
+        listener.start(queue: queue)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(100))
+        timer.setEventHandler { [unowned self] in
+            for stream in streams { stream.send(content: Data("data: news\n\n".utf8), completion: .contentProcessed { _ in }) }
         }
+        timer.resume()
     }
 
+    @MainActor
     func url() async throws -> URL {
         try await waitFor { listener.port != nil && listener.port != .any }
         return URL(string: "http://127.0.0.1:\(try #require(listener.port).rawValue)/")!
     }
 
     func stop() {
-        timer?.invalidate()
-        for stream in streams { stream.cancel() }
-        listener.cancel()
+        queue.sync {
+            timer.cancel()
+            for stream in streams { stream.cancel() }
+            listener.cancel()
+        }
     }
 }
 
@@ -117,21 +120,29 @@ struct HiddenPagesTests {
 
     /// Low Power Mode turned on suspends a page already out of sight, and
     /// turned off lets it run again, without the page being made anew.
+    /// WebKit suspends it about a second after the mode comes on, and the
+    /// page hears what came meanwhile only once it runs again. The mode is
+    /// on for as short a time as shows that, as other tests' spare pages
+    /// go while it is.
     @Test func hiddenPagesFollowLowPowerMode() async throws {
         let server = try StreamServer()
         defer { server.stop(); LowPowerMode.forced = nil; LowPowerMode.changed() }
         let (browser, tab) = try await listeningTab(server)
         let page = tab.webView
+        // A page just loaded runs a while longer whatever the mode.
+        try await Task.sleep(for: .seconds(3))
 
         LowPowerMode.forced = true
         LowPowerMode.changed()
-        try await Task.sleep(for: .seconds(8))
-        #expect(try await heard(tab, over: 6).longestWait >= 2.5)
-
+        try await Task.sleep(for: .seconds(4))
         LowPowerMode.forced = false
         LowPowerMode.changed()
-        try await Task.sleep(for: .seconds(8))
-        #expect(try await heard(tab, over: 6).longestWait < 1.5)
+        let suspended = try await heard(tab, over: 5)
+        #expect(suspended.longestWait >= 2)
+
+        try await Task.sleep(for: .seconds(6))
+        let running = try await heard(tab, over: 5)
+        #expect(running.longestWait < 1.5)
         #expect(tab.webView === page)
         withExtendedLifetime(browser) {}
     }

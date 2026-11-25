@@ -1400,8 +1400,8 @@ final class ExtensionTab: NSObject, WKWebExtensionTab {
         tab?.go(to: url)
     }
     func reload(fromOrigin: Bool, for context: WKWebExtensionContext) async throws { tab?.reload(fromOrigin: fromOrigin) }
-    func goBack(for context: WKWebExtensionContext) async throws { tab?.page?.goBack() }
-    func goForward(for context: WKWebExtensionContext) async throws { tab?.page?.goForward() }
+    func goBack(for context: WKWebExtensionContext) async throws { if tab?.page != nil { tab?.goBack() } }
+    func goForward(for context: WKWebExtensionContext) async throws { if tab?.page != nil { tab?.goForward() } }
 
     func activate(for context: WKWebExtensionContext) async throws {
         guard let tab else { return }

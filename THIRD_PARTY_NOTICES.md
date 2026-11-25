@@ -221,3 +221,6 @@ Adapted in Nerda:
 - Sources/Nerda/Launch.swift
 - Sources/Nerda/Recorder.swift
 - Sources/Nerda/Watchdog.swift
+- Sources/Nerda/LastFrame.swift
+- Sources/Nerda/HungPages.swift
+- Sources/Nerda/SparePages.swift

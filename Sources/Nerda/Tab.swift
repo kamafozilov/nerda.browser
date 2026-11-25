@@ -192,6 +192,10 @@ final class Tab: Identifiable {
     /// An extension's page a tab with no page yet was sent to, to be opened
     /// if WebKit then says a site's server sent it there.
     @ObservationIgnored var returning: URL?
+    /// Whether the page has stopped answering, as far as Nerda knows (HungPages.swift).
+    @ObservationIgnored var hang = Hang()
+    /// "This page isn't answering", Wait or Reload, asked over the page.
+    var asksAboutHang = false
 
     /// The page, woken first if the tab was asleep.
     var webView: WKWebView { page ?? wake() }
@@ -346,6 +350,7 @@ final class Tab: Identifiable {
 
     /// Takes the tab to `url`, a new one included.
     func go(to url: URL) {
+        letGoHung()
         stopReconnecting()
         // An address typed, a bookmark: the browser leaving the page asks.
         if let page, hasUnsavedWork, !departureApproved, let browser = delegate as? Browser {
@@ -377,10 +382,11 @@ final class Tab: Identifiable {
         page.load(.page(url))
     }
 
-    private func makePage(_ configuration: WKWebViewConfiguration) -> WKWebView {
+    /// `spare`, a page made ahead from this same configuration (SparePages), in place of a new one.
+    private func makePage(_ configuration: WKWebViewConfiguration, spare: SwipingWebView? = nil) -> WKWebView {
         Self.matchScreenRate(configuration.preferences)
         Self.holdHidden(configuration.preferences)
-        let page = SwipingWebView(frame: .zero, configuration: configuration)
+        let page = spare ?? SwipingWebView(frame: .zero, configuration: configuration)
         _ = Self.powerWatch
         Self.pages.add(page)
         page.isInspectable = true
@@ -630,6 +636,20 @@ final class Tab: Identifiable {
         if let pool = processPool as? NSObject, pool.responds(to: warm) { pool.perform(warm) }
     }
 
+    /// A blank page for `store`'s next tab, made as `wake` makes one, its
+    /// process started now rather than at its first load (SparePages).
+    // WebKit SPI, Safari's: should it go, the process starts at the first load, as it did.
+    static func sparePage(for store: WKWebsiteDataStore) -> SwipingWebView {
+        let configuration = configuration(store)
+        matchScreenRate(configuration.preferences)
+        holdHidden(configuration.preferences)
+        let page = SwipingWebView(frame: .zero, configuration: configuration)
+        pages.add(page)
+        let launch = NSSelectorFromString("_launchInitialProcessIfNecessary")
+        if page.responds(to: launch) { page.perform(launch) }
+        return page
+    }
+
     /// The colour along the page's top edge: what the address bar touches,
     /// which sites' theme colours often aren't (GitHub's, YouTube's). None
     /// when the edge isn't one colour; then the page's theme colour, or its background.
@@ -703,6 +723,7 @@ final class Tab: Identifiable {
     /// `look`, the page's top (`snapshot`), stays for its hover card: some
     /// 100 KB, of the hundreds of MB let go.
     func sleep(keeping look: NSImage? = nil, discarding: Bool = false) {
+        if letGoHung() { return }
         guard discarding || !hasUnsavedWork else { return }
         guard let page else { return }
         stopReconnecting()
@@ -761,7 +782,8 @@ final class Tab: Identifiable {
         packedLook = nil
         let site = target ?? url
         madeFor = Extensions.host(of: site)
-        let page = makePage(site.flatMap(Extensions.configuration(for:)) ?? Self.configuration(dataStore))
+        let page = site.flatMap(Extensions.configuration(for:)).map { makePage($0) }
+            ?? makePage(Self.configuration(dataStore), spare: SparePages.take(for: dataStore))
         self.page = page
         if let slept { page.pageZoom = slept.zoom }
         if let state = slept?.state {
@@ -829,11 +851,23 @@ final class Tab: Identifiable {
         reconnecting = nil
     }
 
+    /// Back and Forward, a page that stopped answering ended first.
+    func goBack() {
+        letGoHung()
+        webView.goBack()
+    }
+
+    func goForward() {
+        letGoHung()
+        webView.goForward()
+    }
+
     /// Go Back from a page that couldn't be opened: to the page still under
     /// it, when a link from there failed, or else back in its history.
     var canLeaveFailure: Bool { failure != nil && (failedOverPage || canGoBack) }
 
     func leaveFailure() {
+        if letGoHung() { return goBack() }
         if failedOverPage { failure = nil } else { page?.goBack() }
     }
 
@@ -846,6 +880,7 @@ final class Tab: Identifiable {
     /// From origin, the page and what it loads are fetched anew, not taken
     /// from the cache.
     func reload(fromOrigin: Bool = false) {
+        if letGoHung() { _ = webView; return }
         stopReconnecting()
         if let failure {
             webView.load(.page(failure.url, cachePolicy: fromOrigin ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy))
@@ -931,6 +966,8 @@ final class Tab: Identifiable {
     /// For a closed tab: no more sound or video, and the camera and microphone off,
     /// for good. Suspended rather than paused, so the page can't start them again.
     func silence() {
+        // Its window closed, a page that stopped answering would spin on.
+        letGoHung()
         stopReconnecting()
         guard let page else { return }
         recoloring?.cancel()
@@ -1349,6 +1386,7 @@ struct PageView: NSViewRepresentable {
             slot.stage.resized = { [weak selected] in selected?.resize(width: $0.width, height: $0.height) }
             if slot.isHidden { slot.isHidden = false }
             if page.isHidden { page.isHidden = false }
+            if arriving { slot.lastFrame.arrive(page, on: slot.stage, in: slot) }
             guard arriving, takesFocus, !keepsKeyboard else { continue }
             if let window, focused != nil {
                 window.makeFirstResponder(page)
@@ -1361,6 +1399,7 @@ struct PageView: NSViewRepresentable {
         // With no page on screen (a new tab, the settings), the keyboard
         // leaves the one hidden behind: Space would pause its video unseen.
         if shown == nil, focused != nil { window?.makeFirstResponder(nil) }
+        for slot in slots where slot.page !== shown && !slot.isHidden { slot.lastFrame.leave(slot.page, on: slot.stage) }
         for page in pages where page !== shown && !page.isHidden { page.isHidden = true }
         for slot in slots where slot.page !== shown && !slot.isHidden { slot.isHidden = true }
     }
@@ -1368,9 +1407,11 @@ struct PageView: NSViewRepresentable {
 
 /// A page's place in the card: its stage, and WebKit's inspector when docked
 /// under it, which WebKit puts here, beside the stage. They hide together.
-private final class PageSlot: NSView {
+/// Its last frame stands over the page as it comes back (LastFrame.swift).
+final class PageSlot: NSView {
     let page: WKWebView
     let stage = PageStage()
+    let lastFrame = LastFrame()
 
     init(_ page: WKWebView, frame: CGRect) {
         self.page = page
