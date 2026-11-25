@@ -31,6 +31,8 @@ final class AgentHarness {
     /// The saved logins every Agent browser here signs in with: in memory
     /// and a temporary file, never the owner's vault or keychain.
     let vault: Vault
+    /// Where Agent tabs' downloads go: the test's own Downloads folder.
+    let downloads: URL
     private let defaultsName: String
     var socket: URL { server.socket }
 
@@ -53,12 +55,16 @@ final class AgentHarness {
         // Every profile's Agent tabs on a store of their own, kept in memory.
         let clock = clock
         let vault = Vault(inMemory: folder.appending(path: "accounts.json"))
+        let downloads = folder.appending(path: "Downloads")
+        self.downloads = downloads
         self.vault = vault
         server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults,
                              profiles: { [.main] + profiles }, notifier: notifier, now: { clock.now }, ask: ask,
                              skills: SiteSkills(folder: folder.appending(path: "Skills"), approve: approveSkill)) { profile in
             let agents = AgentBrowser(profile: profile, dataStore: .nonPersistent())
             agents.browser.vault = vault
+            // Downloads under the test's folder, never the owner's Downloads.
+            agents.browser.downloadFolder = downloads
             return agents
         }
         server.start()
