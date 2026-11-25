@@ -83,8 +83,12 @@ nonisolated enum AgentCommandLine {
             parsed = try self.arguments(words, for: verb)
         } catch { return Outcome(status: failed, errors: "\(error.message)\nusage: nerda-browser \(synopsis(of: verb))\n") }
 
-        let request = AgentRequest(verb: verb.name, session: session(in: environment), args: parsed)
-        let reply = await AgentWire.send(request, to: socket, launcher: launcher)
+        let session = session(in: environment)
+        let reply = if verb.name == AgentVerb.run.name {
+            await runScript(parsed, session: session, environment: environment, socket: socket, launcher: launcher)
+        } else {
+            await AgentWire.send(AgentRequest(verb: verb.name, session: session, args: parsed), to: socket, launcher: launcher)
+        }
         var text = reply.text.hasSuffix("\n") || reply.text.isEmpty ? reply.text : reply.text + "\n"
         guard reply.ok else { return Outcome(status: status(of: reply), errors: text) }
         if let jpeg = reply.jpeg {
@@ -92,6 +96,31 @@ nonisolated enum AgentCommandLine {
             catch { return Outcome(status: failed, output: text, errors: "The picture couldn't be saved: \(error.localizedDescription)\n") }
         }
         return Outcome(status: done, output: text)
+    }
+
+    /// `run`, done here as the shim does it (`AgentScript`), each step a
+    /// request of this session's. Its `state` is kept in a file of the
+    /// session's in the temporary folder, for the session's next run.
+    static func runScript(_ arguments: [String: AgentJSON], session: AgentSessionName, environment: [String: String],
+                          socket: URL, launcher: AgentLauncher?) async -> AgentReply {
+        guard let script = arguments["script"]?.string, !script.isEmpty else {
+            return .failed(AgentError(.invalid, "Give script as a string."))
+        }
+        let file = stateFile(of: session, in: environment)
+        let state = (try? String(contentsOf: file, encoding: .utf8)) ?? "{}"
+        let outcome = await AgentScript.run(script, state: state, time: AgentScript.time(arguments)) { verb, arguments in
+            await AgentWire.send(AgentRequest(verb: verb, session: session, args: arguments), to: socket, launcher: launcher)
+        }
+        if outcome.state != state { try? outcome.state.write(to: file, atomically: true, encoding: .utf8) }
+        return outcome.reply
+    }
+
+    /// Where a session's `run` state is kept between commands.
+    static func stateFile(of session: AgentSessionName, in environment: [String: String]) -> URL {
+        let temporary = environment["TMPDIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.temporaryDirectory
+        let name = (session.client + "-" + session.id).map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "_" }
+        return temporary.appending(path: "nerda-browser-state-\(String(name.prefix(120))).json")
     }
 
     /// Writes a picture where `--out` said, or to a new file in the
