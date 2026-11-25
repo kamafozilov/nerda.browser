@@ -7,8 +7,6 @@
 #                       its own bundle id, data and keychain item (Edition.swift)
 #   ./build.sh test     build/Nerda Test.app, for agents trying things on
 #                       screen: Nerda Dev's build with data of its own
-#   ./build.sh bench    build/Nerda Bench.app, for bench.sh: a development build
-#                       with data of its own, optimized as a release is
 #
 # The version is NERDA_VERSION (release.sh sets it), else the latest v* tag.
 # NERDA_SIGN_IDENTITY names the certificate to sign with (release.sh sets
@@ -24,9 +22,6 @@ elif [ "$CONFIG" = test ]; then
   NAME="Nerda Test"
   ID="dev.nerda.browser.test"
   CONFIG=debug
-elif [ "$CONFIG" = bench ]; then
-  NAME="Nerda Bench"
-  ID="dev.nerda.browser.bench"
 else
   NAME="Nerda Dev"
   ID="dev.nerda.browser.debug"
@@ -40,8 +35,6 @@ VERSION="${VERSION:-0.0.0}"
 # built for this Mac only, which is quicker.
 FLAGS=(-c "$CONFIG")
 [ "$CONFIG" = release ] && FLAGS+=(--arch arm64 --arch x86_64)
-# Timed as people get it, with the development build's Bench.swift in.
-[ "$CONFIG" = bench ] && FLAGS=(-c release -Xswiftc -DDEBUG)
 swift build "${FLAGS[@]}"
 BINARY="$(swift build "${FLAGS[@]}" --show-bin-path)/Nerda"
 

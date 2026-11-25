@@ -70,7 +70,6 @@ Nerda is a browser that stays out of the way. It is a native Mac app written in 
 - **Edited pages stay awake** until you leave them. Leaving or closing one asks first; this conservatively includes forms a site may have saved already.
 - **120 frames a second** on a ProMotion screen, where WebKit holds pages near 60; back to 60 in Low Power Mode.
 - **Sites start connecting while you type** their address, or when the pointer rests on a link to one, so they open sooner.
-- Measured, not guessed: `./bench.sh` times launch, tab switches, typing and memory before and after each change.
 
 ### Private by default
 
