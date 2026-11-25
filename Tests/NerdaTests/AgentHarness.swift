@@ -28,6 +28,9 @@ final class AgentHarness {
     let notifier = RecordingNotifier()
     /// The server's awake time, moved by hand (`advance(by:)`).
     let clock = AgentTestClock()
+    /// The saved logins every Agent browser here signs in with: in memory
+    /// and a temporary file, never the owner's vault or keychain.
+    let vault: Vault
     private let defaultsName: String
     var socket: URL { server.socket }
 
@@ -36,8 +39,11 @@ final class AgentHarness {
     /// owner asked about another program; by default they never answer.
     /// `profiles` are the profiles beside Personal agents may choose
     /// (`temporaryProfile`), so a test never reads the owner's.
+    /// `approveSkill` is the owner looking at a Site skill's card; by
+    /// default they never answer. The owner's Site skills are read from and
+    /// saved in the harness's temporary folder, never the data folder.
     init(callers: AgentCallers = .anyone, ask: @escaping AgentApprovals.Ask = { _ in nil },
-         profiles: [Profile] = []) throws {
+         approveSkill: @escaping SiteSkills.Approve = { _ in nil }, profiles: [Profile] = []) throws {
         // Short: a socket's path has room for 103 bytes.
         folder = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "na-" + UUID().uuidString.prefix(8))
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -46,9 +52,14 @@ final class AgentHarness {
         defaults = try #require(UserDefaults(suiteName: defaultsName))
         // Every profile's Agent tabs on a store of their own, kept in memory.
         let clock = clock
+        let vault = Vault(inMemory: folder.appending(path: "accounts.json"))
+        self.vault = vault
         server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults,
-                             profiles: { [.main] + profiles }, notifier: notifier, now: { clock.now }, ask: ask) { profile in
-            AgentBrowser(profile: profile, dataStore: .nonPersistent())
+                             profiles: { [.main] + profiles }, notifier: notifier, now: { clock.now }, ask: ask,
+                             skills: SiteSkills(folder: folder.appending(path: "Skills"), approve: approveSkill)) { profile in
+            let agents = AgentBrowser(profile: profile, dataStore: .nonPersistent())
+            agents.browser.vault = vault
+            return agents
         }
         server.start()
     }

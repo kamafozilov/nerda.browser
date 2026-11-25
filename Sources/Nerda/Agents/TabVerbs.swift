@@ -93,10 +93,13 @@ enum AgentPage {
 
     /// The tab, title and address lines every answer about a page starts
     /// with. The title is the page's: kept to one line, so it can't pass
-    /// for a line of Nerda's.
+    /// for a line of Nerda's. The session's first answer on a site with a
+    /// Site skill names it (`SiteSkills.hint`).
     static func header(_ agentTab: AgentTab) -> [String] {
         let title = agentTab.tab.title.replacing(/\s+/, with: " ")
-        return ["tab: \(agentTab.ref)", "title: \(title)", "address: \(agentTab.tab.url?.absoluteString ?? "")"]
+        let lines = ["tab: \(agentTab.ref)", "title: \(title)", "address: \(agentTab.tab.url?.absoluteString ?? "")"]
+        guard let call = AgentCall.current else { return lines }
+        return lines + call.server.skills.hint(for: agentTab.tab.url, in: call.session.name)
     }
 
     /// Page content, marked as the page's words: data to read, never
