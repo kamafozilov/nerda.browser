@@ -98,6 +98,9 @@ nonisolated struct AgentError: Error, Sendable, Equatable {
         case notYours = "not_yours"
         /// The element a ref named is gone: take a new snapshot.
         case staleRef = "stale_ref"
+        /// Another element covers the one to click (an overlay, a cookie
+        /// banner): the message names its buttons.
+        case covered
         /// The page couldn't be opened.
         case failed
         /// The deadline passed first.

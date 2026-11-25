@@ -540,6 +540,17 @@ nonisolated enum AgentPageScript {
                 return { parts: parts.map(tidy), hidden: reading.hidden };
             };
 
+            /// What the outline would call an element, for answers that
+            /// name one outside an outline (the buttons of an overlay in
+            /// the way): its ref if it has one already (refs are handed out
+            /// by outlines only), its role and name, and the start of its text.
+            agent.describe = (element) => {
+                const style = styleOf(element);
+                const role = roleOf(element) || (clickable(element, style) ? 'clickable' : null);
+                return { ref: known.get(element) || null, role, name: role ? nameOf(element, role) : '',
+                    text: cut(textOf(element, 120), 80), shown: shown(element, style) };
+            };
+
             agent.outline = ({ full, ref, providers, floor }) => {
                 agent.count = Math.max(agent.count, floor || 0);
                 let root = document.documentElement;
