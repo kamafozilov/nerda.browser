@@ -119,6 +119,33 @@ struct AgentAwakeTests {
         #expect(awake() == ["Page 1", "Page 3"] as Set)
     }
 
+    /// A tab the owner took over, or watches, is theirs to use: the cap
+    /// never puts it to sleep under them, however long the agent left it.
+    @Test func theCapSparesATabTheOwnerTookOverOrWatches() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        harness.server.awake.cap = 2
+        let agent = try await harness.agent()
+        for n in 1...2 {
+            let url = try await harness.pages.serve("/\(n)", "<title>Page \(n)</title><p>Page \(n)</p>")
+            #expect(try await agent.call("open", ["url": AgentJSON(url)]).isError == false)
+        }
+        let session = try #require(harness.server.sessions.all.first)
+        let first = try #require(harness.server.openTabs(of: session).first { $0.ref == "t1" })
+        harness.server.takeOver(first)
+        let third = try await harness.pages.serve("/3", "<title>Page 3</title><p>Page 3</p>")
+
+        #expect(try await agent.call("open", ["url": AgentJSON(third)]).isError == false)
+
+        #expect(!first.tab.isAsleep)
+        harness.server.handBack(first)
+        first.agents.watched.insert(first.tab.id)
+        let fourth = try await harness.pages.serve("/4", "<title>Page 4</title><p>Page 4</p>")
+        #expect(try await agent.call("open", ["url": AgentJSON(fourth)]).isError == false)
+        #expect(!first.tab.isAsleep)
+        first.agents.watched.remove(first.tab.id)
+    }
+
     /// A page of two halves, red and blue, that counts the clicks on each.
     static let halves = """
         <title>Halves</title>
