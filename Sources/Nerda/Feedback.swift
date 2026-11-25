@@ -55,6 +55,7 @@ final class Feedback: NSObject, MXMetricManagerSubscriber {
 
             ---
             \(Self.system)
+            \(Self.diagnostics)
             \(report.map { "\n" + $0 } ?? "")
             """) { if report != nil { self.dismissCrash() } }
     }
@@ -82,6 +83,8 @@ final class Feedback: NSObject, MXMetricManagerSubscriber {
 
             ---
             \(crash)
+
+            \(Self.diagnostics)
             """) { self.dismissCrash() }
     }
 
@@ -130,6 +133,19 @@ final class Feedback: NSObject, MXMetricManagerSubscriber {
             .map { "\($0)=\($1.addingPercentEncoding(withAllowedCharacters: allowed) ?? "")" }
             .joined(separator: "&")
         return URL(string: "\(issues)?\(query)")
+    }
+
+    /// What Nerda recorded of the last few minutes: how long tab operations
+    /// took (Recorder) and where the window stalled (Watchdog), newest
+    /// last in the log. At most 4 KB in all, so the report still fits in
+    /// the address GitHub opens.
+    static var diagnostics: String {
+        var parts = [Recorder.shared.report].filter { !$0.isEmpty }
+        let room = 4096 - parts.joined(separator: "\n").utf8.count - 32
+        if room > 256, let stalls = Watchdog.recent(min(room, 1536)) {
+            parts.append("Stalls:\n```\n\(stalls)```")
+        }
+        return parts.joined(separator: "\n")
     }
 
     /// This Nerda and Mac: "Nerda 0.0.21 · macOS 26.0 (Build 25A354) · Apple silicon".

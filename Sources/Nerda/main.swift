@@ -862,6 +862,7 @@ extension Browser {
                 }
                 return
             }
+            recorder.begin(.tabClose)
             if let next = recent.last(where: { !$0.isPinned }) ?? tabs.first(where: { !$0.isPinned }) {
                 selectedID = next.id
             } else {
@@ -880,6 +881,8 @@ extension Browser {
 
 // Nerda run again only to compile the block list (see Blocker), not as a browser.
 if CommandLine.arguments.contains(Blocker.compileArgument) { Blocker.compileAndExit() }
+// Where the main thread stops, from the first moment on (Watchdog, Recorder).
+Watchdog.start()
 
 // Read off the main thread while the rest below gets ready.
 let launchSession = Session.reading(Session.file)

@@ -174,6 +174,9 @@ final class Tab: Identifiable {
     /// The load under way and the site last answering for it, which a
     /// server's redirect to an extension's page comes from (see Browser).
     @ObservationIgnored var loading: (navigation: WKNavigation, site: URL?)?
+    /// When the load on screen began, and when Back or Forward was asked
+    /// for, for the record (Recorder.painted).
+    @ObservationIgnored var timing = Recorder.PageTiming()
     /// An extension's page a tab with no page yet was sent to, to be opened
     /// if WebKit then says a site's server sent it there.
     @ObservationIgnored var returning: URL?

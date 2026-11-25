@@ -30,6 +30,7 @@ final class Browser: NSObject {
     var selectedID: Tab.ID? {
         didSet {
             if selected?.id != selectedID { findSelected() }
+            if selectedID != oldValue, oldValue != nil { recorder.begin(.tabSwitch) }
             if let left = tabs.first(where: { $0.id == oldValue }) {
                 left.lastSeen = .now
                 left.pageMoved()
@@ -80,6 +81,9 @@ final class Browser: NSObject {
     }
     /// Where this window's downloads go instead of `Downloads.folder` (tests).
     @ObservationIgnored var downloadFolder: URL?
+    /// Where this window's tab operations are timed: the app's one record,
+    /// or a test's own.
+    @ObservationIgnored var recorder = Recorder.shared
     var recentlyClosed: [Session.ClosedTab] = []
     @ObservationIgnored private var closing: Set<Tab.ID> = []
     /// A tab put on screen from the keyboard in the sidebar's list (the
@@ -297,6 +301,7 @@ final class Browser: NSObject {
     /// first, under the sidebar's New Tab, or across the top, newest `last`,
     /// by its + button.
     func add(_ tab: Tab, inBackground: Bool = false, last: Bool = TabStyle.current == .horizontal) {
+        recorder.begin(.tabOpen)
         tab.dataStore = dataStore
         tab.delegate = self
         tabs.insert(tab, at: tab.isPinned ? 0 : last ? tabs.count : pinnedCount)
@@ -392,6 +397,7 @@ final class Browser: NSObject {
             }
             return
         }
+        recorder.begin(.tabClose)
         if !isPrivate, let saved = tab.saved, saved.url != nil {
             recentlyClosed.append(Session.ClosedTab(tab: saved, index: index))
             recentlyClosed = Array(recentlyClosed.suffix(25))
@@ -837,6 +843,9 @@ extension Browser: WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  preferences: WKWebpagePreferences) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
         preferences.allowsContentJavaScript = tab(for: webView)?.javaScriptOff != true
+        if action.navigationType == .backForward, action.targetFrame?.isMainFrame ?? true, let tab = tab(for: webView) {
+            recorder.stepped(tab)
+        }
         if action.targetFrame?.isMainFrame ?? true {
             siteSettings.applyBlocking(to: preferences, for: action.request.url)
             if HTTPSUpgrade.isOn, let url = action.request.url, httpsUpgrade.applies(to: url) {
@@ -1100,7 +1109,19 @@ extension Browser: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        tab(for: webView)?.loading = (navigation, webView.url)
+        guard let tab = tab(for: webView) else { return }
+        tab.loading = (navigation, webView.url)
+        recorder.loading(tab, onScreen: tab.id == selectedID)
+    }
+
+    /// The page drew its first text or picture, for the record. WebKit SPI
+    /// (`WKNavigationDelegatePrivate`), told to a delegate that has it:
+    /// should it go, first paints go untimed, and Back and Forward are timed
+    /// to the page loaded.
+    @objc(_webView:renderingProgressDidChange:)
+    func webView(_ webView: WKWebView, renderingProgressDidChange events: UInt) {
+        guard events & Recorder.paintEvents != 0, let tab = tab(for: webView) else { return }
+        recorder.painted(tab, onScreen: tab.id == selectedID)
     }
 
     /// A server sending a tab with no page yet on to an extension's page
@@ -1118,6 +1139,7 @@ extension Browser: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         tab(for: webView)?.pageDidLoad()
+        if let tab = tab(for: webView) { recorder.arrived(tab) }
         tab(for: webView)?.checkReadable()
         if let tab = tab(for: webView) {
             signInLanded(on: tab)
@@ -1129,6 +1151,7 @@ extension Browser: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         tab(for: webView)?.departureApproved = false
+        if let tab = tab(for: webView) { recorder.failed(tab) }
         show(error, in: webView, opening: navigation)
     }
 
