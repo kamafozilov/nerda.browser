@@ -15,7 +15,8 @@ import SwiftUI
 /// binary. `./symbolicate.sh` turns Nerda's into function names with the
 /// release's Nerda.dSYM.zip (release.sh). MetricKit's reports of Nerda's
 /// main thread hanging, which macOS gathers over a day, are kept the same
-/// way, and go with a report with the launches' moments (`diagnostics`).
+/// way, and go with a report with the launches' moments and the tab
+/// timings and stalls Nerda recorded (`diagnostics`).
 @Observable
 final class Feedback: NSObject, MXMetricManagerSubscriber {
     static let shared = Feedback()
@@ -129,13 +130,24 @@ final class Feedback: NSObject, MXMetricManagerSubscriber {
     /// address, with the rest of the report.
     nonisolated static let diagnosticsLimit = 4096
 
-    /// What Nerda measured, under the system line of a report: the last
-    /// launches' moments and the hangs macOS reported, newest first.
-    static var diagnostics: String { diagnostics(launch: Launch.report, hangs: Feedback.shared.hangs) }
+    /// The most of the watchdog's log a report takes, so the stalls leave
+    /// room for the launches and hangs after them.
+    nonisolated static let stallsLimit = 1536
 
-    nonisolated static func diagnostics(launch: String, hangs: [String]) -> String {
+    /// What Nerda measured, under the system line of a report.
+    static var diagnostics: String {
+        diagnostics(tabs: Recorder.shared.report, stalls: Watchdog.recent(stallsLimit),
+                    launch: Launch.report, hangs: Feedback.shared.hangs)
+    }
+
+    /// The parts, the most useful first: the last minutes' tab timings and
+    /// hitches (Recorder), where the window stalled (Watchdog's log, newest
+    /// last), the last launches' moments, and the hangs macOS reported,
+    /// newest first. At most `diagnosticsLimit` in all, cut from the end.
+    nonisolated static func diagnostics(tabs: String, stalls: String?, launch: String, hangs: [String]) -> String {
+        let stalls = stalls.map { "Stalls:\n```\n" + ($0.hasSuffix("\n") ? $0 : $0 + "\n") + "```" } ?? ""
         let hangs = hangs.isEmpty ? [] : ["Hangs macOS reported, newest first:"] + hangs
-        return capped(([launch] + hangs).filter { !$0.isEmpty }.joined(separator: "\n\n"), to: diagnosticsLimit)
+        return capped(([tabs, stalls, launch] + hangs).filter { !$0.isEmpty }.joined(separator: "\n\n"), to: diagnosticsLimit)
     }
 
     /// `text` cut between lines to fit `limit` bytes, with a code block

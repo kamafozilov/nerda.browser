@@ -862,6 +862,7 @@ extension Browser {
                 }
                 return
             }
+            recorder.begin(.tabClose)
             if let next = recent.last(where: { !$0.isPinned }) ?? tabs.first(where: { !$0.isPinned }) {
                 selectedID = next.id
             } else {
@@ -882,6 +883,8 @@ extension Browser {
 if CommandLine.arguments.contains(Blocker.compileArgument) { Blocker.compileAndExit() }
 // This launch's moments, from the process start (Launch.swift).
 Launch.start()
+// Where the main thread stops, from the first moment on (Watchdog, Recorder).
+Watchdog.start()
 
 // Read off the main thread while the rest below gets ready.
 let launchSession = Launch.stage("session") { Session.reading(Session.file) }

@@ -161,7 +161,7 @@ struct HangReportTests {
     @Test func diagnosticsCarryTheLaunchesAndHangsWithinTheLimit() {
         let launch = "Launches\nmain 80 · page 900"
         let hangs = (1...3).map { "Hang \($0) s\n```\n" + String(repeating: "0   Nerda   0x1000\n", count: 120) + "```" }
-        let text = Feedback.diagnostics(launch: launch, hangs: hangs)
+        let text = Feedback.diagnostics(tabs: "", stalls: nil, launch: launch, hangs: hangs)
         #expect(text.hasPrefix(launch))
         #expect(text.contains("Hang 1 s"))
         #expect(text.utf8.count <= Feedback.diagnosticsLimit)

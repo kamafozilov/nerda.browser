@@ -219,3 +219,5 @@ Adapted in Nerda:
 
 - Sources/Nerda/PageEnds.swift
 - Sources/Nerda/Launch.swift
+- Sources/Nerda/Recorder.swift
+- Sources/Nerda/Watchdog.swift
