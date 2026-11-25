@@ -118,6 +118,9 @@ final class Tab: Identifiable {
     @ObservationIgnored var dataStore = WKWebsiteDataStore.default()
     /// When the tab was last on screen, so it sleeps only once it has been away a while.
     @ObservationIgnored var lastSeen = Date.now
+    /// An Agent tab whose agent is at work (`AgentAwake`): no rule puts it
+    /// to sleep until the agent has been idle a while.
+    @ObservationIgnored var isKeptAwake = false
     /// How many times it was gone to: one gone back to often is kept awake
     /// (SleepCoordinator).
     @ObservationIgnored var switchCount = 0

@@ -56,8 +56,10 @@ nonisolated struct AgentReply: Codable, Sendable, Equatable {
     var ok: Bool
     var text: String
     var error: String?
+    /// A picture of the page that comes with the text (`screenshot`).
+    var jpeg: Data?
 
-    static func done(_ text: String) -> AgentReply { AgentReply(ok: true, text: text) }
+    static func done(_ text: String, jpeg: Data? = nil) -> AgentReply { AgentReply(ok: true, text: text, jpeg: jpeg) }
 
     static func failed(_ error: AgentError) -> AgentReply {
         AgentReply(ok: false, text: error.message, error: error.code.rawValue)

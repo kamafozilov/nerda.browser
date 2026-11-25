@@ -57,7 +57,7 @@ nonisolated extension AgentVerb {
         summary: "Close one of this session's Agent tabs.",
         arguments: [.tab], destructive: true
     ) { call in
-        let tab = try call.tab()
+        let tab = try call.tab(waking: false)
         call.server.sessions.close(tab, in: call.session)
         return "Closed \(tab.ref)."
     }

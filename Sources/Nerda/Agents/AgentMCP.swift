@@ -100,8 +100,12 @@ actor AgentMCP {
             } else {
                 await call(name, arguments: arguments)
             }
+            var content: [AgentJSON] = [["type": "text", "text": .string(reply.text)]]
+            if let jpeg = reply.jpeg {
+                content.append(["type": "image", "data": .string(jpeg.base64EncodedString()), "mimeType": "image/jpeg"])
+            }
             return Self.result(id: id, [
-                "content": [["type": "text", "text": .string(reply.text)]],
+                "content": .array(content),
                 // Waiting on the owner is no failure: the agent tells them.
                 "isError": .bool(!reply.ok && !reply.needsUser),
             ]).line

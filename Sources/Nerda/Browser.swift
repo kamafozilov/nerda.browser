@@ -248,14 +248,14 @@ final class Browser: NSObject {
     func sleepIdleTabs(unseenFor age: TimeInterval, pinsToo: Bool = false, over size: UInt64 = 0,
                        picturing: Bool = true, sparingRevisited: Bool = false) {
         let cutoff = Date.now.addingTimeInterval(-age)
-        for tab in tabs where tab.id != selectedID && (pinsToo || !tab.isPinned) && !tab.isAsleep
+        for tab in tabs where tab.id != selectedID && (pinsToo || !tab.isPinned) && !tab.isAsleep && !tab.isKeptAwake
             && tab.lastSeen <= cutoff && (size == 0 || (tab.memory ?? 0) > size)
             && !(sparingRevisited && tab.switchCount > Self.revisited) {
             Task {
                 // Asked of the page, so it may have come on screen in the meantime.
                 guard await !tab.isBusy(), tab.id != selectedID else { return }
                 let look = picturing ? await tab.snapshot() : nil
-                if tab.id != selectedID, !tab.hasUnsavedWork { tab.sleep(keeping: look) }
+                if tab.id != selectedID, !tab.hasUnsavedWork, !tab.isKeptAwake { tab.sleep(keeping: look) }
             }
         }
     }
