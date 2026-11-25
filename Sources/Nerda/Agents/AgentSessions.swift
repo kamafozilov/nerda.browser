@@ -67,9 +67,9 @@ final class AgentSessions {
     /// is no time unused. Tests move it by hand.
     @ObservationIgnored let now: () -> SuspendingClock.Instant
     /// Whether the owner holds an Agent tab as their own, so cleanup leaves
-    /// it alone (`isKept`). Take over (#145) answers it for a tab the owner
-    /// has taken or kept; until then no tab is.
-    @ObservationIgnored var ownerKeeps: (AgentTab) -> Bool = { _ in false }
+    /// it alone (`isKept`): one they took over. One they kept leaves the
+    /// session (`leave`), so cleanup never sees it.
+    @ObservationIgnored var ownerKeeps: (AgentTab) -> Bool = { $0.isTaken }
     /// Whether an Agent waits on the owner in the tab (a Handoff, a
     /// question), so cleanup leaves it for the owner to come to.
     @ObservationIgnored var waitsOnOwner: (AgentTab) -> Bool = { _ in false }
@@ -155,6 +155,13 @@ final class AgentSessions {
         session.tabs.removeAll { $0.ref == tab.ref }
         ended[tab.ref] = why ?? "Tab \(tab.ref) was closed."
         tab.agents.browser.close(tab.tab.id, discarding: true)
+    }
+
+    /// The session lets go of its tab, which stays open: the owner kept it
+    /// as their own. `why` answers the agent asking for it later.
+    func leave(_ tab: AgentTab, from session: AgentSession, why: String) {
+        session.tabs.removeAll { $0.ref == tab.ref }
+        ended[tab.ref] = why
     }
 
     private func isOpen(_ tab: AgentTab) -> Bool { tab.agents.browser.tabs.contains { $0 === tab.tab } }

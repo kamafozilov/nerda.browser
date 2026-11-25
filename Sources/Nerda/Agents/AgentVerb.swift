@@ -131,8 +131,10 @@ struct AgentCall {
 
     /// The session's Agent tab named by the `tab` argument (`AgentSessions.tab`),
     /// awake (`AgentAwake.use`) unless only `waking: false`, as for closing it.
+    /// One the owner took over isn't the agent's to use until handed back.
     func tab(_ name: String = "tab", waking: Bool = true) throws -> AgentTab {
         let tab = try server.sessions.tab(try string(name), for: session)
+        if tab.isTaken { throw AgentServer.taken(tab) }
         if waking { server.awake.use(tab) }
         return tab
     }

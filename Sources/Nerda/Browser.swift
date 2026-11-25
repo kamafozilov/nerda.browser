@@ -476,7 +476,7 @@ final class Browser: NSObject {
         autofillOffers.removeAll { $0.tab == id }
         if selectedID == id {
             selectedID = recent.last?.id ?? tabs.first(where: Self.listed)?.id
-            if selectedID == nil, !isSecondary || window == nil { add(Tab()) }
+            if selectedID == nil, !isForAgents, !isSecondary || window == nil { add(Tab()) }
         }
         target.add(tab)
         // Down the side the list has no bookmarks' tabs; across the top they are among the rest.

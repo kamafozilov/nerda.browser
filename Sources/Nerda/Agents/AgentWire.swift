@@ -112,6 +112,9 @@ nonisolated struct AgentError: Error, Sendable, Equatable {
         case needsUser = "needs_user"
         /// The owner stopped the Agent session from the Agent row.
         case stopped
+        /// The owner took the Agent tab over (Take over): it is theirs
+        /// until they hand it back.
+        case taken
     }
 
     let code: Code
