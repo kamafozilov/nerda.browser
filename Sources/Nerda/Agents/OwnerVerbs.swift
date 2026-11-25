@@ -105,7 +105,7 @@ nonisolated extension AgentVerb {
     /// How long this request waits on the owner: as the caller asked,
     /// inside the deadline.
     @MainActor
-    private static func waitOnOwner(_ call: AgentCall) -> Duration {
+    static func waitOnOwner(_ call: AgentCall) -> Duration {
         let asked = call.arguments["wait"]?.number.map { Duration.seconds(max(0, $0)) } ?? ownerWait
         return min(asked, call.remaining - .seconds(1))
     }
