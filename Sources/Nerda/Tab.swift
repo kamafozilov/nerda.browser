@@ -377,9 +377,10 @@ final class Tab: Identifiable {
         page.load(.page(url))
     }
 
-    private func makePage(_ configuration: WKWebViewConfiguration) -> WKWebView {
+    /// `spare`, a page made ahead from this same configuration (SparePages), in place of a new one.
+    private func makePage(_ configuration: WKWebViewConfiguration, spare: SwipingWebView? = nil) -> WKWebView {
         Self.matchScreenRate(configuration.preferences)
-        let page = SwipingWebView(frame: .zero, configuration: configuration)
+        let page = spare ?? SwipingWebView(frame: .zero, configuration: configuration)
         _ = Self.powerWatch
         Self.pages.add(page)
         page.isInspectable = true
@@ -629,6 +630,19 @@ final class Tab: Identifiable {
         if let pool = processPool as? NSObject, pool.responds(to: warm) { pool.perform(warm) }
     }
 
+    /// A blank page for `store`'s next tab, made as `wake` makes one, its
+    /// process started now rather than at its first load (SparePages).
+    // WebKit SPI, Safari's: should it go, the process starts at the first load, as it did.
+    static func sparePage(for store: WKWebsiteDataStore) -> SwipingWebView {
+        let configuration = configuration(store)
+        matchScreenRate(configuration.preferences)
+        let page = SwipingWebView(frame: .zero, configuration: configuration)
+        pages.add(page)
+        let launch = NSSelectorFromString("_launchInitialProcessIfNecessary")
+        if page.responds(to: launch) { page.perform(launch) }
+        return page
+    }
+
     /// The colour along the page's top edge: what the address bar touches,
     /// which sites' theme colours often aren't (GitHub's, YouTube's). None
     /// when the edge isn't one colour; then the page's theme colour, or its background.
@@ -760,7 +774,8 @@ final class Tab: Identifiable {
         packedLook = nil
         let site = target ?? url
         madeFor = Extensions.host(of: site)
-        let page = makePage(site.flatMap(Extensions.configuration(for:)) ?? Self.configuration(dataStore))
+        let page = site.flatMap(Extensions.configuration(for:)).map { makePage($0) }
+            ?? makePage(Self.configuration(dataStore), spare: SparePages.take(for: dataStore))
         self.page = page
         if let slept { page.pageZoom = slept.zoom }
         if let state = slept?.state {
