@@ -27,6 +27,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - With the sidebar hidden, the window's close, minimise and zoom buttons show while the pointer is at the top of the window, and go when it leaves, without the sidebar coming out; the address bar starts past them, so they never sit over its buttons. Before, they showed only with the sidebar.
 - Offering to save a password shows a card with the site's icon, the user name, to correct before you save, and the password, hidden until you click the eye. It warns when the password is easy to guess.
 - File › Import Bookmarks… no longer stops you with a dialog once it has worked: the bookmarks come in as the Imported folder at the end of your bookmarks, and the sidebar opens to show it. After File › Import Passwords…, the reminder to delete the file shows on the window you are in, rather than holding up all of Nerda.
+- When your Mac runs short of memory, Nerda no longer puts every tab out of sight to sleep at once. Only when memory runs out does it put one to sleep, the one using the most memory, then another every few seconds until there is enough, and never the tabs you used last, one you looked at in the last ten minutes or one that played sound in the last minute. A tab you keep going back to is no longer put to sleep by Settings › Tabs › Sleep inactive tabs, however long you leave it.
 
 ### Fixed
 
