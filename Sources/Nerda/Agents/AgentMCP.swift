@@ -30,11 +30,17 @@ actor AgentMCP {
     /// The groups of tools the agent asked for (`more_tools`), listed beside
     /// the page verbs from then on.
     private var groups: Set<String> = []
+    /// Starts Nerda hidden when nothing answers; nil to only say so.
+    private let launcher: AgentLauncher?
+    /// Nerda being started, for every call that found it closed.
+    private var starting: Task<Bool, Never>?
 
     init(socket: URL, environment: [String: String] = ProcessInfo.processInfo.environment,
-         wire: Int = AgentWire.version, notify: @escaping @Sendable (String) -> Void = { _ in }) {
+         wire: Int = AgentWire.version, launcher: AgentLauncher? = nil,
+         notify: @escaping @Sendable (String) -> Void = { _ in }) {
         self.socket = socket
         self.wire = wire
+        self.launcher = launcher
         self.notify = notify
         sessionID = Self.sessionVariables.lazy.compactMap { environment[$0] }.first { !$0.isEmpty }
             ?? UUID().uuidString
@@ -81,26 +87,37 @@ actor AgentMCP {
         }
     }
 
-    /// One verb, sent to the app as one request.
+    /// One verb, sent to the app as one request. With Nerda closed, it is
+    /// started hidden first (`AgentLauncher`), and the request sent once it
+    /// answers.
     func call(_ verb: String, arguments: [String: AgentJSON]) async -> AgentReply {
         let request = AgentRequest(v: wire, verb: verb, session: AgentSessionName(client: client, id: sessionID), args: arguments)
         let deadline = AgentVerb.named[verb]?.deadline ?? AgentWire.deadline
+        guard let data = try? JSONEncoder().encode(request) else {
+            return .failed(AgentError(.invalid, "The arguments to \(verb) couldn't be sent."))
+        }
         do {
-            let data = try JSONEncoder().encode(request)
-            let answer = try await AgentSocket.request(data, to: socket.path, timeout: deadline + .seconds(5))
-            if let version = (try? AgentJSON(data: answer))?["v"]?.int, version != wire {
-                return .reopen(app: version, shim: wire)
-            }
-            return try JSONDecoder().decode(AgentReply.self, from: answer)
+            return try await send(data, timeout: deadline + .seconds(5))
         } catch AgentSocket.Failure.unreachable {
-            return .failed(AgentError(.unreachable, """
-                Nerda isn't running, or agents are turned off in its Settings › Security & Privacy. \
-                Ask the user to open Nerda.
-                """))
-        } catch AgentSocket.Failure.timedOut {
-            return .failed(AgentError(.timedOut, "Nerda didn't answer \(verb) in time."))
+            guard let launcher else { return .failed(Self.unreachable) }
+            guard await started(launcher) else {
+                return .failed(launcher.app() == .open ? Self.agentsOff : Self.notStarted)
+            }
+            // Unreachable means nothing was sent: trying again does it once.
+            let end = ContinuousClock.now + launcher.wait
+            while true {
+                do {
+                    return try await send(data, timeout: deadline + .seconds(5))
+                } catch AgentSocket.Failure.unreachable where ContinuousClock.now < end {
+                    try? await Task.sleep(for: launcher.poll)
+                } catch AgentSocket.Failure.unreachable {
+                    return .failed(Self.notStarted)
+                } catch {
+                    return Self.failure(error, verb: verb)
+                }
+            }
         } catch {
-            return .failed(AgentError(.failed, "Nerda's answer to \(verb) couldn't be read: \(error)"))
+            return Self.failure(error, verb: verb)
         }
     }
 
@@ -121,6 +138,49 @@ actor AgentMCP {
         }
     }
 
+    private func send(_ data: Data, timeout: Duration) async throws -> AgentReply {
+        let answer = try await AgentSocket.request(data, to: socket.path, timeout: timeout)
+        if let version = (try? AgentJSON(data: answer))?["v"]?.int, version != wire {
+            return .reopen(app: version, shim: wire)
+        }
+        return try JSONDecoder().decode(AgentReply.self, from: answer)
+    }
+
+    /// Nerda started, once for all the calls that find it closed together.
+    private func started(_ launcher: AgentLauncher) async -> Bool {
+        if let starting { return await starting.value }
+        let task = Task { await launcher.started() }
+        starting = task
+        defer { starting = nil }
+        return await task.value
+    }
+
+    private static func failure(_ error: any Error, verb: String) -> AgentReply {
+        switch error {
+        case AgentSocket.Failure.timedOut:
+            .failed(AgentError(.timedOut, "Nerda didn't answer \(verb) in time."))
+        case AgentSocket.Failure.unreachable:
+            .failed(unreachable)
+        default:
+            .failed(AgentError(.failed, "Nerda's answer to \(verb) couldn't be read: \(error)"))
+        }
+    }
+
+    private static let unreachable = AgentError(.unreachable, """
+        Nerda isn't running, or agents are turned off in its Settings › Security & Privacy. \
+        Ask the user to open Nerda.
+        """)
+
+    private static let agentsOff = AgentError(.unreachable, """
+        Agents are turned off in Nerda's Settings › Security & Privacy. \
+        Ask the user to turn on Agents can use Nerda there.
+        """)
+
+    private static let notStarted = AgentError(.unreachable, """
+        Nerda didn't start, or agents are turned off in its Settings › Security & Privacy. \
+        Ask the user to open Nerda.
+        """)
+
     /// Tells the app this shim's agent went away, so its session detaches
     /// (`AgentWire.detach`). Unanswered or not, the shim is done.
     func detach() async {
@@ -139,7 +199,7 @@ actor AgentMCP {
         let write: @Sendable (String) -> Void = { line in
             output.withLock { _ in FileHandle.standardOutput.write(Data((line + "\n").utf8)) }
         }
-        let mcp = AgentMCP(socket: socket, notify: write)
+        let mcp = AgentMCP(socket: socket, launcher: .thisApp, notify: write)
         let pending = DispatchGroup()
         while let line = readLine(strippingNewline: true) {
             guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { continue }

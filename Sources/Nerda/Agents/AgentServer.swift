@@ -53,6 +53,11 @@ final class AgentServer {
     /// Whether the socket is there for agents to reach.
     var isListening: Bool { listener != nil }
 
+    /// Requests being worked on now.
+    private(set) var working = 0
+    /// When a request last came or was answered; nil before the first.
+    private(set) var lastUsed: ContinuousClock.Instant?
+
     /// Listens while the switch is on, from now on, following it as it is
     /// turned off and on; and cleans up finished sessions' tabs, switch or
     /// not.
@@ -141,6 +146,12 @@ final class AgentServer {
 
     /// The answer to one request line, from a caller with `access`.
     func answer(_ line: Data, access: AgentCallers.Access) async -> AgentReply {
+        working += 1
+        lastUsed = .now
+        defer {
+            working -= 1
+            lastUsed = .now
+        }
         // The version first, from whatever shape the rest has: an app and a
         // shim of different versions may not read each other's.
         let version = (try? AgentJSON(data: line))?["v"]?.int

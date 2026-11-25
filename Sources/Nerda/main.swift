@@ -896,8 +896,11 @@ Watchdog.start()
 
 // Read off the main thread while the rest below gets ready.
 let launchSession = Launch.stage("session") { Session.reading(Session.file) }
+// Started by an agent's nerda-browser with Nerda closed: hidden until the
+// owner opens Nerda (HiddenStart), its tabs and windows only then.
+let startsHidden = CommandLine.arguments.contains(AgentLauncher.hiddenArgument)
 let app = NSApplication.shared
-app.setActivationPolicy(.regular)
+if !startsHidden { app.setActivationPolicy(.regular) }
 // Tabs are ours; no system tab bar, and no Show Tab Bar items in the menus.
 NSWindow.allowsAutomaticWindowTabbing = false
 SpellCheck.registerDefault()
@@ -909,10 +912,12 @@ Launch.stage("history") { History.shared.load(from: History.file, waiting: false
 // Before the tabs: those of bookmarks are told by them.
 Launch.stage("bookmarks") { Bookmarks.shared.load(from: Bookmarks.file) }
 Favicons.shared.folder = Favicons.folder
-Launch.stage("restore") {
-    browser.restore(launchSession(), from: Session.file)
-    // Read off the main thread, so the tabs' icons are there with the window.
-    Favicons.shared.preload(browser.tabs.compactMap(\.site))
+if !startsHidden {
+    Launch.stage("restore") {
+        browser.restore(launchSession(), from: Session.file)
+        // Read off the main thread, so the tabs' icons are there with the window.
+        Favicons.shared.preload(browser.tabs.compactMap(\.site))
+    }
 }
 // Opening on a new tab, it opens with its picture already there. On a web
 // page, the picture waits for the first new tab: 20 to 100 MB not taken for one.
@@ -934,16 +939,36 @@ AgentServer.shared.start()
 
 let window = Launch.stage("window") { BrowserWindow(browser: browser) }
 Windows.regular = window
-window.makeKeyAndOrderFront(nil)
-// A blank tab has no page to wait for: the window is the launch.
-Launch.watch(window, waitingForPage: browser.selected.map { !$0.isBlank } ?? false)
-Launch.stage("other windows") {
-    Windows.reopenProfiles()
-    Windows.reopenSecondary()
+
+/// The windows Nerda opens with: at once, or after a hidden start, once the
+/// owner opens it.
+func showWindows() {
+    window.makeKeyAndOrderFront(nil)
+    // A blank tab has no page to wait for: the window is the launch.
+    Launch.watch(window, waitingForPage: browser.selected.map { !$0.isBlank } ?? false)
+    Launch.stage("other windows") {
+        Windows.reopenProfiles()
+        Windows.reopenSecondary()
+    }
+    // Once the window is up: loading them takes the main thread a while.
+    if Extensions.enabledAtLaunch { DispatchQueue.main.async { Extensions.shared.start(for: browser) } }
+}
+
+if startsHidden {
+    HiddenStart.shared = HiddenStart(
+        server: AgentServer.shared,
+        setPolicy: { app.setActivationPolicy($0) },
+        show: {
+            browser.restore(from: Session.file)
+            Favicons.shared.preload(browser.tabs.compactMap(\.site))
+            showWindows()
+        },
+        quit: { app.terminate(nil) }
+    )
+} else {
+    showWindows()
 }
 Launch.later("stores left") { Profiles.removeStoresLeft() }
-// Once the window is up: loading them takes the main thread a while.
-if Extensions.enabledAtLaunch { DispatchQueue.main.async { Extensions.shared.start(for: browser) } }
 
 #if DEBUG
 // Nerda Dev: which view each key goes to, for when keys stop reaching a
