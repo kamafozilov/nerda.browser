@@ -26,12 +26,15 @@ final class AgentHarness {
     /// What Nerda would have shown the owner as notifications: tests post
     /// none of the Mac's.
     let notifier = RecordingNotifier()
+    /// The server's awake time, moved by hand (`advance(by:)`).
+    let clock = AgentTestClock()
     private let defaultsName: String
     var socket: URL { server.socket }
 
     /// `callers` decides who may do more than ask for status; by default
-    /// every program of this user, as in development builds.
-    init(callers: AgentCallers = .anyone) throws {
+    /// every program of this user, as in development builds. `ask` is the
+    /// owner asked about another program; by default they never answer.
+    init(callers: AgentCallers = .anyone, ask: @escaping AgentApprovals.Ask = { _ in nil }) throws {
         // Short: a socket's path has room for 103 bytes.
         folder = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "na-" + UUID().uuidString.prefix(8))
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -39,8 +42,9 @@ final class AgentHarness {
         defaultsName = "nerda.agents.tests." + UUID().uuidString
         defaults = try #require(UserDefaults(suiteName: defaultsName))
         // Every profile's Agent tabs on a store of their own, kept in memory.
+        let clock = clock
         server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults,
-                             notifier: notifier) { profile in
+                             notifier: notifier, now: { clock.now }, ask: ask) { profile in
             AgentBrowser(profile: profile, dataStore: .nonPersistent())
         }
         server.start()
@@ -77,6 +81,15 @@ final class AgentHarness {
         UserDefaults.standard.removePersistentDomain(forName: defaultsName)
         try? FileManager.default.removeItem(at: folder)
     }
+}
+
+/// Awake time that only moves when a test moves it, so cleanup's 15
+/// minutes pass at once.
+@MainActor
+final class AgentTestClock {
+    private(set) var now = SuspendingClock.now
+
+    func advance(by duration: Duration) { now = now.advanced(by: duration) }
 }
 
 /// One MCP client's side of the conversation with the shim.
