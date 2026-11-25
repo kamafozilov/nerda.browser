@@ -15,6 +15,8 @@ final class AgentServer {
 
     let socket: URL
     let sessions = AgentSessions()
+    /// What agents wait on the owner for: Handoffs and questions.
+    let owner: OwnerRequests
     private let callers: AgentCallers
     private let defaults: UserDefaults
     private let makeBrowser: (Profile) -> AgentBrowser
@@ -24,8 +26,10 @@ final class AgentServer {
     private var switchWatch: NSObjectProtocol?
 
     init(socket: URL, callers: AgentCallers = .nerdas, defaults: UserDefaults = .standard,
+         notifier: AgentNotifier = MacAgentNotifier(),
          makeBrowser: @escaping (Profile) -> AgentBrowser = { AgentBrowser(profile: $0) }) {
         self.socket = socket
+        owner = OwnerRequests(notifier: notifier)
         self.callers = callers
         self.defaults = defaults
         self.makeBrowser = makeBrowser

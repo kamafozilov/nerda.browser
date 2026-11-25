@@ -67,6 +67,24 @@ nonisolated struct AgentReply: Codable, Sendable, Equatable {
     }
 }
 
+nonisolated extension AgentReply {
+    /// What the `nerda-browser` command line exits with for this answer:
+    /// 0 done, 1 failed, 2 Nerda unreachable, 3 the owner is needed, 124
+    /// timed out (130, interrupted, is the command line's own).
+    var exitCode: Int32 {
+        if ok { return 0 }
+        switch error.flatMap(AgentError.Code.init(rawValue:)) {
+        case .needsUser: return 3
+        case .unreachable: return 2
+        case .timedOut: return 124
+        default: return 1
+        }
+    }
+
+    /// Waiting on the owner, rather than failed.
+    var needsUser: Bool { error == AgentError.Code.needsUser.rawValue }
+}
+
 /// A request that could not be done, with what to tell the agent.
 nonisolated struct AgentError: Error, Sendable, Equatable {
     /// Each kind of failure, as it travels in `AgentReply.error`. Later
@@ -90,6 +108,9 @@ nonisolated struct AgentError: Error, Sendable, Equatable {
         case timedOut = "timed_out"
         /// Nerda isn't running, or agents are turned off (shim side only).
         case unreachable
+        /// Waiting on the owner (a Handoff, a question): no failure, the
+        /// agent tells the owner and asks again.
+        case needsUser = "needs_user"
     }
 
     let code: Code

@@ -19,6 +19,10 @@ nonisolated struct AgentVerb: Sendable {
     var forAnyCaller = false
     /// How long it may take before the answer is "timed out".
     var deadline = AgentWire.deadline
+    /// Waits on the owner (a Handoff, a question): the shim asks again and
+    /// again, with progress, while its client waits (`AgentMCP.Waits`), and
+    /// passes each request how long to wait in `wait`.
+    var waitsForOwner = false
     /// Does it on the main thread, for the session asking, with its
     /// arguments; the text is what the agent is shown. Throws an
     /// `AgentError` to fail with one.
@@ -29,6 +33,7 @@ nonisolated struct AgentVerb: Sendable {
     static let all: [AgentVerb] = [
         [status],
         tabVerbs, // TabVerbs.swift
+        ownerVerbs, // OwnerVerbs.swift
     ].flatMap(\.self)
 
     static let named = Dictionary(uniqueKeysWithValues: all.map { ($0.name, $0) })

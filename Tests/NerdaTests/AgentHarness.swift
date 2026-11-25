@@ -23,6 +23,9 @@ final class AgentHarness {
     let server: AgentServer
     /// Settings of the test's own, for the switch that lets agents in.
     let defaults: UserDefaults
+    /// What Nerda would have shown the owner as notifications: tests post
+    /// none of the Mac's.
+    let notifier = RecordingNotifier()
     private let defaultsName: String
     var socket: URL { server.socket }
 
@@ -36,7 +39,8 @@ final class AgentHarness {
         defaultsName = "nerda.agents.tests." + UUID().uuidString
         defaults = try #require(UserDefaults(suiteName: defaultsName))
         // Every profile's Agent tabs on a store of their own, kept in memory.
-        server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults) { profile in
+        server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults,
+                             notifier: notifier) { profile in
             AgentBrowser(profile: profile, dataStore: .nonPersistent())
         }
         server.start()
@@ -48,10 +52,14 @@ final class AgentHarness {
     /// An MCP client connected to the server through the shim, as Claude
     /// Code or Codex would be, already past `initialize`. `session` is the
     /// harness's session id (Claude Code's, Codex's thread's).
+    /// `waits` are how long the shim waits on the owner.
     func agent(client: String = "claude-code", session: String = "session-1",
-               wire: Int = AgentWire.version) async throws -> AgentTestClient {
-        let mcp = AgentMCP(socket: socket, environment: ["CLAUDE_CODE_SESSION_ID": session], wire: wire)
-        let agent = AgentTestClient(mcp: mcp)
+               wire: Int = AgentWire.version, waits: AgentMCP.Waits = AgentMCP.Waits()) async throws -> AgentTestClient {
+        let heard = Heard()
+        let mcp = AgentMCP(socket: socket, environment: ["CLAUDE_CODE_SESSION_ID": session], wire: wire, waits: waits) {
+            heard.append($0)
+        }
+        let agent = AgentTestClient(mcp: mcp, heard: heard)
         let reply = try await agent.request("initialize", [
             "protocolVersion": "2025-06-18",
             "capabilities": [:],
@@ -74,6 +82,8 @@ final class AgentHarness {
 /// One MCP client's side of the conversation with the shim.
 struct AgentTestClient {
     let mcp: AgentMCP
+    /// The notifications the shim sent this client between replies.
+    let heard: Heard
     private static let ids = Counter()
 
     /// A JSON-RPC request and its whole reply (`result` or `error`).
@@ -87,8 +97,13 @@ struct AgentTestClient {
     }
 
     /// A tool called, and the text it answered, with whether it failed.
-    func call(_ tool: String, _ arguments: [String: AgentJSON] = [:]) async throws -> (text: String, isError: Bool) {
-        let reply = try await request("tools/call", ["name": .string(tool), "arguments": .object(arguments)])
+    /// With `progressToken`, as Claude Code calls: the shim may send
+    /// progress while the call waits (`heard`).
+    func call(_ tool: String, _ arguments: [String: AgentJSON] = [:],
+              progressToken: AgentJSON? = nil) async throws -> (text: String, isError: Bool) {
+        var params: [String: AgentJSON] = ["name": .string(tool), "arguments": .object(arguments)]
+        if let progressToken { params["_meta"] = ["progressToken": progressToken] }
+        let reply = try await request("tools/call", .object(params))
         let result = try #require(reply["result"], "No result: \(reply.line)")
         let text = result["content"]?.array?.compactMap { $0["text"]?.string }.joined(separator: "\n") ?? ""
         return (text, result["isError"]?.bool ?? false)
@@ -98,6 +113,25 @@ struct AgentTestClient {
     func tools() async throws -> [AgentJSON] {
         try #require(try await request("tools/list")["result"]?["tools"]?.array)
     }
+}
+
+/// JSON-RPC notifications a client was sent, as they came.
+final class Heard: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [AgentJSON] = []
+    func append(_ line: String) { if let json = try? AgentJSON(line: line) { lock.withLock { lines.append(json) } } }
+    var all: [AgentJSON] { lock.withLock { lines } }
+    /// The `notifications/progress` among them.
+    var progress: [AgentJSON] { all.filter { $0["method"] == "notifications/progress" } }
+}
+
+/// Stands in for the Mac's notifications: keeps what would be shown.
+@MainActor
+final class RecordingNotifier: AgentNotifier {
+    private(set) var posted: [AgentNotice] = []
+    private(set) var withdrawn: [String] = []
+    func post(_ notice: AgentNotice) { posted.append(notice) }
+    func withdraw(_ id: String) { withdrawn.append(id) }
 }
 
 private final class Counter: @unchecked Sendable {
