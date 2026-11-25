@@ -58,8 +58,6 @@ final class Blocker {
     /// Every page's controller, given the rules as they come, and each new list.
     private let controllers = NSHashTable<WKUserContentController>.weakObjects()
     private var started = false
-    private var settled = false
-    private var waiting: [CheckedContinuation<Void, Never>] = []
     private var schedule: NSBackgroundActivityScheduler?
 
     /// Takes the rules compiled last time, then fetches the lists: at once
@@ -74,9 +72,6 @@ final class Blocker {
             // Only a first run waits for the lists. One that is merely due is
             // left to the schedule below, so it never competes with a launch.
             if rules.isEmpty { await refresh(fetch: true) }
-            settled = true
-            waiting.forEach { $0.resume() }
-            waiting = []
         }
         // Due lists are fetched when macOS finds the Mac has time to spare:
         // first 15 to 45 minutes after launch, then about every half hour, so
@@ -132,12 +127,6 @@ final class Blocker {
         UserDefaults.standard.set(chosen.map(\.absoluteString), forKey: Self.chosenKey)
         UserDefaults.standard.set(try? JSONEncoder().encode(added), forKey: Self.addedKey)
         Task { await refresh(fetch: false) }
-    }
-
-    /// Once the rules are in, or couldn't be had this time (Nerda Bench times pages with them).
-    func ready() async {
-        guard started, !settled else { return }
-        await withCheckedContinuation { waiting.append($0) }
     }
 
     /// Due every few days, and while a chosen list was never had, whatever the

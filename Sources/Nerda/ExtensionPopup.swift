@@ -34,8 +34,8 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// would open it again.
     private var closedByButton: (id: String, at: Date)?
 
-    /// The popup's web view, while one is up — for the bench, and for its
-    /// clipboard to follow a permission (Extensions.clipboardChanged).
+    /// The popup's web view, while one is up, for its clipboard to follow a
+    /// permission (Extensions.clipboardChanged).
     var view: WKWebView? { web }
 
     /// Kept up while Nerda asks a question on the window: the sheet takes

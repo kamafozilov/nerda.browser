@@ -967,9 +967,6 @@ terminated.setEventHandler {
 }
 terminated.resume()
 
-#if DEBUG
-Bench.start(browser, window)
-#endif
 // Not activated here: macOS brings Nerda forward when it is opened, and leaves
 // it behind when asked to (`open -g`, watch.sh).
 app.run()
