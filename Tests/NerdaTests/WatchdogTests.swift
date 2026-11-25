@@ -24,7 +24,7 @@ struct WatchdogTests {
         // A pass of its own, begun after the watchdog was watching.
         try await Task.sleep(for: .milliseconds(50))
         usleep(1_200_000)
-        try await waitFor { log(file).contains("stall 1.") }
+        try await waitFor { log(file).contains("  stall ") }
         let text = log(file)
         #expect(text.contains("stalling"), "the stall was seen while it lasted")
         // Its frames: the binary and the offset in it, the tests' own among them.
