@@ -65,7 +65,7 @@ enum AgentSignIn {
             throw AgentError(.failed, "Nerda couldn't read the saved password from the keychain. Ask the user to sign in with handoff (step sign_in).")
         }
         let filled = try? await page.callAsyncJavaScript(
-            "return nerdaFill(user, password, site, secure)",
+            "return nerdaFill(user, password, site, secure, true)",
             arguments: ["user": account.user, "password": password, "site": form.host, "secure": !form.clear],
             in: form.frame, contentWorld: Passwords.world
         ) as? Bool

@@ -445,12 +445,13 @@ enum Passwords {
             // when the name comes first on its own, else null.
             window.nerdaSignInAsks = () => passwords().length ? 'password' : nameAsked() ? 'name' : null;
             // Into the boxes the caret was in, else the page's first password
-            // box or name asked for alone, and only on the site it was picked
-            // for, over https if it was listed for a page over https.
-            window.nerdaFill = (user, password, site, secure) => {
+            // box, or for an agent's sign_in (forAgent) a name asked for
+            // alone, and only on the site it was picked for, over https if
+            // it was listed for a page over https.
+            window.nerdaFill = (user, password, site, secure, forAgent) => {
                 if (location.hostname.toLowerCase().replace(/^www\./, '') !== site) return false;
                 if (secure && location.protocol !== 'https:') return false;
-                const box = field?.isConnected ? field : passwords()[0] ?? nameAsked();
+                const box = field?.isConnected ? field : passwords()[0] ?? (forAgent === true ? nameAsked() : null);
                 if (!box) return false;
                 const passwordBox = box.type === 'password' ? box : passwordFor(box);
                 const nameBox = box.type === 'password' ? nameFor(box) : box;
