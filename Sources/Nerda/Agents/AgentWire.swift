@@ -90,6 +90,9 @@ nonisolated struct AgentError: Error, Sendable, Equatable {
         case timedOut = "timed_out"
         /// Nerda isn't running, or agents are turned off (shim side only).
         case unreachable
+        /// The step waits on the owner (a Handoff, a question); the agent
+        /// tells them, and asks again.
+        case needsUser = "needs_user"
     }
 
     let code: Code
@@ -98,5 +101,32 @@ nonisolated struct AgentError: Error, Sendable, Equatable {
     init(_ code: Code, _ message: String) {
         self.code = code
         self.message = message
+    }
+}
+
+nonisolated extension AgentWire {
+    /// Sends one request to the app listening at `socket` and answers what
+    /// it said, or why nothing came back: the shim's and the command line's
+    /// way in alike.
+    static func send(_ request: AgentRequest, to socket: URL) async -> AgentReply {
+        let verb = request.verb
+        let deadline = AgentVerb.named[verb]?.deadline ?? AgentWire.deadline
+        do {
+            let data = try JSONEncoder().encode(request)
+            let answer = try await AgentSocket.request(data, to: socket.path, timeout: deadline + .seconds(5))
+            if let version = (try? AgentJSON(data: answer))?["v"]?.int, version != request.v {
+                return .reopen(app: version, shim: request.v)
+            }
+            return try JSONDecoder().decode(AgentReply.self, from: answer)
+        } catch AgentSocket.Failure.unreachable {
+            return .failed(AgentError(.unreachable, """
+                Nerda isn't running, or agents are turned off in its Settings › Security & Privacy. \
+                Ask the user to open Nerda.
+                """))
+        } catch AgentSocket.Failure.timedOut {
+            return .failed(AgentError(.timedOut, "Nerda didn't answer \(verb) in time."))
+        } catch {
+            return .failed(AgentError(.failed, "Nerda's answer to \(verb) couldn't be read: \(error)"))
+        }
     }
 }

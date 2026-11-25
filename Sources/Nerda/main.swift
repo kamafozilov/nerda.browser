@@ -889,6 +889,11 @@ if CommandLine.arguments.contains(Blocker.compileArgument) { Blocker.compileAndE
 // `Nerda mcp`: the nerda-browser MCP server an agent starts, passing its
 // requests to the Nerda running (AgentMCP), not a browser itself.
 if CommandLine.arguments.dropFirst().first == "mcp" { AgentMCP.runStdio(socket: AgentWire.socket) }
+// `Nerda cli …`: the nerda-browser command (AgentCommandLine), which
+// setup's command on PATH runs.
+if CommandLine.arguments.dropFirst().first == "cli" { AgentCommandLine.main(Array(CommandLine.arguments.dropFirst(2))) }
+// `Nerda setup`: connects Nerda to Claude Code and Codex (AgentSetup).
+if CommandLine.arguments.dropFirst().first == "setup" { AgentSetup.main(Array(CommandLine.arguments.dropFirst(2))) }
 // This launch's moments, from the process start (Launch.swift).
 Launch.start()
 // Where the main thread stops, from the first moment on (Watchdog, Recorder).
@@ -931,6 +936,9 @@ Feedback.shared.start()
 HungPages.start()
 // Agents reach Nerda on its socket while Settings lets them (AgentServer).
 AgentServer.shared.start()
+// The skill setup wrote for Claude Code and Codex, written again if this
+// version of Nerda changed it; nowhere setup didn't write it.
+Task.detached(priority: .utility) { AgentSetup.installed()?.refreshSkills() }
 
 let window = Launch.stage("window") { BrowserWindow(browser: browser) }
 Windows.regular = window

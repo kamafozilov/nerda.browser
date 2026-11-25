@@ -77,24 +77,7 @@ actor AgentMCP {
     /// One verb, sent to the app as one request.
     func call(_ verb: String, arguments: [String: AgentJSON]) async -> AgentReply {
         let request = AgentRequest(v: wire, verb: verb, session: AgentSessionName(client: client, id: sessionID), args: arguments)
-        let deadline = AgentVerb.named[verb]?.deadline ?? AgentWire.deadline
-        do {
-            let data = try JSONEncoder().encode(request)
-            let answer = try await AgentSocket.request(data, to: socket.path, timeout: deadline + .seconds(5))
-            if let version = (try? AgentJSON(data: answer))?["v"]?.int, version != wire {
-                return .reopen(app: version, shim: wire)
-            }
-            return try JSONDecoder().decode(AgentReply.self, from: answer)
-        } catch AgentSocket.Failure.unreachable {
-            return .failed(AgentError(.unreachable, """
-                Nerda isn't running, or agents are turned off in its Settings › Security & Privacy. \
-                Ask the user to open Nerda.
-                """))
-        } catch AgentSocket.Failure.timedOut {
-            return .failed(AgentError(.timedOut, "Nerda didn't answer \(verb) in time."))
-        } catch {
-            return .failed(AgentError(.failed, "Nerda's answer to \(verb) couldn't be read: \(error)"))
-        }
+        return await AgentWire.send(request, to: socket)
     }
 
     // MARK: stdio
