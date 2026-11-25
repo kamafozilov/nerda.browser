@@ -32,44 +32,14 @@ extension AgentPage {
     /// takes no mouse there), it is clicked by script instead, and a notice
     /// says so. Answers the action's line for `act`.
     static func click(_ ref: String, in agentTab: AgentTab) async throws -> String {
-        let element = try await element(ref, in: agentTab)
-        let aim = try await run(clickHelpers + aimScript, on: element) as? [String: Any] ?? [:]
-        let what = describe(ref: ref, aim["what"])
-        if aim["unseen"] != nil {
-            throw AgentError(.failed, "\(what) isn't shown on the page (no size, or out of reach), so it can't be clicked.")
-        }
-        if let cover = aim["covered"] { throw covered(what, by: cover) }
-        guard let x = aim["x"] as? Double, let y = aim["y"] as? Double else {
-            throw AgentError(.failed, "Nerda couldn't find where \(what) is on the page.")
-        }
-        var point = CGPoint(x: x, y: y)
-        // Into the page's own coordinates, frame by frame, from a frame of
-        // another site up through those holding it.
-        if let path = aim["path"] as? [Int], !path.isEmpty {
-            let tree = await frames(of: element.page)
-            for depth in stride(from: path.count - 1, through: 0, by: -1) {
-                let holder = depth == 0 ? nil : tree?.frame(at: Array(path[..<depth]))?.info
-                guard depth == 0 || holder != nil else { throw AgentError(.failed, "Nerda couldn't find where \(what) is on the page.") }
-                let step = try await element.page.callAsyncJavaScript(
-                    AgentPageScript.source + "\n" + clickHelpers + holderScript,
-                    arguments: ["op": "run", "args": [String: Any](), "prefix": "", "index": path[depth], "x": point.x, "y": point.y],
-                    in: holder, contentWorld: world
-                ) as? [String: Any] ?? [:]
-                if let cover = step["covered"] { throw covered(what, by: cover) }
-                guard let x = step["x"] as? Double, let y = step["y"] as? Double else {
-                    throw AgentError(.failed, "Nerda couldn't find where \(what) is on the page.")
-                }
-                point = CGPoint(x: x, y: y)
-            }
-        }
-        let page = element.page
-        let zoom = page.pageZoom * page.magnification
-        try AgentInput.click(page, at: CGPoint(x: point.x * zoom, y: point.y * zoom))
+        let aim = try await aim(ref, in: agentTab, watchingClicks: true)
+        let element = aim.element, what = aim.what
+        try AgentInput.click(element.page, at: aim.point)
 
         // Whether the page heard it: gone (a navigation, the element taken
         // away) or held by a dialog counts as heard.
         let heard = await unlessHeld(agentTab.tab, by: .now + .seconds(1)) {
-            try await page.callAsyncJavaScript(
+            try await element.page.callAsyncJavaScript(
                 AgentPageScript.source + "\n" + heardScript, arguments: ["op": "run", "args": [String: Any](), "prefix": ""],
                 in: element.frame, contentWorld: world
             ) as? Bool
@@ -83,8 +53,53 @@ extension AgentPage {
         return "clicked \(what)"
     }
 
+    /// Where the pointer goes to reach the element `ref` names, as a person
+    /// would: the element scrolled into view (`scrolling` as
+    /// `scrollIntoView`'s block and inline), a point of it checked to be on
+    /// top, in its page view's points from the top left. Also the point in
+    /// the element's own frame (`inFrame`, CSS px), and how to name it.
+    /// Fails when it isn't shown, or another element covers it (`covered`,
+    /// naming that one's buttons; `action` is what would land there).
+    /// `watchingClicks` arms a listener for the click to come (`heardScript`).
+    static func aim(_ ref: String, in agentTab: AgentTab, for action: String = "click", scrolling: String = "center",
+                    watchingClicks: Bool = false) async throws -> (element: AgentElement, point: CGPoint, inFrame: CGPoint, what: String) {
+        let element = try await element(ref, in: agentTab)
+        let aim = try await run(clickHelpers + aimScript, on: element, arguments: ["scrolling": scrolling, "watching": watchingClicks]) as? [String: Any] ?? [:]
+        let what = describe(ref: ref, aim["what"])
+        if aim["unseen"] != nil {
+            throw AgentError(.failed, "\(what) isn't shown on the page (no size, or out of reach), so it can't be \(action == "click" ? "clicked" : "reached").")
+        }
+        if let cover = aim["covered"] { throw covered(what, by: cover, action: action) }
+        guard let x = aim["x"] as? Double, let y = aim["y"] as? Double else {
+            throw AgentError(.failed, "Nerda couldn't find where \(what) is on the page.")
+        }
+        let inFrame = CGPoint(x: x, y: y)
+        var point = inFrame
+        // Into the page's own coordinates, frame by frame, from a frame of
+        // another site up through those holding it.
+        if let path = aim["path"] as? [Int], !path.isEmpty {
+            let tree = await frames(of: element.page)
+            for depth in stride(from: path.count - 1, through: 0, by: -1) {
+                let holder = depth == 0 ? nil : tree?.frame(at: Array(path[..<depth]))?.info
+                guard depth == 0 || holder != nil else { throw AgentError(.failed, "Nerda couldn't find where \(what) is on the page.") }
+                let step = try await element.page.callAsyncJavaScript(
+                    AgentPageScript.source + "\n" + clickHelpers + holderScript,
+                    arguments: ["op": "run", "args": [String: Any](), "prefix": "", "index": path[depth], "x": point.x, "y": point.y],
+                    in: holder, contentWorld: world
+                ) as? [String: Any] ?? [:]
+                if let cover = step["covered"] { throw covered(what, by: cover, action: action) }
+                guard let x = step["x"] as? Double, let y = step["y"] as? Double else {
+                    throw AgentError(.failed, "Nerda couldn't find where \(what) is on the page.")
+                }
+                point = CGPoint(x: x, y: y)
+            }
+        }
+        let zoom = element.page.pageZoom * element.page.magnification
+        return (element, CGPoint(x: point.x * zoom, y: point.y * zoom), inFrame, what)
+    }
+
     /// `e7 button "Send"`, from the page model's description of an element.
-    private static func describe(ref: String?, _ description: Any?) -> String {
+    static func describe(ref: String?, _ description: Any?) -> String {
         let description = description as? [String: Any] ?? [:]
         var words = [ref ?? description["ref"] as? String, description["role"] as? String].compactMap(\.self)
         if let name = description["name"] as? String, !name.isEmpty {
@@ -95,14 +110,14 @@ extension AgentPage {
         return words.joined(separator: " ")
     }
 
-    private static func covered(_ what: String, by cover: Any) -> AgentError {
+    private static func covered(_ what: String, by cover: Any, action: String) -> AgentError {
         let cover = cover as? [String: Any] ?? [:]
         let layer = describe(ref: nil, cover["layer"])
         let buttons = (cover["buttons"] as? [Any] ?? []).map { describe(ref: nil, $0) }
-        var message = "\(what) is covered by \(layer), so a click there would land on that instead."
+        var message = "\(what) is covered by \(layer), so a \(action) there would land on that instead."
         message += buttons.isEmpty
-            ? " Close it or scroll it away, then click \(what.split(separator: " ").first ?? "") again."
-            : " Its buttons: \(buttons.joined(separator: ", ")). Close it with one of them, then click again."
+            ? " Close it or scroll it away, then \(action) \(what.split(separator: " ").first ?? "") again."
+            : " Its buttons: \(buttons.joined(separator: ", ")). Close it with one of them, then \(action) again."
         return AgentError(.covered, message)
     }
 
@@ -158,13 +173,13 @@ extension AgentPage {
         """
 
     /// Scrolls `element` into view, finds a point of it that is on top, and
-    /// arms a listener for its click. Answers `{x, y, path, what}` (the point
+    /// with `watching` arms a listener for its click. Answers `{x, y, path, what}` (the point
     /// in this frame, the frame's path down from the top window), or
     /// `{unseen}`, or `{covered: {layer, buttons}}`.
     private static let aimScript = """
         const what = nerdaAgent.describe(element);
         const view = element.ownerDocument.defaultView;
-        element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+        element.scrollIntoView({ block: scrolling, inline: scrolling, behavior: 'instant' });
         const boxes = [...element.getClientRects()].filter((box) => box.width > 0 && box.height > 0);
         const box = boxes.find((box) => box.bottom > 0 && box.right > 0 && box.top < view.innerHeight && box.left < view.innerWidth);
         if (!box) return { unseen: true, what };
@@ -195,11 +210,13 @@ extension AgentPage {
             for (let i = 0; i < frame.parent.frames.length; i++) if (frame.parent.frames[i] === frame) { index = i; break; }
             path.unshift(index);
         }
-        const watch = { trusted: false };
-        watch.listener = (event) => { if (event.isTrusted && reaches(element, event.composedPath()[0])) watch.trusted = true; };
-        element.ownerDocument.addEventListener('click', watch.listener, true);
-        watch.document = element.ownerDocument;
-        nerdaAgent.clickWatch = watch;
+        if (watching) {
+            const watch = { trusted: false };
+            watch.listener = (event) => { if (event.isTrusted && reaches(element, event.composedPath()[0])) watch.trusted = true; };
+            element.ownerDocument.addEventListener('click', watch.listener, true);
+            watch.document = element.ownerDocument;
+            nerdaAgent.clickWatch = watch;
+        }
         return { x, y, path, what };
         """
 
