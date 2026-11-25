@@ -31,6 +31,33 @@ struct AgentCommandLineTests {
         #expect(harness.agents?.tabs.isEmpty == true)
     }
 
+    /// `upload` takes plain paths, as a shell gives them, one or many,
+    /// besides a JSON list.
+    @Test func uploadTakesPlainPaths() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        let url = try await harness.pages.serve("/upload", AgentFilesTests.uploadPage)
+        let folder = harness.folder.appending(path: "Files")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let report = folder.appending(path: "report.txt"), notes = folder.appending(path: "notes.txt")
+        try Data("Quarterly numbers".utf8).write(to: report)
+        try Data("Remember".utf8).write(to: notes)
+        let shell = ["NERDA_BROWSER_SESSION": "script-upload"]
+        let opened = await AgentCommandLine.run(["open", url.absoluteString], environment: shell, socket: harness.socket)
+        let control = try #require(opened.output.split(separator: "\n").first { $0.contains(#""Attachment""#) }
+            .flatMap { $0.firstMatch(of: #/^\s*- ((?:f\d+)?e\d+) /#) }.map { String($0.output.1) }, "\(opened.output)")
+
+        let uploaded = await AgentCommandLine.run(["upload", "t1", control, report.path, notes.path],
+                                                  environment: shell, socket: harness.socket)
+
+        #expect(uploaded.status == 0, "\(uploaded.errors)")
+        let page = try #require(harness.agents?.tabs.first?.page)
+        try await waitFor {
+            (try? await page.callAsyncJavaScript("return window.chosen", contentWorld: .page) as? [String])
+                == ["report.txt: Quarterly numbers", "notes.txt: Remember"]
+        }
+    }
+
     /// A screenshot's picture is written to a file, --out or a new one in
     /// the temporary folder, and its path printed: never dropped, and no
     /// JPEG bytes on standard output.
