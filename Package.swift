@@ -19,6 +19,8 @@ let package = Package(
             // themselves; background work opts out explicitly.
             swiftSettings: [.defaultIsolation(MainActor.self)] + approachable
         ),
-        .testTarget(name: "NerdaTests", dependencies: ["Nerda"], swiftSettings: approachable),
+        // How the test run itself goes: how many tests run at once (TestRun.c).
+        .target(name: "TestRun", path: "Tests/TestRun"),
+        .testTarget(name: "NerdaTests", dependencies: ["Nerda", "TestRun"], swiftSettings: approachable),
     ]
 )
