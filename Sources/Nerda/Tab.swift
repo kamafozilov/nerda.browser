@@ -1088,6 +1088,7 @@ final class Tab: Identifiable {
         controller.add(Fullscreen.messages, contentWorld: .defaultClient, name: "fullscreen")
         Passwords.install(in: controller)
         PageActivity.install(in: controller)
+        LastFrame.install(in: controller)
         if Extensions.available { WebStore.install(in: controller) }
         Selection.install(in: controller)
         Find.install(in: controller)

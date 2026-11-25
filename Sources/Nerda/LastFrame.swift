@@ -33,27 +33,44 @@ final class LastFrame {
         var dark: Bool
 
         /// Why a frame drawn for `self` can't stand in for the page now at
-        /// `now`, or nil when it can. Scroll is asked of the page (`arrive`).
-        func refusal(for now: Key) -> String? {
-            if url != now.url { return "address" }
-            if abs(size.width - now.size.width) > 0.5 || abs(size.height - now.size.height) > 0.5 { return "size" }
-            if scale != now.scale { return "scale" }
-            if abs(zoom - now.zoom) > 0.001 || abs(magnification - now.magnification) > 0.001 { return "zoom" }
-            if dark != now.dark { return "appearance" }
+        /// `now`, or nil when it can. Scroll is the page's to tell
+        /// (`script`), and asked of it as it comes back (`arrive`).
+        func refusal(for now: Key) -> Refusal? {
+            if url != now.url { return .address }
+            if abs(size.width - now.size.width) > 0.5 || abs(size.height - now.size.height) > 0.5 { return .size }
+            if scale != now.scale { return .scale }
+            if abs(zoom - now.zoom) > 0.001 || abs(magnification - now.magnification) > 0.001 { return .zoom }
+            if dark != now.dark { return .appearance }
             return nil
         }
+    }
+
+    /// Why the live page came on screen rather than its last frame.
+    enum Refusal: Equatable {
+        /// `NERDA_LAST_FRAME=0`.
+        case off
+        /// None was kept: the page is new, or its frame went for memory.
+        case none
+        case address, size, scale, zoom, appearance
+        /// The page scrolled, or its height changed, out of sight.
+        case scroll
+        /// The page is shown at a device's size (Developer's responsive
+        /// view), or out of a window: no frame is kept for it.
+        case staged
     }
 
     /// What the page showed the last time it came on screen: its last frame,
     /// or the live page, and why. Nil while it is out of sight.
     enum Arrival: Equatable {
         case lastFrame
-        case live(because: String)
+        case live(because: Refusal)
     }
 
     private(set) var arrival: Arrival?
     /// The frame, and where the page was scrolled to when it was drawn.
     private var kept: (key: Key, scroll: [Double], surface: IOSurface, drawn: CFTimeInterval)?
+    /// Why the frame was let go out of sight, for the arrival after.
+    private var dropped: Refusal?
     /// Showing the frame, over the page.
     private var view: FrameView?
     private var onScreen = false
@@ -73,6 +90,7 @@ final class LastFrame {
         guard onScreen else { return }
         onScreen = false
         arrival = nil
+        dropped = nil
         lift()
         guard Self.isOn, stage.device == nil, let key = Self.key(page) else {
             drop()
@@ -88,16 +106,16 @@ final class LastFrame {
         onScreen = true
         turn += 1
         guard Self.isOn else {
-            arrival = .live(because: "off")
+            arrival = .live(because: .off)
             drop()
             return
         }
         guard let kept else {
-            arrival = .live(because: "none")
+            arrival = .live(because: dropped ?? .none)
             return
         }
         guard stage.device == nil, let key = Self.key(page) else {
-            arrival = .live(because: "size")
+            arrival = .live(because: .staged)
             drop()
             return
         }
@@ -130,7 +148,7 @@ final class LastFrame {
             guard let page else { return }
             let scroll = await Self.scroll(of: page)
             guard let self, self.turn == turn, scroll != kept.scroll else { return }
-            self.arrival = .live(because: "scroll")
+            self.arrival = .live(because: .scroll)
             self.lift()
             self.drop()
         }
@@ -146,6 +164,15 @@ final class LastFrame {
     fileprivate func drop() {
         kept = nil
         lift()
+    }
+
+    /// The page scrolled, or its height changed, since its frame was taken:
+    /// what it shows now isn't its frame, nor will be when it comes back.
+    fileprivate func pageScrolled() {
+        // A frame being taken would be of either.
+        if asking { turn += 1 }
+        drop()
+        if !onScreen { dropped = .scroll }
     }
 
     private func take(_ page: WKWebView, key: Key) {
@@ -181,9 +208,11 @@ final class LastFrame {
                    dark: page.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
     }
 
-    /// Where the page is scrolled to, or nil if it can't say.
+    /// Where the page is scrolled to, or nil if it can't say; the page told
+    /// to say when that changes (`script`), where it has the script.
     private static func scroll(of page: WKWebView) async -> [Double]? {
-        let answer = try? await page.callAsyncJavaScript("return [scrollX, scrollY]", contentWorld: .defaultClient)
+        let ask = "return globalThis.nerdaLastFrame ? nerdaLastFrame() : [scrollX, scrollY]"
+        let answer = try? await page.callAsyncJavaScript(ask, contentWorld: .defaultClient)
         return (answer as? [NSNumber])?.map { $0.doubleValue.rounded() }
     }
 
@@ -201,6 +230,47 @@ final class LastFrame {
         }
         let block: @convention(block) () -> Void = { MainActor.assumeIsolated { done() } }
         page.perform(name, with: block)
+    }
+
+    // MARK: - The page's word
+
+    /// In Nerda's world, the main frame only. As its frame is taken
+    /// (`scroll(of:)`), the page notes where it is scrolled to and how tall it
+    /// is; the first scroll after, or change of height, it says once, so a
+    /// page that moved out of sight has its frame let go before its tab comes
+    /// back, rather than shown and taken down. One word at most each time a
+    /// frame is taken.
+    static let script = WKUserScript(source: """
+        (() => {
+            let watching = false, height = 0;
+            const tell = () => {
+                watching = false;
+                webkit.messageHandlers.lastFrame.postMessage(true);
+            };
+            addEventListener('scroll', () => { if (watching) tell(); }, { capture: true, passive: true });
+            new ResizeObserver(() => {
+                if (watching && document.documentElement.scrollHeight !== height) tell();
+            }).observe(document.documentElement);
+            globalThis.nerdaLastFrame = () => {
+                watching = true;
+                height = document.documentElement.scrollHeight;
+                return [scrollX, scrollY];
+            };
+        })();
+        """, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient)
+
+    static let messages = Messages()
+
+    static func install(in controller: WKUserContentController) {
+        controller.addUserScript(script)
+        controller.add(messages, contentWorld: .defaultClient, name: "lastFrame")
+    }
+
+    final class Messages: NSObject, WKScriptMessageHandler {
+        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.frameInfo.isMainFrame else { return }
+            message.webView?.lastFrame?.pageScrolled()
+        }
     }
 
     // MARK: - How many are kept
@@ -311,10 +381,12 @@ private final class FrameView: NSView {
 }
 
 extension WKWebView {
+    /// The last frame of the slot the page is in.
+    fileprivate var lastFrame: LastFrame? { (superview?.superview as? PageSlot)?.lastFrame }
     /// The page's last frame is kept, to show when its tab comes back.
-    var keepsLastFrame: Bool { (superview?.superview as? PageSlot)?.lastFrame.keeps ?? false }
+    var keepsLastFrame: Bool { lastFrame?.keeps ?? false }
     /// Its last frame stands in for it now.
-    var showsLastFrame: Bool { (superview?.superview as? PageSlot)?.lastFrame.shows ?? false }
+    var showsLastFrame: Bool { lastFrame?.shows ?? false }
     /// What it showed the last time it came on screen; nil out of sight.
-    var lastArrival: LastFrame.Arrival? { (superview?.superview as? PageSlot)?.lastFrame.arrival }
+    var lastArrival: LastFrame.Arrival? { lastFrame?.arrival }
 }
