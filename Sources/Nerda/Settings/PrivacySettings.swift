@@ -10,6 +10,7 @@ struct PrivacySettings: View {
     @AppStorage(HistoryKeep.key) private var keep = HistoryKeep.threeMonths
     @AppStorage(IncognitoAutoLock.key) private var lock = IncognitoAutoLock.minute
     @AppStorage(HTTPSUpgrade.key) private var upgradesToHTTPS = true
+    @AppStorage(AgentServer.isOnKey) private var agentsCanUseNerda = true
 
     var body: some View {
         SettingsGroup(title: "Browsing history") {
@@ -43,6 +44,13 @@ struct PrivacySettings: View {
                         detail: "Open http:// sites over HTTPS when they support it, and over HTTP when they don't",
                         icon: "lock") {
                 SettingsToggle(title: "Upgrade connections to HTTPS", isOn: $upgradesToHTTPS)
+            }
+        }
+        SettingsGroup(title: "Agents") {
+            SettingsRow(title: "Agents can use Nerda",
+                        detail: "AI agents such as Claude Code and Codex open pages in tabs of their own, signed in as you are, out of your way",
+                        icon: "sparkles") {
+                SettingsToggle(title: "Agents can use Nerda", isOn: $agentsCanUseNerda)
             }
         }
         SettingsGroup(title: "Incognito") {

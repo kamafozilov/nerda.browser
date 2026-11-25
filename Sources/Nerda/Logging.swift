@@ -10,6 +10,7 @@ nonisolated extension Logger {
     /// Nerda's logs and signposts all go under it.
     static let subsystem = Bundle.main.bundleIdentifier ?? "dev.nerda.browser"
 
+    static let agents = Logger(subsystem: subsystem, category: "agents")
     static let autoFill = Logger(subsystem: subsystem, category: "autofill")
     static let blocker = Logger(subsystem: subsystem, category: "blocker")
     static let bookmarks = Logger(subsystem: subsystem, category: "bookmarks")

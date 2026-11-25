@@ -886,6 +886,9 @@ extension Browser {
 
 // Nerda run again only to compile the block list (see Blocker), not as a browser.
 if CommandLine.arguments.contains(Blocker.compileArgument) { Blocker.compileAndExit() }
+// `Nerda mcp`: the nerda-browser MCP server an agent starts, passing its
+// requests to the Nerda running (AgentMCP), not a browser itself.
+if CommandLine.arguments.dropFirst().first == "mcp" { AgentMCP.runStdio(socket: AgentWire.socket) }
 // This launch's moments, from the process start (Launch.swift).
 Launch.start()
 // Where the main thread stops, from the first moment on (Watchdog, Recorder).
@@ -926,6 +929,8 @@ if Edition.updates { Launch.later("updates") { Updater.shared.start() } }
 Feedback.shared.start()
 // Every window's pages out of sight, looked at once a minute for one stuck in a loop.
 HungPages.start()
+// Agents reach Nerda on its socket while Settings lets them (AgentServer).
+AgentServer.shared.start()
 
 let window = Launch.stage("window") { BrowserWindow(browser: browser) }
 Windows.regular = window

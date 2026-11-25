@@ -60,7 +60,8 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
                          "shipping", "billing", "checkout"]
         case .siteSettings: ["permissions", "camera", "microphone", "location", "notifications", "pop-ups", "popups", "sites", "allow", "block", "ads"]
         case .privacy: ["security", "https", "secure connections", "upgrade", "history", "keep history", "delete", "clear", "cookies", "cache", "site data", "ads", "trackers", "adblock", "blocking",
-                        "filters", "easylist", "ublock", "adguard", "incognito", "private", "lock"]
+                        "filters", "easylist", "ublock", "adguard", "incognito", "private", "lock",
+                        "agents", "ai", "mcp", "claude", "codex", "nerda-browser"]
         case .profiles: ["work", "personal", "school", "separate", "new profile", "window", "accounts", "cookies", "rename", "delete"]
         case .extensions: ["chrome web store", "add-ons", "plugins", "unpacked", "developer"] + Extensions.shared.installed.map(\.name)
         case .shortcuts: ["keyboard", "keys", "hotkeys"] + ShortcutsSettings.groups.flatMap { $0.shortcuts.map(\.title) }
