@@ -43,6 +43,7 @@ nonisolated struct AgentVerb: Sendable {
         keyboardVerbs, // KeyboardVerbs.swift
         dialogVerbs, // AgentDialogs.swift
         fileVerbs, // FileVerbs.swift
+        scriptVerbs, // ScriptVerbs.swift
         lookupVerbs, // LookupVerbs.swift
         ownerVerbs, // OwnerVerbs.swift
         signInVerbs, // SignInVerbs.swift
