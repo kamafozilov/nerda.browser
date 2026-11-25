@@ -15,14 +15,17 @@ enum PageActivity {
             const draft = node =>
                 (node instanceof HTMLInputElement && !['password', 'search', 'hidden'].includes(node.type)) ||
                 node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement || node.isContentEditable;
+            // An agent's input is its own work, no draft of the person's:
+            // Nerda marks the time it acts (`AgentPage.act`).
+            const agents = () => (globalThis.nerdaAgentActs || 0) > Date.now();
             const edited = event => {
-                if (!event.isTrusted) return;
+                if (!event.isTrusted || agents()) return;
                 let field = event.composedPath().find(draft);
                 if (!field || field.closest?.('[role=search], [role=searchbox]')) return;
                 while (field.isContentEditable && field.parentElement?.isContentEditable) field = field.parentElement;
                 return field;
             };
-            const dropped = event => event.isTrusted && event.dataTransfer?.files.length > 0;
+            const dropped = event => event.isTrusted && !agents() && event.dataTransfer?.files.length > 0;
             const post = value => webkit.messageHandlers.pageActivity.postMessage(value);
             if (window !== window.top) {
                 const mark = event => {
