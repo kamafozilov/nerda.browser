@@ -358,7 +358,7 @@ final class Tab: Identifiable {
         // An address typed, a bookmark: the browser leaving the page asks.
         if page != nil, hasUnsavedWork, !departureApproved, (delegate as? Browser)?.isForAgents == true {
             // An Agent tab's agent asked to go, and nobody is there to ask.
-            AgentNotices.post(AgentDialog.leftAnyway, on: self)
+            PageNotices.post(AgentDialog.leftAnyway, on: self)
             departureApproved = true
         } else if let page, hasUnsavedWork, !departureApproved, let browser = delegate as? Browser {
             Task {

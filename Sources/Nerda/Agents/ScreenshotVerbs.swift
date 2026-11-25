@@ -72,7 +72,7 @@ enum AgentShot {
         }
         // A page held by its dialog runs no script, so its secret fields
         // couldn't be masked: it is read, and pictured, once answered.
-        if let held = AgentNotices.held(agentTab.tab) {
+        if let held = PageNotices.held(agentTab.tab) {
             throw AgentError(.failed, "Tab \(agentTab.ref)'s page waits on a dialog (\(held)): answer it with dialog first.")
         }
         let configuration = WKSnapshotConfiguration()

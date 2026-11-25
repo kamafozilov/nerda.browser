@@ -133,7 +133,7 @@ final class AgentApprovals {
     /// Asks on a sheet over the owner's window, which doesn't bring Nerda
     /// forward. With no window open, it waits for the owner to open one.
     static func sheet(_ program: AgentProgram) async -> Choice? {
-        let window = await ownersWindow()
+        guard let window = await ownersWindow() else { return nil }
         let alert = NSAlert()
         alert.messageText = "Allow “\(program.name)” to use Nerda?"
         alert.informativeText = """
@@ -157,12 +157,13 @@ final class AgentApprovals {
     }
 
     /// The owner's window in front of the others, not an incognito one and
-    /// not one already showing a sheet; once there is one.
-    static func ownersWindow() async -> NSWindow {
+    /// not one already showing a sheet; once there is one. Nil once the
+    /// task waiting for it is cancelled.
+    static func ownersWindow() async -> NSWindow? {
         while true {
             if let window = ownersWindowNow { return window }
             // A rare wait (no window yet, as after a hidden start), cheaply looked at.
-            try? await Task.sleep(for: .seconds(1))
+            guard (try? await Task.sleep(for: .seconds(1))) != nil else { return nil }
         }
     }
 

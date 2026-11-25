@@ -9,7 +9,7 @@ import WebKit
 /// Anything can post one: `post("raised an alert: \"Saved\"", on: tab)`.
 /// Each shows in the answer as a line `notice: …` under the header.
 @MainActor
-enum AgentNotices {
+enum PageNotices {
     private final class Box {
         var lines: [String] = []
         /// Dialogs the page waits on now, by hold.
@@ -41,9 +41,9 @@ enum AgentNotices {
     /// leave-page question): posted as a notice, and until `end()` the page
     /// can't run script, so nothing reads it and actions on it are refused.
     /// The delegate showing the dialog holds it for as long as it is up.
-    static func hold(_ tab: Tab?, _ line: String) -> Hold? {
+    static func hold(_ tab: Tab?, _ line: String) -> DialogHold? {
         guard let tab else { return nil }
-        let hold = Hold(tab: tab)
+        let hold = DialogHold(tab: tab)
         post(line, on: tab)
         box(tab).holds[ObjectIdentifier(hold)] = line
         return hold
@@ -54,7 +54,7 @@ enum AgentNotices {
         boxes.object(forKey: tab)?.holds.values.first
     }
 
-    final class Hold {
+    final class DialogHold {
         private weak var tab: Tab?
 
         fileprivate init(tab: Tab) { self.tab = tab }
@@ -85,7 +85,7 @@ extension AgentPage {
     /// `settleAtMost`), and answers:
     /// - the action's own line (what `action` returns, such as `clicked e7
     ///   button "Send"`), then the header (`header(_:_:)`) and the
-    ///   notices (`AgentNotices`), among them each new tab the action
+    ///   notices (`PageNotices`), among them each new tab the action
     ///   opened, which joins the session;
     /// - then what came, went or changed in the outline, by ref; or, after
     ///   a navigation, the new page as `open` answers it; or, after a large
@@ -96,7 +96,7 @@ extension AgentPage {
     /// A new action verb is its own `AgentVerb` whose `run` resolves its
     /// arguments, then `return try await AgentPage.act(tab, for: call) { …
     /// return "typed into e7" }`; what it finds out on the way it posts to
-    /// `AgentNotices`.
+    /// `PageNotices`.
     ///
     /// `answeringDialog`: the action answers the dialog holding the page
     /// (the `dialog` verb), so the page can't be read before it: the answer
@@ -104,7 +104,7 @@ extension AgentPage {
     static func act(_ agentTab: AgentTab, for call: AgentCall, answeringDialog: Bool = false,
                     _ action: () async throws -> String) async throws -> String {
         let tab = agentTab.tab
-        if !answeringDialog, let held = AgentNotices.held(tab) {
+        if !answeringDialog, let held = PageNotices.held(tab) {
             throw AgentError(.failed, "Tab \(agentTab.ref)'s page waits on a dialog (\(held)), so it can't be acted on until that is answered with dialog.")
         }
         let soon = ContinuousClock.now + .seconds(2)
@@ -125,9 +125,9 @@ extension AgentPage {
         let opened = adoptNewTabs(of: agentTab, besides: tabsBefore, for: call)
         var notices = opened.map { "notice: opened a new tab \($0.ref): \($0.tab.url?.absoluteString ?? "") (snapshot \($0.ref) reads it)" }
         let downloading = await AgentDownloads.settle(tab, until: min(.now + AgentDownloads.waitAtMost, call.deadline - .seconds(1)))
-        notices += (AgentNotices.take(from: tab) + downloading).map { "notice: " + $0 }
+        notices += (PageNotices.take(from: tab) + downloading).map { "notice: " + $0 }
 
-        if AgentNotices.held(tab) != nil {
+        if PageNotices.held(tab) != nil {
             return ([did] + header(agentTab) + notices + ["", "The page waits on its dialog: nothing in it can be read or done until the dialog is answered with dialog."])
                 .joined(separator: "\n")
         }
@@ -199,7 +199,7 @@ extension AgentPage {
     /// dialog is up; this one is let go of and finishes unheard.
     static func unlessHeld<Value>(_ tab: Tab, by deadline: ContinuousClock.Instant,
                                   _ work: @escaping () async throws -> Value) async -> Value? {
-        guard AgentNotices.held(tab) == nil else { return nil }
+        guard PageNotices.held(tab) == nil else { return nil }
         let race = Race<Value>()
         return await withCheckedContinuation { continuation in
             race.continuation = continuation
@@ -208,7 +208,7 @@ extension AgentPage {
             }
             Task {
                 while !race.isOver {
-                    if AgentNotices.held(tab) != nil || ContinuousClock.now >= deadline { race.finish(nil) }
+                    if PageNotices.held(tab) != nil || ContinuousClock.now >= deadline { race.finish(nil) }
                     try? await Task.sleep(for: .milliseconds(25))
                 }
             }
@@ -230,7 +230,7 @@ extension AgentPage {
     /// Waits until the page has loaded and then gone `quietFor` without a
     /// change in its document, or a dialog holds it, or `end`.
     private static func settle(_ tab: Tab, until end: ContinuousClock.Instant) async {
-        while ContinuousClock.now < end, AgentNotices.held(tab) == nil {
+        while ContinuousClock.now < end, PageNotices.held(tab) == nil {
             guard let page = tab.page, !tab.isLoading, !page.isLoading else {
                 try? await Task.sleep(for: .milliseconds(25))
                 continue
@@ -315,12 +315,5 @@ extension AgentPage {
             }
             return sessions.add(tab, in: agentTab.agents, to: call.session)
         }
-    }
-}
-
-private extension Duration {
-    var milliseconds: Double {
-        let parts = components
-        return Double(parts.seconds) * 1000 + Double(parts.attoseconds) / 1e15
     }
 }

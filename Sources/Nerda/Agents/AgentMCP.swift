@@ -284,7 +284,3 @@ actor AgentMCP {
         is waiting for them, then call the same tool again.
         """
 }
-
-nonisolated private extension Duration {
-    var seconds: Double { Double(components.seconds) + Double(components.attoseconds) / 1e18 }
-}

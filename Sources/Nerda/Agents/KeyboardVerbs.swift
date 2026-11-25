@@ -194,7 +194,7 @@ extension AgentPage {
         let took = try await run(tookScript, on: element) as? Bool ?? true
         if !took, !text.isEmpty || !focused {
             _ = try await run(setScript, on: element, arguments: ["text": text, "append": append])
-            AgentNotices.post("the page took no typing into \(ref), so Nerda set its value by script", on: agentTab.tab)
+            PageNotices.post("the page took no typing into \(ref), so Nerda set its value by script", on: agentTab.tab)
         }
         return text.isEmpty && !append ? "cleared \(what)" : "typed into \(what)"
     }

@@ -125,10 +125,8 @@ final class AgentPayments {
             for other in holds where other !== hold && other.payment.isOnSameElement(as: payment) && other.isWaiting {
                 end(other)
             }
-            let asked = call.arguments["wait"]?.number.map { Duration.seconds(max(0, $0)) } ?? AgentVerb.ownerWait
             // Room left after it for the press and the page to settle.
-            let wait = min(asked, call.remaining - .seconds(5))
-            let until = ContinuousClock.now + wait
+            let until = ContinuousClock.now + AgentVerb.waitOnOwner(call, leaving: .seconds(5))
             while hold.isWaiting, hold.request.answer == nil, ContinuousClock.now < until {
                 try await Task.sleep(for: .milliseconds(100))
             }
@@ -137,11 +135,10 @@ final class AgentPayments {
                     end(hold)
                     throw AgentError(.noTab, "Tab \(tab.ref) was closed while the payment waited for the user.")
                 }
-                throw AgentError(.needsUser, """
-                    needs_user: \(payment.what) pays\(Self.amounts(payment)), so Nerda holds it until the user \
-                    approves it with Touch ID in Nerda's window, and nothing is pressed meanwhile. Tell the user \
-                    it is waiting for them, then call \(again) again to keep waiting.
-                    """)
+                throw AgentError.needsUser("""
+                    \(payment.what) pays\(Self.amounts(payment)), so Nerda holds it until the user approves it \
+                    with Touch ID in Nerda's window, and nothing is pressed meanwhile.
+                    """, waitingIn: "in Nerda's window", again: again)
             }
             // Answered: weighed again, so an approval goes to these amounts only.
         }
@@ -215,13 +212,7 @@ final class AgentPayments {
     /// Pay button asks for Touch ID or the Mac's password. Taken away when
     /// the hold goes first.
     static func sheet(_ card: PaymentCard) async -> Bool? {
-        var window = AgentApprovals.ownersWindowNow
-        while window == nil {
-            // A rare wait (no window yet, as after a hidden start), cheaply looked at.
-            guard (try? await Task.sleep(for: .seconds(1))) != nil else { return nil }
-            window = AgentApprovals.ownersWindowNow
-        }
-        guard let window, !Task.isCancelled else { return nil }
+        guard let window = await AgentApprovals.ownersWindow(), !Task.isCancelled else { return nil }
         let alert = NSAlert()
         alert.messageText = "\(card.asker) wants to pay on \(card.site)"
         let amounts = card.amounts.isEmpty

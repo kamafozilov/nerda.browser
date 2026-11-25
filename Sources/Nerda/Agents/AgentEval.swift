@@ -52,7 +52,7 @@ enum AgentEval {
                 ?? error.localizedDescription
             throw AgentError(.failed, "eval threw: \(message.replacing(/\s+/, with: " "))")
         case nil:
-            if let held = AgentNotices.held(agentTab.tab) {
+            if let held = PageNotices.held(agentTab.tab) {
                 throw AgentError(.failed, "eval didn't finish: the page raised a dialog (\(held)) and waits on it.")
             }
             throw AgentError(.timedOut, "eval didn't finish in time.")

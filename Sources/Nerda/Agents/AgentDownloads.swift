@@ -4,7 +4,7 @@ import WebKit
 /// Downloads from Agent tabs: each goes straight to a folder of its Agent
 /// session's under Downloads (the folder chosen in Settings, or the Agent
 /// browser's `downloadFolder`), never asked about, and is told to the agent
-/// as a notice on the tab it came from (`AgentNotices`): by the answer to
+/// as a notice on the tab it came from (`PageNotices`): by the answer to
 /// the action that started it when it is done by then (`AgentPage.act`
 /// waits a little for it), else by the next answer about that tab.
 @MainActor
@@ -58,7 +58,7 @@ enum AgentDownloads {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         } catch {
             if let tab = entry?.told(in: browser) ?? tab {
-                AgentNotices.post("a download couldn't be saved: Nerda couldn't make the folder \(folder.path)", on: tab)
+                PageNotices.post("a download couldn't be saved: Nerda couldn't make the folder \(folder.path)", on: tab)
             }
             return nil
         }
@@ -73,7 +73,7 @@ enum AgentDownloads {
         entry.isDone = true
         guard let tab = entry.told(in: browser), let file = entry.file else { return }
         let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { AgentUploads.size(Int64($0)) }
-        AgentNotices.post("downloaded \(String(reflecting: entry.name))\(size.map { " (\($0))" } ?? "") to \(file.path)", on: tab)
+        PageNotices.post("downloaded \(String(reflecting: entry.name))\(size.map { " (\($0))" } ?? "") to \(file.path)", on: tab)
     }
 
     /// The download failed or was cancelled: told to its agent.
@@ -81,7 +81,7 @@ enum AgentDownloads {
         guard let entry = entries.object(forKey: download), !entry.isDone else { return }
         entry.isDone = true
         guard let tab = entry.told(in: browser) else { return }
-        AgentNotices.post("the download of \(String(reflecting: entry.name)) failed: \(error.localizedDescription)", on: tab)
+        PageNotices.post("the download of \(String(reflecting: entry.name)) failed: \(error.localizedDescription)", on: tab)
     }
 
     /// Waits until the downloads from `tab` (or tabs it opened) are done,

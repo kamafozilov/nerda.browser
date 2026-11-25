@@ -227,7 +227,7 @@ final class SiteSkills {
     /// The skill whole, on a sheet over the owner's window that doesn't
     /// bring Nerda forward; with no window open, once they open one.
     static func card(_ card: SiteSkillCard) async -> Bool? {
-        let window = await AgentApprovals.ownersWindow()
+        guard let window = await AgentApprovals.ownersWindow() else { return nil }
         let skill = card.skill
         let alert = NSAlert()
         alert.messageText = "\(card.asker) wants to save a Site skill"
@@ -343,11 +343,8 @@ nonisolated extension AgentVerb {
         }
         let proposal = call.server.skills.propose(skill, by: call.session)
         guard let answer = try await call.server.skills.answer(to: proposal, within: waitOnOwner(call)) else {
-            throw AgentError(.needsUser, """
-                needs_user: Nerda shows the user the skill \(name) to save, and they haven't answered yet. \
-                Tell the user it is waiting for them in Nerda's window, then call skill_save again with the \
-                same skill to keep waiting.
-                """)
+            throw AgentError.needsUser("Nerda shows the user the skill \(name) to save, and they haven't answered yet.",
+                                       waitingIn: "in Nerda's window", again: "skill_save with the same skill")
         }
         switch answer {
         case .saved:

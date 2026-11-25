@@ -99,7 +99,7 @@ extension AgentPage {
     static func waitFor(_ text: String?, load: Bool, in agentTab: AgentTab, until: ContinuousClock.Instant) async -> Bool {
         let tab = agentTab.tab
         while true {
-            if AgentNotices.held(tab) != nil { return true }
+            if PageNotices.held(tab) != nil { return true }
             var done = !load || (!tab.isLoading && tab.page?.isLoading == false && tab.page?.url != nil)
             if done, load { done = await isComplete(tab) }
             if done, let text { done = await shows(text, in: tab) }

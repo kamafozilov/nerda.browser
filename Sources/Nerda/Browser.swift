@@ -511,7 +511,7 @@ final class Browser: NSObject {
         // An Agent tab leaves: its agent asked to go, and nobody is there to
         // ask. Its agent hears of it.
         if isForAgents {
-            if let tab = tab(for: page) { AgentNotices.post(AgentDialog.leftAnyway, on: tab) }
+            if let tab = tab(for: page) { PageNotices.post(AgentDialog.leftAnyway, on: tab) }
             return true
         }
         return await ask("Leave this page?", "Changes you made may not be saved.", over: page,
@@ -774,7 +774,7 @@ extension Browser: WKUIDelegate {
                  initiatedByFrame frame: WKFrameInfo) async {
         // An Agent tab's is accepted at once, and told to its agent.
         if isForAgents {
-            if let tab = tab(for: webView) { AgentNotices.post("accepted an alert: \(AgentDialog.marked(message))", on: tab) }
+            if let tab = tab(for: webView) { PageNotices.post("accepted an alert: \(AgentDialog.marked(message))", on: tab) }
             return
         }
         _ = await ask(Self.says(frame), message, over: webView)

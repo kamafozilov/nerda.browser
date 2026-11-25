@@ -191,7 +191,7 @@ extension AgentPage {
         }
         // A page held by its dialog runs no script: a read would wait for as
         // long as the dialog is up.
-        if let held = AgentNotices.held(agentTab.tab) {
+        if let held = PageNotices.held(agentTab.tab) {
             throw AgentError(.failed, "Tab \(agentTab.ref)'s page waits on a dialog (\(held)): answer it with dialog first.")
         }
         return page

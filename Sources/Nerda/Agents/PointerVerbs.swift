@@ -97,7 +97,7 @@ extension AgentPage {
         _ = try await run(placeScript + guardScript, on: start.element)
         // A dialog the press or a move brings up holds the page: the drag
         // stops there, as a person's would, and nothing waits on its script.
-        let held = { AgentNotices.held(agentTab.tab) != nil }
+        let held = { PageNotices.held(agentTab.tab) != nil }
         do {
             try await AgentInput.drag(page, from: start.point, to: end.point, stopping: held)
         } catch {
@@ -118,7 +118,7 @@ extension AgentPage {
             throw AgentError(.failed, "The page drags \(start.what) with the browser's drag and drop, which Nerda can only do within one frame, and \(end.what) is in another.")
         }
         if let dropped = script?["dropped"] as? Bool {
-            AgentNotices.post("the page drags \(ref) with the browser's drag and drop, so Nerda dragged it by script", on: agentTab.tab)
+            PageNotices.post("the page drags \(ref) with the browser's drag and drop, so Nerda dragged it by script", on: agentTab.tab)
             if !dropped { line += "\n\(end.what) didn't take the drop" }
         }
 
@@ -216,7 +216,7 @@ extension AgentPage {
             try await run(fakeHoverScript, on: aim.element, arguments: ["x": aim.inFrame.x, "y": aim.inFrame.y]) as? Bool
         }
         if faked == true {
-            AgentNotices.post("the page took no pointer move over \(ref), so Nerda showed its hover styles and sent its pointer events by script", on: agentTab.tab)
+            PageNotices.post("the page took no pointer move over \(ref), so Nerda showed its hover styles and sent its pointer events by script", on: agentTab.tab)
         }
         return "hovered \(aim.what)"
     }

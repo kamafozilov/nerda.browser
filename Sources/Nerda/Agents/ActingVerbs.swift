@@ -52,7 +52,7 @@ extension AgentPage {
             _ = await unlessHeld(agentTab.tab, by: .now + .seconds(1)) {
                 try await run("element.click(); return true", on: element)
             }
-            AgentNotices.post("the page took no mouse click on \(ref), so Nerda clicked it by script", on: agentTab.tab)
+            PageNotices.post("the page took no mouse click on \(ref), so Nerda clicked it by script", on: agentTab.tab)
         }
         return "clicked \(what)"
     }
