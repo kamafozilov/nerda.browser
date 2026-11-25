@@ -10,6 +10,10 @@ import os
 ///     nerda-browser open https://example.com
 ///     nerda-browser navigate t1 https://example.com/next
 ///     nerda-browser close --tab t1
+///     nerda-browser screenshot t1 --out page.jpeg
+///
+/// A verb that answers with a picture (`picturing`) has it written to a
+/// file, `--out` or a new one in the temporary folder, and its path printed.
 ///
 /// `run` is the in-process entry point tests speak to; `main` is the
 /// process, the app's binary run as `Nerda cli …`.
@@ -27,6 +31,9 @@ nonisolated enum AgentCommandLine {
     static let needsUser: Int32 = 3
     static let timedOut: Int32 = 124
     static let interrupted: Int32 = 130
+
+    /// Verbs whose answer comes with a picture: they take `--out <path>`.
+    static let picturing: Set<String> = [AgentVerb.screenshot.name]
 
     /// Where each harness puts its session id, with the name its MCP client
     /// gives: in a Claude Code or Codex shell, the command is in the same
@@ -69,13 +76,39 @@ nonisolated enum AgentCommandLine {
         }
         if arguments.contains("--help") { return Outcome(status: done, output: "usage: nerda-browser \(synopsis(of: verb))\n\(verb.summary)\n") }
         let parsed: [String: AgentJSON]
-        do { parsed = try self.arguments(Array(arguments.dropFirst()), for: verb) }
-        catch { return Outcome(status: failed, errors: "\(error.message)\nusage: nerda-browser \(synopsis(of: verb))\n") }
+        let out: String?
+        do {
+            var words = Array(arguments.dropFirst())
+            out = picturing.contains(verb.name) ? try takeOut(&words) : nil
+            parsed = try self.arguments(words, for: verb)
+        } catch { return Outcome(status: failed, errors: "\(error.message)\nusage: nerda-browser \(synopsis(of: verb))\n") }
 
         let request = AgentRequest(verb: verb.name, session: session(in: environment), args: parsed)
         let reply = await AgentWire.send(request, to: socket, launcher: launcher)
-        let text = reply.text.hasSuffix("\n") || reply.text.isEmpty ? reply.text : reply.text + "\n"
-        return reply.ok ? Outcome(status: done, output: text) : Outcome(status: status(of: reply), errors: text)
+        var text = reply.text.hasSuffix("\n") || reply.text.isEmpty ? reply.text : reply.text + "\n"
+        guard reply.ok else { return Outcome(status: status(of: reply), errors: text) }
+        if let jpeg = reply.jpeg {
+            do { text += "file: \(try save(jpeg, to: out, in: environment))\n" }
+            catch { return Outcome(status: failed, output: text, errors: "The picture couldn't be saved: \(error.localizedDescription)\n") }
+        }
+        return Outcome(status: done, output: text)
+    }
+
+    /// Writes a picture where `--out` said, or to a new file in the
+    /// temporary folder, and gives its full path.
+    static func save(_ jpeg: Data, to out: String?, in environment: [String: String]) throws -> String {
+        let file: URL
+        if let out {
+            let folder = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            file = URL(fileURLWithPath: (out as NSString).expandingTildeInPath, relativeTo: folder)
+        } else {
+            let temporary = environment["TMPDIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+                ?? FileManager.default.temporaryDirectory
+            let stamp = Int(Date().timeIntervalSince1970)
+            file = temporary.appending(path: "nerda-screenshot-\(stamp)-\(UUID().uuidString.prefix(8)).jpeg")
+        }
+        try jpeg.write(to: file, options: .atomic)
+        return file.standardizedFileURL.path
     }
 
     /// The exit code for an answer.
@@ -159,6 +192,28 @@ nonisolated enum AgentCommandLine {
         return named
     }
 
+    /// Takes `--out <path>` (or `--out=<path>`) out of the words: where
+    /// the command, not the verb, puts a picture.
+    private static func takeOut(_ words: inout [String]) throws(Problem) -> String? {
+        var out: String?
+        var index = 0
+        while index < words.count {
+            let word = words[index]
+            if word.hasPrefix("--out=") {
+                out = String(word.dropFirst("--out=".count))
+                words.remove(at: index)
+            } else if word == "--out" {
+                guard index + 1 < words.count else { throw Problem(message: "--out needs a path.") }
+                out = words[index + 1]
+                words.removeSubrange(index...index + 1)
+            } else {
+                index += 1
+            }
+        }
+        if out?.isEmpty == true { throw Problem(message: "--out needs a path.") }
+        return out
+    }
+
     private static func type(of argument: AgentArgument) -> String { argument.schema["type"]?.string ?? "string" }
 
     /// A word as the kind of value the argument takes.
@@ -188,7 +243,7 @@ nonisolated enum AgentCommandLine {
         ([verb.name] + verb.arguments.map { argument in
             if argument.required { return "<\(argument.name)>" }
             return type(of: argument) == "boolean" ? "[--\(argument.name)]" : "[--\(argument.name) <value>]"
-        }).joined(separator: " ")
+        } + (picturing.contains(verb.name) ? ["[--out <path>]"] : [])).joined(separator: " ")
     }
 
     static var usage: String {
@@ -204,7 +259,8 @@ nonisolated enum AgentCommandLine {
 
             Drives Nerda, the user's browser, in Agent tabs: their profile, out of their sight.
             Arguments go in the order shown, or by name. Each verb's answer is printed; a
-            failure goes to standard error.
+            failure goes to standard error. A screenshot is written to a file, --out <path>
+            or a new one in the temporary folder, and its path printed after "file:".
 
             \(verbs.joined(separator: "\n"))
 

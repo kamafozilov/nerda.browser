@@ -76,6 +76,10 @@ actor Vault {
 
     private let service: String
     private let namesFile: URL
+    /// The keychain item's contents when kept in memory only (`inMemory`):
+    /// a test's vault, which never reaches the keychain.
+    private var memory: Data?
+    private let keptInMemory: Bool
     /// Newest first; nil until read.
     private var names: [Name]?
     /// The file wasn't there: made again from the keychain once that is read.
@@ -90,6 +94,15 @@ actor Vault {
     init(service: String, names: URL) {
         self.service = service
         self.namesFile = names
+        keptInMemory = false
+    }
+
+    /// One whose passwords are kept in memory, never in the keychain, its
+    /// names in `names`: for tests, which must not touch the owner's keychain.
+    init(inMemory names: URL) {
+        service = ""
+        namesFile = names
+        keptInMemory = true
     }
 
     private var item: [String: Any] {
@@ -119,17 +132,21 @@ actor Vault {
     private func loadLogins() -> [Login]? {
         if let logins { return logins }
         if refused { return nil }
-        var query = item
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var found: CFTypeRef?
-        switch SecItemCopyMatching(query as CFDictionary, &found) {
-        case errSecSuccess:
-            logins = (found as? Data).flatMap { try? JSONDecoder().decode([Login].self, from: $0) }
-        case errSecItemNotFound:
-            logins = []
-        default:
-            refused = true
+        if keptInMemory {
+            logins = memory.flatMap { try? JSONDecoder().decode([Login].self, from: $0) } ?? []
+        } else {
+            var query = item
+            query[kSecReturnData as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
+            var found: CFTypeRef?
+            switch SecItemCopyMatching(query as CFDictionary, &found) {
+            case errSecSuccess:
+                logins = (found as? Data).flatMap { try? JSONDecoder().decode([Login].self, from: $0) }
+            case errSecItemNotFound:
+                logins = []
+            default:
+                refused = true
+            }
         }
         _ = loadNames()
         if namesLost, let logins { writeNames(logins.map(\.name)) }
@@ -159,6 +176,12 @@ actor Vault {
             return login
         }.sorted { $0.saved > $1.saved }
         guard let data = try? JSONEncoder().encode(sorted) else { return false }
+        if keptInMemory {
+            memory = data
+            logins = sorted
+            writeNames(sorted.map(\.name))
+            return true
+        }
         var status = SecItemUpdate(item as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecItemNotFound {
             var add = item

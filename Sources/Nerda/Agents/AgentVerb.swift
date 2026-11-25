@@ -36,8 +36,11 @@ nonisolated struct AgentVerb: Sendable {
     static let all: [AgentVerb] = [
         [status],
         tabVerbs, // TabVerbs.swift
+        screenshotVerbs, // ScreenshotVerbs.swift
+        readingVerbs, // ReadingVerbs.swift
         lookupVerbs, // LookupVerbs.swift
         ownerVerbs, // OwnerVerbs.swift
+        signInVerbs, // SignInVerbs.swift
     ].flatMap(\.self)
 
     static let named = Dictionary(uniqueKeysWithValues: all.map { ($0.name, $0) })
@@ -91,6 +94,12 @@ struct AgentCall {
     let session: AgentSession
     let arguments: [String: AgentJSON]
     let deadline: ContinuousClock.Instant
+    /// A picture the verb answers with, besides its text.
+    let shown = Shown()
+
+    final class Shown {
+        var jpeg: Data?
+    }
 
     /// A string argument, failing as `invalid` when missing.
     func string(_ name: String) throws -> String {
@@ -114,9 +123,12 @@ struct AgentCall {
         return url
     }
 
-    /// The session's Agent tab named by the `tab` argument (`AgentSessions.tab`).
-    func tab(_ name: String = "tab") throws -> AgentTab {
-        try server.sessions.tab(try string(name), for: session)
+    /// The session's Agent tab named by the `tab` argument (`AgentSessions.tab`),
+    /// awake (`AgentAwake.use`) unless only `waking: false`, as for closing it.
+    func tab(_ name: String = "tab", waking: Bool = true) throws -> AgentTab {
+        let tab = try server.sessions.tab(try string(name), for: session)
+        if waking { server.awake.use(tab) }
+        return tab
     }
 
     /// Time left before the deadline.

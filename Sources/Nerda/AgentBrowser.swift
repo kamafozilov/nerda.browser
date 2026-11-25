@@ -23,10 +23,14 @@ final class AgentBrowser {
     var tabs: [Tab] { browser.tabs }
 
     /// An Agent tab for `url`, behind the others: nothing here is ever on
-    /// screen to be put in front of.
+    /// screen to be put in front of. Its agent is at work in it, so it
+    /// loads as a page in sight would (`AgentAwake`).
     @discardableResult
     func open(_ url: URL) -> Tab {
-        browser.open(url, inBackground: true)
+        let tab = browser.open(url, inBackground: true)
+        tab.isKeptAwake = true
+        tab.page?.hearsWindowCovered(false)
+        return tab
     }
 
     func close(_ id: Tab.ID) {

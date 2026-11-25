@@ -19,6 +19,8 @@ final class AgentServer {
     let approvals: AgentApprovals
     /// What agents wait on the owner for: Handoffs and questions.
     let owner: OwnerRequests
+    /// Which Agent tabs run at full speed, and how many stay awake.
+    let awake = AgentAwake()
     private let callers: AgentCallers
     private let defaults: UserDefaults
     private let makeBrowser: (Profile) -> AgentBrowser
@@ -183,6 +185,11 @@ final class AgentServer {
         defer { sessions.finished(session) }
         if session.isStopped { return stopped(session) }
         let call = AgentCall(server: self, session: session, arguments: request.args, deadline: .now + verb.deadline)
+        awake.working(session, tabs: sessions.tabs(of: session))
+        defer {
+            awake.working(session, tabs: sessions.tabs(of: session))
+            awake.keepToCap(browsers.flatMap(\.tabs))
+        }
         let reply = await Self.done(verb, call)
         return session.isStopped ? stopped(session) : reply
     }
@@ -242,7 +249,10 @@ final class AgentServer {
     /// the verb is cancelled then, and its waits end.
     private static func done(_ verb: AgentVerb, _ call: AgentCall) async -> AgentReply {
         let work = Task { @MainActor () -> AgentReply in
-            do { return .done(try await verb.run(call)) }
+            do {
+                let text = try await verb.run(call)
+                return .done(text, jpeg: call.shown.jpeg)
+            }
             catch let error as AgentError { return .failed(error) }
             catch is CancellationError {
                 return .failed(AgentError(.timedOut, "\(verb.name) took longer than \(verb.deadline.components.seconds) s."))
