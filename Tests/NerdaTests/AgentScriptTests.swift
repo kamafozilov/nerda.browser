@@ -40,6 +40,55 @@ struct AgentScriptTests {
         #expect(tabs.text.contains("t1"), "\(tabs.text)")
     }
 
+    /// The verbs that type, press, choose, hover, drag and scroll are steps
+    /// of a script too, each acting on the page as when called alone.
+    @Test func aScriptTypesChoosesHoversDragsAndScrolls() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        let url = try await harness.pages.serve("/form", """
+            <title>Form</title>
+            <script>window.heard = [];</script>
+            <label>Name <input id=who></label>
+            <label>Size <select id=size onchange="heard.push('size ' + this.value)">
+              <option value=s>Small</option><option value=l>Large</option>
+            </select></label>
+            <button id=menu onmouseover="heard.push('hovered')">Menu</button>
+            <ul><li id=file draggable=true>report.pdf</li></ul>
+            <div id=trash role=region aria-label="Trash" style="height: 150px; border: 1px solid">Drop files here</div>
+            <div style="height: 3000px"></div>
+            <script>
+              file.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', 'report.pdf'));
+              trash.addEventListener('dragover', (e) => e.preventDefault());
+              trash.addEventListener('drop', (e) => { e.preventDefault(); heard.push('dropped ' + e.dataTransfer.getData('text/plain')); });
+              who.addEventListener('keydown', (e) => { if (e.key === 'Enter') heard.push('enter'); });
+            </script>
+            """)
+        let agent = try await harness.agent()
+
+        let answer = try await agent.call("run", ["script": .string("""
+            open("\(url.absoluteString)");
+            const outline = snapshot({ tab: "t1", full: true });
+            const ref = (what) => outline.split("\\n").find((line) => line.includes(" " + what)).match(/((?:f\\d+)?e\\d+) /)[1];
+            type("t1", ref('textbox "Name"'), "Ada");
+            press({ tab: "t1", ref: ref('textbox "Name"'), key: "Enter" });
+            choose({ tab: "t1", ref: ref('combobox "Size"'), option: "Large" });
+            hover("t1", ref('button "Menu"'));
+            drag("t1", ref("listitem"), ref('region "Trash"'));
+            scroll({ tab: "t1" });
+            return nerda.eval("t1", "return document.querySelector('#who').value");
+            """)])
+
+        #expect(!answer.isError, "\(answer.text)")
+        #expect(answer.text.contains("Ada"), "\(answer.text)")
+        let page = try #require(harness.agents?.tabs.first?.page)
+        let heard = try await page.callAsyncJavaScript("return heard", contentWorld: .page) as? [String] ?? []
+        #expect(heard.contains("enter"), "\(heard)")
+        #expect(heard.contains("size l"), "\(heard)")
+        #expect(heard.contains("hovered"), "\(heard)")
+        #expect(heard.contains("dropped report.pdf"), "\(heard)")
+        #expect(try await page.callAsyncJavaScript("return scrollY", contentWorld: .page) as? Double ?? 0 > 0)
+    }
+
     /// Past 200 steps the script is stopped, with a message that says so,
     /// even when it catches the error; `state` keeps what it had counted
     /// for the next run.
