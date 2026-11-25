@@ -219,15 +219,27 @@ class SwipingWebView: WKWebView {
     }
 
     /// A click or a key in a page that stopped answering asks about it again
-    /// (HungPages.swift); the page takes them as before.
+    /// (HungPages.swift); the page takes them as before. The owner's in an
+    /// Agent tab they watch takes it over (`AgentServer.ownerReached`).
     override func mouseDown(with event: NSEvent) {
-        (navigationDelegate as? Browser)?.reached(self)
+        reached(by: event)
         super.mouseDown(with: event)
     }
 
+    override func rightMouseDown(with event: NSEvent) {
+        reached(by: event)
+        super.rightMouseDown(with: event)
+    }
+
     override func keyDown(with event: NSEvent) {
-        (navigationDelegate as? Browser)?.reached(self)
+        reached(by: event)
         super.keyDown(with: event)
+    }
+
+    private func reached(by event: NSEvent) {
+        let browser = navigationDelegate as? Browser
+        browser?.reached(self)
+        browser?.agentServer?.ownerReached(self, with: event)
     }
 
     /// Back or Forward by the tab, as from the menu, so a page that stopped

@@ -14,6 +14,9 @@ final class AgentBrowser {
     /// Agent tabs the owner watches in a window of theirs
     /// (`Browser.watched`): their pages are there, not here.
     var watched: Set<Tab.ID> = []
+    /// Agent tabs the owner took over (GLOSSARY.md: Take over): theirs, not
+    /// their agents', until handed back (`AgentServer.handBack`).
+    var taken: Set<Tab.ID> = []
 
     init(profile: Profile = .main, dataStore: WKWebsiteDataStore? = nil) {
         browser = Browser(profile: profile, dataStore: dataStore, forAgents: true)
