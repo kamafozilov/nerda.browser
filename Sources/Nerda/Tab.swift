@@ -356,7 +356,11 @@ final class Tab: Identifiable {
         letGoHung()
         stopReconnecting()
         // An address typed, a bookmark: the browser leaving the page asks.
-        if let page, hasUnsavedWork, !departureApproved, let browser = delegate as? Browser {
+        if page != nil, hasUnsavedWork, !departureApproved, (delegate as? Browser)?.isForAgents == true {
+            // An Agent tab's agent asked to go, and nobody is there to ask.
+            AgentNotices.post(AgentDialog.leftAnyway, on: self)
+            departureApproved = true
+        } else if let page, hasUnsavedWork, !departureApproved, let browser = delegate as? Browser {
             Task {
                 guard await browser.confirmDiscarding(on: page), self.page === page else { return }
                 departureApproved = true
