@@ -22,7 +22,8 @@ nonisolated extension AgentVerb {
         name: "open",
         summary: """
             Open an address in a new Agent tab, signed in as the user is, out of their sight. \
-            Answers the tab's name, title and address, and the start of the page's text.
+            Answers the tab's name, title and address, the page's outline (its buttons, links and \
+            fields, each with a ref such as e5 to act on) and the start of its text.
             """,
         arguments: [.string("url", "The address to open, such as https://example.com"), .profile]
     ) { call in
