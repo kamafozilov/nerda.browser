@@ -198,10 +198,11 @@ nonisolated struct AgentGroup: Hashable, Sendable {
     static let history = AgentGroup(name: "history", summary: "search the pages the user visited")
     static let bookmarks = AgentGroup(name: "bookmarks", summary: "read the user's bookmarks")
     static let profiles = AgentGroup(name: "profiles", summary: "find the profile signed in to a site, to open tabs there")
+    static let skills = AgentGroup(name: "skills", summary: "read a Site skill, what is known to work on a site, and save one")
 
     /// Every group, in the order `more_tools` names them. A ticket adding a
     /// group adds it here.
-    static let listed: [AgentGroup] = [history, bookmarks, profiles]
+    static let listed: [AgentGroup] = [history, bookmarks, profiles, skills]
 
     /// The group of that name; nil for none asked. One there isn't fails,
     /// naming those there are.

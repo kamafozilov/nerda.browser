@@ -158,7 +158,7 @@ final class AgentApprovals {
 
     /// The owner's window in front of the others, not an incognito one and
     /// not one already showing a sheet; once there is one.
-    private static func ownersWindow() async -> NSWindow {
+    static func ownersWindow() async -> NSWindow {
         while true {
             let window = NSApp.orderedWindows.first {
                 guard let window = $0 as? BrowserWindow else { return false }
