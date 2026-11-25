@@ -379,6 +379,7 @@ final class Tab: Identifiable {
 
     private func makePage(_ configuration: WKWebViewConfiguration) -> WKWebView {
         Self.matchScreenRate(configuration.preferences)
+        Self.holdHidden(configuration.preferences)
         let page = SwipingWebView(frame: .zero, configuration: configuration)
         _ = Self.powerWatch
         Self.pages.add(page)
@@ -1107,6 +1108,8 @@ final class Tab: Identifiable {
         // out of sight has its timers slowed further the longer it stays so.
         set(configuration.preferences, "_setDNSPrefetchingEnabled:", true)
         set(configuration.preferences, "_setHiddenPageDOMTimerThrottlingAutoIncreases:", true)
+        // Slowed, but running, where WebKit would suspend it (`hiddenPolicy`).
+        holdHidden(configuration.preferences)
         // Picture in picture, for Auto Picture-in-Picture and a player's own
         // button: without it WebKit says no video supports it.
         set(configuration.preferences, "_setAllowsPictureInPictureMediaPlayback:", true)
@@ -1160,13 +1163,58 @@ final class Tab: Identifiable {
     private static let pages = NSHashTable<WKWebView>.weakObjects()
 
     /// Low Power Mode turned on or off reaches the pages already open too,
-    /// not only those made from then on: WebKit takes it up as each is next
-    /// loaded (reloaded, or gone somewhere), rather than when it is woken.
-    private static let powerWatch = NotificationCenter.default.addObserver(
-        forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main
-    ) { _ in
-        MainActor.assumeIsolated {
-            for page in pages.allObjects { matchScreenRate(page.configuration.preferences) }
+    /// not only those made from then on. The frame rate WebKit takes up as
+    /// each is next loaded (reloaded, or gone somewhere), rather than when it
+    /// is woken; how a hidden page runs, at once (`holdHiddenAgain`).
+    private static let powerWatch: Void = LowPowerMode.watch(pages) { _ in
+        let open = pages.allObjects
+        for page in open {
+            matchScreenRate(page.configuration.preferences)
+            holdHidden(page.configuration.preferences)
+        }
+        holdHiddenAgain(open)
+    }
+
+    /// How a page out of sight is run: it keeps running, where WebKit and
+    /// Safari suspend it, so coming back to it has nothing to wake (Yab
+    /// measured the slowest tenth of switches 128 → 66 ms), and chats,
+    /// dashboards and players carry on. Its timers are still slowed, and a
+    /// runaway page still ended (`prepared`). In Low Power Mode it is
+    /// suspended, as before. NERDA_HIDDEN_RUN=0 leaves WebKit's own, to time
+    /// switches with and without (`Speedups`).
+    static var hiddenPolicy: WKPreferences.InactiveSchedulingPolicy {
+        guard Speedups.isOn("HIDDEN_RUN") else { return webKitsHiddenPolicy }
+        return LowPowerMode.isOn ? .suspend : .none
+    }
+
+    private static let webKitsHiddenPolicy = WKPreferences().inactiveSchedulingPolicy
+
+    /// Each change of a preference is sent to every page's process, so only
+    /// a change is made.
+    private static func holdHidden(_ preferences: WKPreferences) {
+        let policy = hiddenPolicy
+        if preferences.inactiveSchedulingPolicy != policy { preferences.inactiveSchedulingPolicy = policy }
+    }
+
+    /// WebKit reads how a hidden page runs only as a page joins its process
+    /// (macOS 27, and WebKit's source: `WebProcessProxy::addExistingWebPage`):
+    /// changed later, a page already open kept what it began with. So each
+    /// process with pages gets one more, made in it and let go at once, and
+    /// reads it again from the pages it has; measured, a hidden page then
+    /// stops within seconds, or runs again.
+    // WebKit SPI: should it go, a page open follows the mode once it is next
+    // made (woken) or moves to another site's process.
+    private static func holdHiddenAgain(_ open: [WKWebView]) {
+        let related = NSSelectorFromString("_setRelatedWebView:")
+        var reached = Set<pid_t>()
+        for page in open {
+            // No process (ended, or none started yet): one starts with the mode as it is.
+            guard let pid = Processes.pid(of: page), reached.insert(pid).inserted else { continue }
+            let configuration = page.configuration
+            guard configuration.responds(to: related) else { return }
+            configuration.perform(related, with: page)
+            configuration.webExtensionController = nil
+            _ = WKWebView(frame: .zero, configuration: configuration)
         }
     }
 
