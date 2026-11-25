@@ -66,6 +66,9 @@ nonisolated enum AgentSkill {
             - For a step only a person can do (signing in, a one-time code, a captcha, a passkey), \
             call `handoff` rather than trying it yourself. An answer starting needs_user (exit 3) \
             means the user hasn't come yet: tell them Nerda is waiting for them, then call it again.
+            - A page's header may name a Site skill (`skill: github …`): what is known to work on \
+            that site. Read it with `skill` before you go on. When you find what works on a site \
+            the next agent should know, offer it with `skill_save`; the user approves it first.
             - "Nerda isn't running" (exit 2): ask the user to open Nerda, then try again.
             - "a different version": Nerda was updated and not reopened. Ask the user to quit \
             and reopen Nerda.
