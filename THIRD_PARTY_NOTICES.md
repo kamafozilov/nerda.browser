@@ -224,3 +224,4 @@ Adapted in Nerda:
 - Sources/Nerda/LastFrame.swift
 - Sources/Nerda/HungPages.swift
 - Sources/Nerda/SparePages.swift
+- Sources/Nerda/SleepCoordinator.swift

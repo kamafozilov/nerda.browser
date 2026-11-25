@@ -1,3 +1,4 @@
+// Adapted from Sleep.swift in Yab (https://github.com/yetanotherbrowser/yab), Apache License 2.0, Copyright 2026 Serafim Korablev; changed for Nerda.
 import Foundation
 
 /// Puts tabs to sleep in every window: the ones unseen longer than
