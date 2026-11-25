@@ -15,6 +15,8 @@ final class AgentServer {
 
     let socket: URL
     let sessions = AgentSessions()
+    /// Which other programs the owner let in.
+    let approvals: AgentApprovals
     private let callers: AgentCallers
     private let defaults: UserDefaults
     private let makeBrowser: (Profile) -> AgentBrowser
@@ -24,10 +26,12 @@ final class AgentServer {
     private var switchWatch: NSObjectProtocol?
 
     init(socket: URL, callers: AgentCallers = .nerdas, defaults: UserDefaults = .standard,
+         ask: @escaping AgentApprovals.Ask = AgentApprovals.sheet,
          makeBrowser: @escaping (Profile) -> AgentBrowser = { AgentBrowser(profile: $0) }) {
         self.socket = socket
         self.callers = callers
         self.defaults = defaults
+        approvals = AgentApprovals(defaults: defaults, ask: ask)
         self.makeBrowser = makeBrowser
     }
 
@@ -120,15 +124,41 @@ final class AgentServer {
         guard let verb = AgentVerb.named[request.verb] else {
             return .failed(AgentError(.unknown, "Nerda has no \(request.verb). Ask the user to update Nerda."))
         }
-        guard access == .full || verb.forAnyCaller else {
-            return .failed(AgentError(.notAllowed, """
-                This program isn't Nerda's own nerda-browser, so Nerda only tells it its status. \
-                Use the nerda-browser command or MCP server that Nerda's setup installed.
-                """))
-        }
+        if !verb.forAnyCaller, let refusal = refusal(for: access) { return .failed(refusal) }
         let session = sessions.session(request.session ?? AgentSessionName(client: "unknown", id: "unknown"))
         let call = AgentCall(server: self, session: session, arguments: request.args, deadline: .now + verb.deadline)
         return await Self.done(verb, call)
+    }
+
+    /// Why a caller with `access` gets status only, nil when it gets more.
+    /// Another signed program is asked about here, the first time.
+    private func refusal(for access: AgentCallers.Access) -> AgentError? {
+        switch access {
+        case .full:
+            return nil
+        case .statusOnly:
+            return AgentError(.notAllowed, """
+                This program isn't Nerda's own nerda-browser, so Nerda only tells it its status. \
+                Use the nerda-browser command or MCP server that Nerda's setup installed.
+                """)
+        case .unknown(let program):
+            switch approvals.decision(for: program) {
+            case true?:
+                return nil
+            case false?:
+                return AgentError(.notAllowed, """
+                    The user didn't allow \(program.name) to use Nerda, so Nerda only tells it its status. \
+                    Use the nerda-browser command or MCP server that Nerda's setup installed, or ask the user \
+                    to remove \(program.name) in Nerda's Settings › Security & Privacy › Agents to be asked again.
+                    """)
+            case nil:
+                approvals.askAbout(program)
+                return AgentError(.notAllowed, """
+                    Nerda is asking the user whether \(program.name) may use it. Until they allow it, Nerda only \
+                    tells it its status. Ask the user to answer Nerda's question, then try again.
+                    """)
+            }
+        }
     }
 
     /// The verb's answer, or "timed out" once its deadline passes first:

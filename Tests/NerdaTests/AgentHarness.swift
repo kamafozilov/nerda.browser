@@ -27,8 +27,9 @@ final class AgentHarness {
     var socket: URL { server.socket }
 
     /// `callers` decides who may do more than ask for status; by default
-    /// every program of this user, as in development builds.
-    init(callers: AgentCallers = .anyone) throws {
+    /// every program of this user, as in development builds. `ask` is the
+    /// owner asked about another program; by default they never answer.
+    init(callers: AgentCallers = .anyone, ask: @escaping AgentApprovals.Ask = { _ in nil }) throws {
         // Short: a socket's path has room for 103 bytes.
         folder = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "na-" + UUID().uuidString.prefix(8))
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -36,7 +37,7 @@ final class AgentHarness {
         defaultsName = "nerda.agents.tests." + UUID().uuidString
         defaults = try #require(UserDefaults(suiteName: defaultsName))
         // Every profile's Agent tabs on a store of their own, kept in memory.
-        server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults) { profile in
+        server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults, ask: ask) { profile in
             AgentBrowser(profile: profile, dataStore: .nonPersistent())
         }
         server.start()
