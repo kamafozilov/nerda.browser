@@ -43,7 +43,7 @@ struct SiteSkillsTests {
         #expect(hint.contains("shop"))
         #expect(hint.contains("Ordering on the test shop"))
         // The hint is in the header, before the page's own words.
-        let header = first.text.components(separatedBy: "<page-")[0]
+        let header = first.text.components(separatedBy: "\n<page-")[0]
         #expect(header.contains("skill: "))
 
         let again = try await agent.call("text", ["tab": "t1"])

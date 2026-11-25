@@ -774,7 +774,7 @@ extension Browser: WKUIDelegate {
                  initiatedByFrame frame: WKFrameInfo) async {
         // An Agent tab's is accepted at once, and told to its agent.
         if isForAgents {
-            if let tab = tab(for: webView) { AgentNotices.post("accepted an alert: \(AgentDialog.quoted(message))", on: tab) }
+            if let tab = tab(for: webView) { AgentNotices.post("accepted an alert: \(AgentDialog.marked(message))", on: tab) }
             return
         }
         _ = await ask(Self.says(frame), message, over: webView)

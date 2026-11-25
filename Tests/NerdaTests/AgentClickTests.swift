@@ -59,6 +59,8 @@ struct AgentClickTests {
         #expect(refused.text.contains("covered"), "\(refused.text)")
         #expect(refused.text.contains(#"\#(accept) button "Accept all""#), "\(refused.text)")
         #expect(refused.text.contains(#"\#(reject) button "Reject all""#), "\(refused.text)")
+        // The overlay's words are the page's: marked as such.
+        #expect(refused.text.contains(#"Its buttons: <page-text>\#(accept) button "Accept all""#), "\(refused.text)")
         #expect(try await clicks(harness) == [])
 
         let closed = try await agent.call("click", ["tab": "t1", "ref": .string(accept)])
@@ -121,7 +123,7 @@ struct AgentClickTests {
 
         #expect(!answer.isError, "\(answer.text)")
         #expect(answer.text.contains("address: \(next.absoluteString)"), "\(answer.text)")
-        #expect(answer.text.contains("title: Next"), "\(answer.text)")
+        #expect(answer.text.contains("title: <page-text>Next</page-text>"), "\(answer.text)")
         #expect(answer.text.contains(#"button "Go on""#), "\(answer.text)")
         #expect(answer.text.contains("Welcome to the next page"), "\(answer.text)")
     }

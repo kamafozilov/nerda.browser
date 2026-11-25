@@ -25,7 +25,7 @@ struct AgentDialogTests {
         let answer = try await agent.call("click", ["tab": "t1", "ref": .string(save)])
 
         #expect(!answer.isError, "\(answer.text)")
-        #expect(answer.text.contains(#"notice: accepted an alert: "Saved""#), "\(answer.text)")
+        #expect(answer.text.contains(#"notice: accepted an alert: <page-text>"Saved"</page-text>"#), "\(answer.text)")
         #expect(answer.text.contains(#"button "Next""#), "\(answer.text)")
     }
 
@@ -44,7 +44,7 @@ struct AgentDialogTests {
         let delete = try #require(try await ref(of: #"button "Delete""#, agent))
 
         let clicked = try await agent.call("click", ["tab": "t1", "ref": .string(delete)])
-        #expect(clicked.text.contains(#"raised a confirm dialog: "Delete the draft?""#), "\(clicked.text)")
+        #expect(clicked.text.contains(#"raised a confirm dialog: <page-text>"Delete the draft?"</page-text>"#), "\(clicked.text)")
 
         let started = ContinuousClock.now
         let read = try await agent.call("snapshot", ["tab": "t1"])
@@ -55,7 +55,7 @@ struct AgentDialogTests {
         let answered = try await agent.call("dialog", ["tab": "t1", "accept": true])
 
         #expect(!answered.isError, "\(answered.text)")
-        #expect(answered.text.contains(#"answered the confirm dialog "Delete the draft?": OK"#), "\(answered.text)")
+        #expect(answered.text.contains(#"answered the confirm dialog <page-text>"Delete the draft?"</page-text>: OK"#), "\(answered.text)")
         #expect(answered.text.contains(#"button "Deleted""#), "\(answered.text)")
         let again = try await agent.call("dialog", ["tab": "t1", "accept": true])
         #expect(again.isError, "\(again.text)")
@@ -83,7 +83,7 @@ struct AgentDialogTests {
         let dragged = try await agent.call("drag", ["tab": "t1", "ref": .string(card), "to": .string(done)])
         #expect(!dragged.isError, "\(dragged.text)")
         #expect(dragged.text.hasPrefix("began dragging"), "\(dragged.text)")
-        #expect(dragged.text.contains(#"raised a confirm dialog: "Move the card?""#), "\(dragged.text)")
+        #expect(dragged.text.contains(#"raised a confirm dialog: <page-text>"Move the card?"</page-text>"#), "\(dragged.text)")
         #expect(ContinuousClock.now - started < .seconds(5))
 
         let calls: [(String, [String: AgentJSON])] = [

@@ -45,13 +45,18 @@ final class AgentDialog {
     /// had something typed in it, and was left all the same.
     static let leftAnyway = "left a page that asked to stay (a leave-page question, answered leave)"
 
-    /// `the confirm dialog "Delete the draft?"`
-    var named: String { "the \(kind.name) \(Self.quoted(message))" }
+    /// `the confirm dialog <page-text>"Delete the draft?"</page-text>`,
+    /// for agents.
+    var named: String { "the \(kind.name) \(Self.marked(message))" }
 
-    /// The page's words as an answer quotes them: on one line, cut short.
+    /// The page's words as the owner is shown them: on one line, cut short.
     static func quoted(_ text: String) -> String {
         String(reflecting: String(text.replacing(/\s+/, with: " ").trimmingCharacters(in: .whitespaces).prefix(300)))
     }
+
+    /// The page's words as an agent is told them: quoted, and marked as
+    /// the page's (`AgentPage.untrustedInline`).
+    static func marked(_ text: String) -> String { AgentPage.untrustedInline(quoted(text)) }
 
     /// Answers it: the page runs again, given `answer`. Only the first
     /// answer counts.
@@ -75,7 +80,7 @@ final class AgentDialog {
                       in browser: Browser) async -> Answer {
         let dialog = AgentDialog(kind: kind, message: message, asker: asker)
         open.setObject(dialog, forKey: tab)
-        dialog.hold = AgentNotices.hold(tab, "raised a \(kind.name): \(quoted(message)) (answer it with dialog)")
+        dialog.hold = AgentNotices.hold(tab, "raised a \(kind.name): \(marked(message)) (answer it with dialog)")
         let watch = Task { [weak tab, weak browser] in
             while dialog.answer == nil {
                 try? await Task.sleep(for: .milliseconds(250))
