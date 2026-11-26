@@ -8,36 +8,47 @@ import WebKit
 /// and screenshots of them (spec #119, ticket #135).
 @MainActor
 struct AgentAwakeTests {
-    /// A page that counts its animation frames, keeps the time of each tick
-    /// of its 50 ms timer, and says whether it thinks it is seen.
+    /// A page that keeps the time of each of its animation frames and each
+    /// tick of its 50 ms timer, on its own clock, and says whether it
+    /// thinks it is seen.
     static let running = """
         <title>Running</title>
         <script>
-        window.frameCount = 0; window.ticks = [];
-        function frame() { window.frameCount++; requestAnimationFrame(frame); }
+        window.drawn = []; window.ticks = [];
+        const keep = (times) => { times.push(performance.now()); if (times.length > 600) times.shift(); };
+        function frame() { keep(drawn); requestAnimationFrame(frame); }
         requestAnimationFrame(frame);
-        setInterval(() => window.ticks.push(performance.now()), 50);
+        setInterval(() => keep(ticks), 50);
         </script>
         <p>Counting</p>
         """
 
-    /// The page's frames so far, the shortest time between two of its last
-    /// ten ticks in ms, and whether it counts as seen.
-    private func looked(_ tab: Nerda.Tab) async throws -> (frames: Int, closestTicks: Double, visible: Bool) {
+    /// The most frames and ticks the page had in any one second of those it
+    /// kept, and whether it counts as seen.
+    private func looked(_ tab: Nerda.Tab) async throws -> (frames: Int, ticks: Int, visible: Bool) {
         let page = try #require(tab.page)
         let read = """
-            const last = ticks.slice(-10), gaps = last.slice(1).map((t, i) => t - last[i]);
-            return [frameCount, gaps.length ? Math.min(...gaps) : 1e9, document.visibilityState];
+            const most = (times) => {
+                let best = 0;
+                for (let i = 0, j = 0; i < times.length; i++) {
+                    while (j < times.length && times[j] - times[i] < 1000) j++;
+                    best = Math.max(best, j - i);
+                }
+                return best;
+            };
+            return [most(drawn), most(ticks), document.visibilityState];
             """
         let values = try #require(try await page.callAsyncJavaScript(read, contentWorld: .page) as? [Any])
-        return (values[0] as? Int ?? 0, values[1] as? Double ?? 1e9, values[2] as? String == "visible")
+        return (values[0] as? Int ?? 0, values[1] as? Int ?? 0, values[2] as? String == "visible")
     }
 
     /// While its agent works, an Agent tab runs as a page on screen would:
-    /// it counts as seen, its animation frames come, and its timer ticks
-    /// faster than once a second. A page out of sight gets no frames, and
-    /// WebKit holds its timers to a second or more apart; however busy the
-    /// Mac, a page that runs gets there.
+    /// it counts as seen, and in a second it has more than twenty animation
+    /// frames and more than ten ticks of its timer. A page out of sight gets
+    /// no frames, and WebKit holds its timers to a second or more apart. The
+    /// page times itself, on its own clock, and any one second of its own
+    /// will do: a busy Mac may slow some seconds, not every one. (In Low
+    /// Power Mode WebKit draws a page 30 times a second, still more than twenty.)
     @Test func aWorkingAgentsTabRunsAtFullSpeed() async throws {
         let harness = try AgentHarness()
         defer { harness.close() }
@@ -46,11 +57,16 @@ struct AgentAwakeTests {
         #expect(try await agent.call("open", ["url": AgentJSON(url)]).isError == false)
         let tab = try #require(harness.agents?.tabs.first)
 
-        let first = try await looked(tab)
-        #expect(first.visible)
-        try await waitFor("Frames, and ticks less than a second apart") {
-            let now = try await looked(tab)
-            return now.frames >= first.frames + 10 && now.closestTicks < 500
+        #expect(try await looked(tab).visible)
+        var seen = (frames: 0, ticks: 0, visible: false)
+        do {
+            try await waitFor("More than twenty frames and ten ticks in a second") {
+                seen = try await looked(tab)
+                return seen.frames > 20 && seen.ticks > 10
+            }
+        } catch {
+            Issue.record("at most \(seen.frames) frames and \(seen.ticks) ticks in a second")
+            throw error
         }
         #expect(try await looked(tab).visible)
     }
