@@ -8,9 +8,9 @@ import WebKit
 class SwipingWebView: WKWebView {
     /// The swipe under way, from fingers down to fingers up.
     private var swipe: Swipe?
-    /// How far the fingers have gone since they came down, until it's clear
-    /// whether they're going sideways (a swipe) or up and down (a scroll).
-    private var opening: CGSize?
+    /// Which way the fingers are going since they came down, until it's
+    /// settled: nil once they are scrolling, or swiping where the page can't go.
+    private var travel: SwipeTravel?
     private let arrow = SwipeArrow()
 
     private struct Swipe {
@@ -173,7 +173,7 @@ class SwipingWebView: WKWebView {
         switch event.phase {
         case .began:
             end(going: false)
-            opening = .zero
+            travel = SwipeTravel()
         case .ended:
             stopWaiting()
             return end(going: swipe.map { $0.armed || $0.flicked } ?? false)
@@ -183,22 +183,26 @@ class SwipingWebView: WKWebView {
             break
         }
 
-        if var moved = opening {
-            moved.width += dx
-            moved.height += event.scrollingDeltaY
-            opening = moved
-            // A few points in, the fingers have shown which way they mean to
-            // go: only a clearly sideways swipe is one, not a scroll drifting.
-            guard abs(moved.width) + abs(moved.height) > 6 else { return }
-            opening = nil
-            let back = moved.width > 0
-            guard abs(moved.width) > abs(moved.height) * 1.3, NSEvent.isSwipeTrackingFromScrollEventsEnabled,
-                  back ? canGoBack : canGoForward
-            else { return }
-            swipe = Swipe(back: back, distance: abs(moved.width))
-            ask(back: back, at: convert(event.locationInWindow, from: nil))
-        } else if let current = swipe {
-            swipe?.distance = max(0, current.distance + (current.back ? dx : -dx))
+        guard var travel else { return }
+        travel.move(dx: dx, dy: event.scrollingDeltaY)
+        switch travel.reading {
+        case .unsure:
+            self.travel = travel
+            return
+        case .scroll:
+            // Up or down: the page's to scroll, until the fingers lift.
+            return end(going: false)
+        case .swipe(let back):
+            if swipe == nil {
+                guard NSEvent.isSwipeTrackingFromScrollEventsEnabled, back ? canGoBack : canGoForward else {
+                    self.travel = nil
+                    return
+                }
+                swipe = Swipe(back: back)
+                ask(back: back, at: convert(event.locationInWindow, from: nil))
+            }
+            self.travel = travel
+            swipe?.distance = travel.distance
             stopWaiting()
         }
         showArrow()
@@ -279,7 +283,7 @@ class SwipingWebView: WKWebView {
     }
 
     private func end(going: Bool) {
-        opening = nil
+        travel = nil
         guard let swipe else { return }
         self.swipe = nil
         if going { step(back: swipe.back) }
@@ -309,10 +313,16 @@ class SwipingWebView: WKWebView {
         arrow.alphaValue = 1
     }
 
-    private static let scrollsThere = """
+    /// The page keeps a swipe that something under the pointer can still
+    /// scroll that way, or that a scroller it would reach, or the page itself,
+    /// keeps to itself with `overscroll-behavior-x` (contain or none), the
+    /// way a page asks Chrome not to go back under a sideways swipe.
+    static let scrollsThere = """
+        const keeps = style => style.overscrollBehaviorX !== 'auto';
         const scrolls = (box, style) => {
             const room = box.scrollWidth - box.clientWidth;
             if (room < 1) return false;
+            if (keeps(style)) return true;
             const left = style.direction === 'rtl' ? room + box.scrollLeft : box.scrollLeft;
             return back ? left > 0.5 : left < room - 0.5;
         };
@@ -320,11 +330,61 @@ class SwipingWebView: WKWebView {
             const style = getComputedStyle(box);
             if (/auto|scroll/.test(style.overflowX) && scrolls(box, style)) return true;
         }
+        const ends = [document.documentElement, document.body].filter(box => box);
+        if (ends.some(box => keeps(getComputedStyle(box)))) return true;
         const root = document.scrollingElement;
-        if (!root || [document.documentElement, document.body].some(
-            box => box && /hidden|clip/.test(getComputedStyle(box).overflowX))) return false;
+        if (!root || ends.some(box => /hidden|clip/.test(getComputedStyle(box).overflowX))) return false;
         return scrolls(root, getComputedStyle(root));
         """
+}
+
+/// Which way two fingers on the trackpad are going, from when they come down
+/// to when they lift: a scroll, or a swipe back or forward. A swipe has to be
+/// one from the start and stay one; anything else is a scroll to the end, so
+/// scrolling down a page while drifting sideways goes nowhere. Safari's rule
+/// to begin and Chrome's to keep going (WebKit's ViewGestureController,
+/// Chromium's HistorySwiper), counted in the trackpad's scrolling points.
+nonisolated struct SwipeTravel {
+    enum Reading: Equatable { case unsure, scroll, swipe(back: Bool) }
+
+    private(set) var reading = Reading.unsure
+    /// How far sideways from where they came down: positive to the right.
+    private(set) var across: CGFloat = 0
+    /// How far up and down, there and back alike: a scroll that wavers is a
+    /// scroll all the same.
+    private(set) var upAndDown: CGFloat = 0
+
+    /// A swipe is this far sideways (Safari's 15 points)…
+    static let start: CGFloat = 15
+    /// …having gone up and down less than half that far all the while (Safari's 2 to 1).
+    static let startSlant: CGFloat = 0.5
+    /// After that, more up and down than this part of the way across ends
+    /// it: Chrome's 1 to 1.3, which leaves room for a hand's arc.
+    static let keepSlant: CGFloat = 1 / 1.3
+
+    /// How far a swipe has gone its own way.
+    var distance: CGFloat {
+        guard case .swipe(let back) = reading else { return 0 }
+        return max(0, back ? across : -across)
+    }
+
+    mutating func move(dx: CGFloat, dy: CGFloat) {
+        guard reading != .scroll, dx != 0 || dy != 0 else { return }
+        across += dx
+        upAndDown += abs(dy)
+        switch reading {
+        case .unsure:
+            if upAndDown >= abs(across) * Self.startSlant {
+                reading = .scroll
+            } else if abs(across) >= Self.start {
+                reading = .swipe(back: across > 0)
+            }
+        case .swipe:
+            if upAndDown > abs(across) * Self.keepSlant { reading = .scroll }
+        case .scroll:
+            break
+        }
+    }
 }
 
 /// The arrow a swipe pulls in: a round button that fills with the accent

@@ -7,6 +7,11 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Scrolling with two fingers no longer goes back or forward by itself. A swipe has to go sideways from the start and stay sideways, as in Safari and Chrome; once your fingers move up or down, it is a scroll until you lift them. Before, a scroll that set off a little sideways, or a quick flick down a feed, could leave the page.
+- A page that asks to keep sideways swipes to itself, as some maps, spreadsheets and editors do, keeps them: swiping there moves the page instead of going back, as in Chrome.
+
 ## [0.0.30] - 2026-11-26
 
 ### Changed

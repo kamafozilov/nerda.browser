@@ -2576,3 +2576,106 @@ func errorsAreCountedOnThisMacOnly(address: String, counted: Int) async throws {
     #expect(run("v.playbackRate = 2; try { v.playbackRate = NaN } catch {}") == [2, 2])
     #expect(context.exception == nil)
 }
+
+/// Two fingers that set off up or down, or only a little sideways, scroll the
+/// page to the end of the gesture, however sideways they go after: scrolling
+/// down a feed while drifting doesn't go back or forward.
+@Test(arguments: [
+    // A scroll down that starts a little sideways, then goes straight across.
+    [(5.0, 3.0), (6.0, 10.0), (40.0, 0.0), (40.0, 0.0)],
+    // A quick scroll down, slanting.
+    [(4.0, 6.0), (12.0, 30.0), (20.0, 50.0)],
+    // Up and down and back: a scroll all the same.
+    [(6.0, 4.0), (6.0, -4.0), (30.0, 0.0)],
+    // Mostly sideways for a few points, then turning down before it is far enough.
+    [(3.0, 1.0), (3.0, 1.0), (3.0, 3.0), (40.0, 0.0)],
+])
+func aScrollStaysAScroll(moves: [(Double, Double)]) {
+    var travel = SwipeTravel()
+    for (dx, dy) in moves { travel.move(dx: dx, dy: dy) }
+    #expect(travel.reading == .scroll)
+    #expect(travel.distance == 0)
+}
+
+/// A clean sideways swipe is one, with room for a hand's arc; turning up or
+/// down partway ends it for good.
+@Test func aSwipeIsSidewaysFromTheStartAndStaysSo() {
+    var back = SwipeTravel()
+    for move in [(4.0, 0.0), (6.0, 1.0), (8.0, 0.0)] { back.move(dx: move.0, dy: move.1) }
+    #expect(back.reading == .swipe(back: true))
+    #expect(back.distance == 18)
+    for move in Array(repeating: (10.0, 4.0), count: 6) { back.move(dx: move.0, dy: move.1) }
+    #expect(back.reading == .swipe(back: true))
+    #expect(back.distance == 78)
+
+    var forward = SwipeTravel()
+    for move in [(-10.0, 0.0), (-10.0, 1.0)] { forward.move(dx: move.0, dy: move.1) }
+    #expect(forward.reading == .swipe(back: false))
+    #expect(forward.distance == 20)
+    for move in [(0.0, 10.0), (0.0, 10.0)] { forward.move(dx: move.0, dy: move.1) }
+    #expect(forward.reading == .scroll)
+    forward.move(dx: -60, dy: 0)
+    #expect(forward.reading == .scroll)
+}
+
+/// A page that keeps sideways overscroll to itself (`overscroll-behavior-x`),
+/// or something under the pointer still able to scroll that way, keeps the
+/// swipe; a plain page leaves it to Back and Forward.
+@MainActor
+@Test(arguments: [
+    ("", false),
+    ("<style>html{overscroll-behavior-x:none}</style>", true),
+    ("<style>body{overscroll-behavior-x:contain}</style>", true),
+    ("<style>html{overflow-x:hidden}</style>", false),
+    (#"<div style="position:fixed;inset:0;overflow-x:auto"><div style="width:3000px;height:10px"></div></div><script>document.querySelector('div').scrollLeft=100</script>"#, true),
+])
+func aPageMayKeepASwipe(page html: String, keeps: Bool) async throws {
+    let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 400, height: 300), styleMask: .borderless,
+                          backing: .buffered, defer: false)
+    let page = Tab().webView
+    page.frame = window.contentView!.bounds
+    window.contentView!.addSubview(page)
+    page.loadHTMLString(html + "<script>window.ready = true</script>", baseURL: somewhere)
+    for _ in 0..<100 where try await page.callAsyncJavaScript("return window.ready === true", contentWorld: .page) as? Bool != true {
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    let kept = try await page.callAsyncJavaScript(SwipingWebView.scrollsThere, arguments: ["x": 200, "y": 150, "back": true],
+                                                  contentWorld: .defaultClient)
+    #expect(kept as? Bool == keeps)
+}
+
+/// Two fingers on the trackpad, as scroll events: a clean swipe right goes
+/// back, a scroll down that drifts as far sideways stays on the page.
+@MainActor
+@Test(.enabled(if: NSEvent.isSwipeTrackingFromScrollEventsEnabled, "Swipe between pages is on in System Settings"))
+func aTrackpadSwipeGoesBackButADriftingScrollDoesnt() async throws {
+    let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 400, height: 300), styleMask: .borderless,
+                          backing: .buffered, defer: false)
+    let page = Tab().webView
+    page.frame = window.contentView!.bounds
+    window.contentView!.addSubview(page)
+    let one = URL(string: "data:text/html,one")!, two = URL(string: "data:text/html,<div style='height:5000px'>two</div>")!
+    for url in [one, two] {
+        page.load(URLRequest(url: url))
+        for _ in 0..<100 where page.url != url || page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    }
+    func fingers(_ moves: [(dx: Int32, dy: Int32)]) async throws {
+        // Phases as the trackpad sends them: began, changed…, ended.
+        let phases = [1] + Array(repeating: 2, count: moves.count - 1)
+        for (move, phase) in zip(moves, phases) + [((0, 0), 4)] {
+            let made = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: move.dy, wheel2: move.dx, wheel3: 0)!
+            made.location = CGPoint(x: 200, y: 150)
+            made.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(phase))
+            page.scrollWheel(with: NSEvent(cgEvent: made)!)
+            try await Task.sleep(for: .milliseconds(40))
+        }
+    }
+    // Down and to the right, in step: toward Back (unnatural scrolling, as made
+    // here, scrolls the page left for fingers moving right).
+    try await fingers([(-4, -3), (-8, -12), (-12, -20), (-16, -24), (-16, -24), (-16, -24), (-16, -24)])
+    try await Task.sleep(for: .milliseconds(500))
+    #expect(page.url == two)
+    try await fingers(Array(repeating: (-12, 0), count: 9))
+    for _ in 0..<100 where page.url != one || page.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(page.url == one)
+}
