@@ -98,6 +98,11 @@ final class Browser: NSObject {
     /// stays in the list for the next arrow. Taken by the next pass of the
     /// pages (`PageView`), whichever tab is on screen then.
     @ObservationIgnored var keepsKeyboard: Tab.ID?
+    /// How long its pages have to answer a ping, and from WebKit's word that
+    /// one stopped taking input to the card (HungPages): Nerda's, or a test's
+    /// own for its browser, which no other browser's pages follow.
+    @ObservationIgnored var hangPatience = HungPages.patience
+    @ObservationIgnored var hangAskAfter = HungPages.askAfter
     /// A tab on its way to another window, which goes on playing there.
     @ObservationIgnored private var handedOver: Tab?
     let siteSettings: SiteSettings

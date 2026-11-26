@@ -56,10 +56,11 @@ struct Hang {
 
 enum HungPages {
     static var isOn: Bool { Speedups.isOn(.hangHandling) }
-    /// How long a page has to answer a ping.
-    static var patience: TimeInterval = 2
-    /// From WebKit's word (itself three seconds after the reach) to the card.
-    static var askAfter: TimeInterval = 12
+    /// How long a page has to answer a ping (`Browser.hangPatience`).
+    static let patience: TimeInterval = 2
+    /// From WebKit's word (itself three seconds after the reach) to the card
+    /// (`Browser.hangAskAfter`).
+    static let askAfter: TimeInterval = 12
     /// How long Wait keeps the card away.
     static let quiet: TimeInterval = 30
     /// How often pages out of sight are looked at, and the share of a core
@@ -92,7 +93,7 @@ extension Browser {
             Logger.pages.notice("A page stopped taking input")
         }
         ping(tab)
-        let due = HungPages.askAfter
+        let due = hangAskAfter
         Task { [weak self, weak tab] in
             try? await Task.sleep(for: .seconds(due))
             guard let self, let tab else { return }
@@ -118,7 +119,7 @@ extension Browser {
             answered = true
             tab?.answered()
         }
-        let patience = HungPages.patience
+        let patience = hangPatience
         Task { [weak self, weak tab, weak page] in
             try? await Task.sleep(for: .seconds(patience))
             guard let self, let tab, !answered, let page, tab.page === page else { return }
@@ -140,7 +141,7 @@ extension Browser {
             if tab.hasUnsavedWork || tab.playsAudio { tab.asksAboutHang = true } else { tab.letGoHung() }
             return
         }
-        let due = (tab.hang.reported ?? .distantPast).addingTimeInterval(HungPages.askAfter)
+        let due = (tab.hang.reported ?? .distantPast).addingTimeInterval(hangAskAfter)
         guard Date.now >= due, Date.now >= tab.hang.quietUntil ?? .distantPast else { return }
         tab.asksAboutHang = true
     }
