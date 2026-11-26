@@ -112,9 +112,9 @@ struct HiddenPagesTests {
         try await Task.sleep(for: .seconds(8))
 
         let heard = try await heard(tab, over: 6)
-        #expect(heard.longestWait < 1.5)
-        #expect(heard.events >= 20)
-        #expect(heard.ticks < 30)
+        #expect(heard.longestWait < 1.5, "\(heard)")
+        #expect(heard.events >= 20, "\(heard)")
+        #expect(heard.ticks < 30, "\(heard)")
         withExtendedLifetime(browser) {}
     }
 
@@ -138,11 +138,11 @@ struct HiddenPagesTests {
         LowPowerMode.forced = false
         LowPowerMode.changed()
         let suspended = try await heard(tab, over: 5)
-        #expect(suspended.longestWait >= 2)
+        #expect(suspended.longestWait >= 2, "\(suspended)")
 
         try await Task.sleep(for: .seconds(6))
         let running = try await heard(tab, over: 5)
-        #expect(running.longestWait < 1.5)
+        #expect(running.longestWait < 1.5, "\(running)")
         #expect(tab.webView === page)
         withExtendedLifetime(browser) {}
     }

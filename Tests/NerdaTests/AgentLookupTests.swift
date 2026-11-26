@@ -122,7 +122,7 @@ struct AgentLookupTests {
         #expect(harness.agents?.tabs.isEmpty == true)
 
         let capped = try await agent.call("fetch", ["url": AgentJSON(long)])
-        #expect(!capped.isError)
+        #expect(!capped.isError, "\(capped.text.prefix(300))")
         #expect(capped.text.contains("more characters"))
         #expect(capped.text.count < 45_000)
         let missing = try await agent.call("fetch", ["url": AgentJSON(try await harness.pages.url("/gone"))])
