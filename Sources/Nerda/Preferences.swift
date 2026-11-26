@@ -154,8 +154,10 @@ enum PictureInPicture {
     static let key = "autoPictureInPicture"
     static let appsKey = "autoPictureInPictureForApps"
 
-    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+    static var isOn: Bool { isOn(in: .standard) }
     static var isOnForApps: Bool { isOn && UserDefaults.standard.bool(forKey: appsKey) }
+    /// On in `settings`: the app's, or a test's own.
+    static func isOn(in settings: UserDefaults) -> Bool { settings.bool(forKey: key) }
 
     // Run by the app, which counts as a click, as WebKit wants for picture in picture.
     // ponytail: the page's own frame only; a video in an iframe (an embed) stays put.

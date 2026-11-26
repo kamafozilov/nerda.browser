@@ -134,8 +134,13 @@ final class Tab: Identifiable {
             pageMoved()
             if isAsleep != (page == nil) { isAsleep = page == nil }
             if page == nil, playsAudio { playsAudio = false }
+            if page == nil, isFloating { isFloating = false }
         }
     }
+    /// Whether the page has a video floating (Picture in Picture), as WebKit
+    /// last said (`Browser.webView(_:hasVideoInPictureInPictureDidChange:)`):
+    /// never taken from Nerda having asked, which WebKit may ignore.
+    var isFloating = false
     /// Whether its page is let go (`sleep`), kept in step with `page` so a
     /// pinned site's icon can show it, where `page` itself isn't watched.
     private(set) var isAsleep = true
