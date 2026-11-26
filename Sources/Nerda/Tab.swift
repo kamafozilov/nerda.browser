@@ -118,6 +118,9 @@ final class Tab: Identifiable {
     @ObservationIgnored var dataStore = WKWebsiteDataStore.default()
     /// When the tab was last on screen, so it sleeps only once it has been away a while.
     @ObservationIgnored var lastSeen = Date.now
+    /// An Agent tab whose agent is at work (`AgentAwake`): no rule puts it
+    /// to sleep until the agent has been idle a while.
+    @ObservationIgnored var isKeptAwake = false
     /// How many times it was gone to: one gone back to often is kept awake
     /// (SleepCoordinator).
     @ObservationIgnored var switchCount = 0
@@ -353,7 +356,11 @@ final class Tab: Identifiable {
         letGoHung()
         stopReconnecting()
         // An address typed, a bookmark: the browser leaving the page asks.
-        if let page, hasUnsavedWork, !departureApproved, let browser = delegate as? Browser {
+        if page != nil, hasUnsavedWork, !departureApproved, (delegate as? Browser)?.isForAgents == true {
+            // An Agent tab's agent asked to go, and nobody is there to ask.
+            PageNotices.post(AgentDialog.leftAnyway, on: self)
+            departureApproved = true
+        } else if let page, hasUnsavedWork, !departureApproved, let browser = delegate as? Browser {
             Task {
                 guard await browser.confirmDiscarding(on: page), self.page === page else { return }
                 departureApproved = true
@@ -416,7 +423,7 @@ final class Tab: Identifiable {
             page.observe(\.title) { [weak self] page, _ in
                 MainActor.assumeIsolated {
                     self?.pageTitle = page.title ?? ""
-                    if self?.isPrivate == false, let url = page.url, let title = page.title { self?.history.name(url, title) }
+                    if self?.keepsHistory == true, let url = page.url, let title = page.title { self?.history.name(url, title) }
                 }
             },
             page.observe(\.isLoading) { [weak self] page, _ in
@@ -824,7 +831,7 @@ final class Tab: Identifiable {
     /// Puts the page's address in history, once it is really there: loaded,
     /// not just asked for (a mistyped address that fails is not a visit).
     func recordVisit() {
-        guard !isPrivate, let page, let url = page.url, url != recorded,
+        guard keepsHistory, let page, let url = page.url, url != recorded,
               page.backForwardList.currentItem?.url == url else { return }
         recorded = url
         history.visit(url, title: page.title ?? "")
@@ -832,6 +839,9 @@ final class Tab: Identifiable {
 
     /// Its window's profile's; Personal's for a tab in no window (tests).
     private var history: History { (delegate as? Browser)?.profile.history ?? .shared }
+    /// Neither an incognito tab nor an Agent tab adds to it: what an agent
+    /// opens is not the owner's browsing.
+    private var keepsHistory: Bool { !isPrivate && (delegate as? Browser)?.isForAgents != true }
 
     /// `url` failed for want of a network: opened again in `page` once the
     /// Mac is back online, if the tab is still open and still says why.

@@ -240,6 +240,11 @@ final class AppMenu: NSObject {
         // that are the browser's whatever the page does with them, as in
         // Chrome: a page that took ⌘W or ⌘T for itself would keep you in it.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
+            // An agent's key the page left alone is the agent's, not the
+            // owner's: `AgentInput` keeps it from the browser's keys.
+            if MainActor.assumeIsolated({ AgentInput.isAgents(event) }) { return event }
+            // ⌘. and ⌘↩ take over and hand back an Agent tab watched here.
+            if MainActor.assumeIsolated({ AgentServer.ownerKey(event) }) { return nil }
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             // Only in a browser's window: in the Vault ⌃Tab is its own, and
             // the tabs of a window behind it are out of sight.
@@ -785,9 +790,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return false
     }
 
-    /// The window comes back with the tabs it closed with.
+    /// The window comes back with the tabs it closed with. After a hidden
+    /// start, Nerda opens as any launch does. AppKit's `hasVisibleWindows`
+    /// counts the Agent window, up off screen while agents work, so the
+    /// owner's own are counted instead.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        if !hasVisibleWindows {
+        if let hidden = HiddenStart.shared, hidden.isHidden {
+            hidden.showWindow()
+            return true
+        }
+        if !Windows.ownerShowsOne() {
             browser.restore(from: browser.profile.sessionFile)
             window.makeKeyAndOrderFront(nil)
         }
@@ -800,6 +812,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func application(_ application: NSApplication, open urls: [URL]) {
         let links = urls.filter(ExternalNavigation.accepts)
         guard !links.isEmpty else { return }
+        // Started hidden: the link opens Nerda as any launch.
+        HiddenStart.shared?.showWindow()
         let last = Windows.lastUsed
         let window = last ?? self.window
         let browser = last?.browser ?? self.browser
@@ -813,6 +827,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Started hidden and never opened: no tabs of the owner's, and no one to ask.
+        if HiddenStart.shared?.isHidden == true { return .terminateNow }
         // With no tabs in any window, a profile's or incognito, there is nothing to lose.
         let browsers = NSApp.windows.compactMap { ($0 as? BrowserWindow)?.browser }
         let hasWork = browsers.contains {
@@ -851,6 +867,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // A muted tab's video has no sound to keep hearing.
         floating = ((NSApp.mainWindow as? BrowserWindow)?.browser ?? browser).selected.flatMap { $0.isMuted ? nil : $0.page }
         floating?.evaluateJavaScript(PictureInPicture.enter)
+    }
+
+    /// Made active after a hidden start (opened by hand, its Dock tile
+    /// absent): Nerda opens as any launch does.
+    func applicationWillBecomeActive(_ notification: Notification) {
+        HiddenStart.shared?.showWindow()
     }
 
     /// Back in Nerda, the video goes back into its page.

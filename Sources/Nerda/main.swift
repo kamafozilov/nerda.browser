@@ -412,8 +412,9 @@ private struct PageCard: View {
                     ZStack {
                         PageView(
                             tabs: browser.tabs,
-                            // Locked, no page shows, nor can be read out from under the lock.
-                            selected: browser.locked ? nil : browser.selected,
+                            // Locked, no page shows, nor can be read out from
+                            // under the lock; nor under an Agent tab watched.
+                            selected: browser.locked || browser.watchedTab != nil ? nil : browser.selected,
                             takesFocus: !browser.commandBarOpen
                         )
                         if let reader = browser.selected?.reader, !browser.locked {
@@ -470,6 +471,9 @@ private struct PageCard: View {
                     .background(Palette.ground)
                     .transition(.identity)
             }
+            if let watched = browser.watched, browser.watchedTab != nil, !browser.locked {
+                WatchedAgentTab(browser: browser, watched: watched)
+            }
         }
         // Another tab comes as it is, at once: a new tab's field and picture,
         // opened with the sidebar's slide, would otherwise slide into place too.
@@ -500,6 +504,15 @@ private struct PageCard: View {
                 AutoFillOfferBar(browser: browser, offer: offer)
                     .padding(.top, 12)
                     .transition(Motion.moving(.opacity.combined(with: .move(edge: .top))))
+            }
+        }
+        .overlay(alignment: .bottom) {
+            // An Agent tab shown here whose Agent waits on the owner.
+            if let tab = browser.watchedTab ?? browser.selected, let request = AgentServer.shared.owner.handoff(on: tab),
+               !browser.locked {
+                HandoffBar(request: request, owner: AgentServer.shared.owner)
+                    .padding(.bottom, 12)
+                    .transition(Motion.moving(.opacity.combined(with: .move(edge: .bottom))))
             }
         }
         .overlay(alignment: .topLeading) {
@@ -886,6 +899,14 @@ extension Browser {
 
 // Nerda run again only to compile the block list (see Blocker), not as a browser.
 if CommandLine.arguments.contains(Blocker.compileArgument) { Blocker.compileAndExit() }
+// `Nerda mcp`: the nerda-browser MCP server an agent starts, passing its
+// requests to the Nerda running (AgentMCP), not a browser itself.
+if CommandLine.arguments.dropFirst().first == "mcp" { AgentMCP.runStdio(socket: AgentWire.socket) }
+// `Nerda cli …`: the nerda-browser command (AgentCommandLine), which
+// setup's command on PATH runs.
+if CommandLine.arguments.dropFirst().first == "cli" { AgentCommandLine.main(Array(CommandLine.arguments.dropFirst(2))) }
+// `Nerda setup`: connects Nerda to Claude Code and Codex (AgentSetup).
+if CommandLine.arguments.dropFirst().first == "setup" { AgentSetup.main(Array(CommandLine.arguments.dropFirst(2))) }
 // This launch's moments, from the process start (Launch.swift).
 Launch.start()
 // Where the main thread stops, from the first moment on (Watchdog, Recorder).
@@ -893,8 +914,11 @@ Watchdog.start()
 
 // Read off the main thread while the rest below gets ready.
 let launchSession = Launch.stage("session") { Session.reading(Session.file) }
+// Started by an agent's nerda-browser with Nerda closed: hidden until the
+// owner opens Nerda (HiddenStart), its tabs and windows only then.
+let startsHidden = CommandLine.arguments.contains(AgentLauncher.hiddenArgument)
 let app = NSApplication.shared
-app.setActivationPolicy(.regular)
+if !startsHidden { app.setActivationPolicy(.regular) }
 // Tabs are ours; no system tab bar, and no Show Tab Bar items in the menus.
 NSWindow.allowsAutomaticWindowTabbing = false
 SpellCheck.registerDefault()
@@ -906,10 +930,12 @@ Launch.stage("history") { History.shared.load(from: History.file, waiting: false
 // Before the tabs: those of bookmarks are told by them.
 Launch.stage("bookmarks") { Bookmarks.shared.load(from: Bookmarks.file) }
 Favicons.shared.folder = Favicons.folder
-Launch.stage("restore") {
-    browser.restore(launchSession(), from: Session.file)
-    // Read off the main thread, so the tabs' icons are there with the window.
-    Favicons.shared.preload(browser.tabs.compactMap(\.site))
+if !startsHidden {
+    Launch.stage("restore") {
+        browser.restore(launchSession(), from: Session.file)
+        // Read off the main thread, so the tabs' icons are there with the window.
+        Favicons.shared.preload(browser.tabs.compactMap(\.site))
+    }
 }
 // Opening on a new tab, it opens with its picture already there. On a web
 // page, the picture waits for the first new tab: 20 to 100 MB not taken for one.
@@ -926,19 +952,44 @@ if Edition.updates { Launch.later("updates") { Updater.shared.start() } }
 Feedback.shared.start()
 // Every window's pages out of sight, looked at once a minute for one stuck in a loop.
 HungPages.start()
+// Agents reach Nerda on its socket while Settings lets them (AgentServer).
+AgentServer.shared.start()
+// The skill setup wrote for Claude Code and Codex, written again if this
+// version of Nerda changed it; nowhere setup didn't write it.
+Task.detached(priority: .utility) { AgentSetup.installed()?.refreshSkills() }
 
 let window = Launch.stage("window") { BrowserWindow(browser: browser) }
 Windows.regular = window
-window.makeKeyAndOrderFront(nil)
-// A blank tab has no page to wait for: the window is the launch.
-Launch.watch(window, waitingForPage: browser.selected.map { !$0.isBlank } ?? false)
-Launch.stage("other windows") {
-    Windows.reopenProfiles()
-    Windows.reopenSecondary()
+
+/// The windows Nerda opens with: at once, or after a hidden start, once the
+/// owner opens it.
+func showWindows() {
+    window.makeKeyAndOrderFront(nil)
+    // A blank tab has no page to wait for: the window is the launch.
+    Launch.watch(window, waitingForPage: browser.selected.map { !$0.isBlank } ?? false)
+    Launch.stage("other windows") {
+        Windows.reopenProfiles()
+        Windows.reopenSecondary()
+    }
+    // Once the window is up: loading them takes the main thread a while.
+    if Extensions.enabledAtLaunch { DispatchQueue.main.async { Extensions.shared.start(for: browser) } }
+}
+
+if startsHidden {
+    HiddenStart.shared = HiddenStart(
+        server: AgentServer.shared,
+        setPolicy: { app.setActivationPolicy($0) },
+        show: {
+            browser.restore(from: Session.file)
+            Favicons.shared.preload(browser.tabs.compactMap(\.site))
+            showWindows()
+        },
+        quit: { app.terminate(nil) }
+    )
+} else {
+    showWindows()
 }
 Launch.later("stores left") { Profiles.removeStoresLeft() }
-// Once the window is up: loading them takes the main thread a while.
-if Extensions.enabledAtLaunch { DispatchQueue.main.async { Extensions.shared.start(for: browser) } }
 
 #if DEBUG
 // Nerda Dev: which view each key goes to, for when keys stop reaching a

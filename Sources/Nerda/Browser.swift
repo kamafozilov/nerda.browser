@@ -53,6 +53,8 @@ final class Browser: NSObject {
             if selectedID != oldValue, Extensions.started { Extensions.shared.activated(self, from: oldValue) }
             // Its page may be the one to translate now.
             if selectedID != oldValue { translator.nudge() }
+            // Back on a tab of the owner's, an Agent tab watched goes back.
+            if selectedID != oldValue { watched = nil }
             sessionChanged()
         }
     }
@@ -83,6 +85,9 @@ final class Browser: NSObject {
     }
     /// Where this window's downloads go instead of `Downloads.folder` (tests).
     @ObservationIgnored var downloadFolder: URL?
+    /// An Agent browser's: the folder under `downloadFolder` where a tab's
+    /// downloads go, its Agent session's (`AgentDownloads`).
+    @ObservationIgnored var agentDownloadsFolder: (Tab) -> String? = { _ in nil }
     /// Where this window's tab operations are timed: the app's one record,
     /// or a test's own.
     @ObservationIgnored var recorder = Recorder.shared
@@ -173,6 +178,23 @@ final class Browser: NSObject {
     /// The window it is shown in, which closing its last tab closes; none in tests.
     @ObservationIgnored weak var window: NSWindow?
 
+    /// An Agent tab the owner watches in this window (from the Agent row),
+    /// shown over the selected tab until they go back to one of theirs. It
+    /// stays its Agent's: in its Agent browser's list, not this one's.
+    var watched: AgentTab? {
+        didSet {
+            guard oldValue?.tab !== watched?.tab else { return }
+            if let oldValue { oldValue.agents.watched.remove(oldValue.tab.id) }
+            if let watched { watched.agents.watched.insert(watched.tab.id) }
+        }
+    }
+
+    /// The Agent tab watched here, while it is open.
+    var watchedTab: Tab? {
+        guard let watched, watched.agents.tabs.contains(where: { $0 === watched.tab }) else { return nil }
+        return watched.tab
+    }
+
     /// The tab on screen, kept rather than looked up: what shows it then
     /// draws again when it changes, not on every change to the list, as
     /// each step of a drag in the sidebar is.
@@ -203,6 +225,12 @@ final class Browser: NSObject {
     /// display: tabs only. The profile's pinned sites and bookmarks stay in
     /// its own window, rather than each have a page in every window.
     let isSecondary: Bool
+    /// The browser of Agent tabs (AgentBrowser): it keeps no history and no
+    /// session, and has no window of the owner's.
+    let isForAgents: Bool
+    /// An Agent browser's server, told of its pages' popups and dialogs
+    /// (`AgentServer.opened`, `raised`); nil for the owner's browsers.
+    @ObservationIgnored weak var agentServer: AgentServer?
     /// Where the pinned sites and bookmarks show: not in incognito, nor in a secondary window.
     var keepsPins: Bool { !isPrivate && !isSecondary }
     /// The profile its window is marked with: none with Personal alone, nor in incognito.
@@ -210,9 +238,10 @@ final class Browser: NSObject {
     /// What its fields suggest from: the profile's history, or in incognito, nothing of it.
     var history: History { isPrivate ? History.empty : profile.history }
 
-    init(profile: Profile = .main, dataStore: WKWebsiteDataStore? = nil, secondary: Bool = false) {
+    init(profile: Profile = .main, dataStore: WKWebsiteDataStore? = nil, secondary: Bool = false, forAgents: Bool = false) {
         self.profile = profile
         isSecondary = secondary
+        isForAgents = forAgents
         let dataStore = dataStore ?? profile.dataStore
         self.dataStore = dataStore
         siteSettings = dataStore.isPersistent ? profile.siteSettings : SiteSettings(defaults: nil)
@@ -244,14 +273,14 @@ final class Browser: NSObject {
     func sleepIdleTabs(unseenFor age: TimeInterval, pinsToo: Bool = false, over size: UInt64 = 0,
                        picturing: Bool = true, sparingRevisited: Bool = false) {
         let cutoff = Date.now.addingTimeInterval(-age)
-        for tab in tabs where tab.id != selectedID && (pinsToo || !tab.isPinned) && !tab.isAsleep
+        for tab in tabs where tab.id != selectedID && (pinsToo || !tab.isPinned) && !tab.isAsleep && !tab.isKeptAwake
             && tab.lastSeen <= cutoff && (size == 0 || (tab.memory ?? 0) > size)
             && !(sparingRevisited && tab.switchCount > Self.revisited) {
             Task {
                 // Asked of the page, so it may have come on screen in the meantime.
                 guard await !tab.isBusy(), tab.id != selectedID else { return }
                 let look = picturing ? await tab.snapshot() : nil
-                if tab.id != selectedID, !tab.hasUnsavedWork { tab.sleep(keeping: look) }
+                if tab.id != selectedID, !tab.hasUnsavedWork, !tab.isKeptAwake { tab.sleep(keeping: look) }
             }
         }
     }
@@ -327,6 +356,7 @@ final class Browser: NSObject {
 
     /// The tab on screen, at once: a press and the click it ends in both ask.
     func select(_ id: Tab.ID) {
+        watched = nil
         if selectedID != id { selectedID = id }
     }
 
@@ -409,7 +439,8 @@ final class Browser: NSObject {
         }
         // With nothing left, the window goes, as in other browsers: an
         // incognito one, and incognito with it. Without a window, a new tab.
-        if tabs.isEmpty {
+        // Agent tabs have no window to close, and nothing to show a new tab.
+        if tabs.isEmpty, !isForAgents {
             if downloads.contains(where: \.needsSession) { add(Tab()) }
             else if let window { window.close() }
             else { add(Tab()) }
@@ -445,7 +476,7 @@ final class Browser: NSObject {
         autofillOffers.removeAll { $0.tab == id }
         if selectedID == id {
             selectedID = recent.last?.id ?? tabs.first(where: Self.listed)?.id
-            if selectedID == nil, !isSecondary || window == nil { add(Tab()) }
+            if selectedID == nil, !isForAgents, !isSecondary || window == nil { add(Tab()) }
         }
         target.add(tab)
         // Down the side the list has no bookmarks' tabs; across the top they are among the rest.
@@ -477,8 +508,14 @@ final class Browser: NSObject {
     }
 
     func confirmDiscarding(on page: WKWebView) async -> Bool {
-        await ask("Leave this page?", "Changes you made may not be saved.", over: page,
-                  buttons: ["Stay", "Leave"]) == .alertSecondButtonReturn
+        // An Agent tab leaves: its agent asked to go, and nobody is there to
+        // ask. Its agent hears of it.
+        if isForAgents {
+            if let tab = tab(for: page) { PageNotices.post(AgentDialog.leftAnyway, on: tab) }
+            return true
+        }
+        return await ask("Leave this page?", "Changes you made may not be saved.", over: page,
+                         buttons: ["Stay", "Leave"]) == .alertSecondButtonReturn
     }
 
     /// Closing the window closes its tabs, as Safari does: nothing keeps
@@ -698,6 +735,8 @@ extension Browser: WKUIDelegate {
         }
         let tab = Tab(configuration: configuration, opener: opener)
         withAnimation(.slide) { add(tab, inBackground: ask == .behind) }
+        // An Agent tab's popup is its session's Agent tab too.
+        agentServer?.opened(tab, by: opener)
         return tab.webView
     }
 
@@ -733,16 +772,31 @@ extension Browser: WKUIDelegate {
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo) async {
+        // An Agent tab's is accepted at once, and told to its agent.
+        if isForAgents {
+            if let tab = tab(for: webView) { PageNotices.post("accepted an alert: \(AgentDialog.marked(message))", on: tab) }
+            return
+        }
         _ = await ask(Self.says(frame), message, over: webView)
     }
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo) async -> Bool {
-        await ask(Self.says(frame), message, over: webView, buttons: ["OK", "Cancel"]) == .alertFirstButtonReturn
+        if isForAgents, let tab = tab(for: webView) {
+            return await AgentDialog.raise(.confirm, message, by: Self.says(frame), on: tab, page: webView, in: self) != .cancel
+        }
+        return await ask(Self.says(frame), message, over: webView, buttons: ["OK", "Cancel"]) == .alertFirstButtonReturn
     }
 
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String,
                  defaultText: String?, initiatedByFrame frame: WKFrameInfo) async -> String? {
+        // An Agent tab's waits for its agent's answer (`AgentDialog`).
+        if isForAgents, let tab = tab(for: webView) {
+            let answer = await AgentDialog.raise(.prompt(defaultText: defaultText ?? ""), prompt, by: Self.says(frame),
+                                                 on: tab, page: webView, in: self)
+            if case .ok(let text) = answer { return text ?? "" }
+            return nil
+        }
         let field = NSTextField(string: defaultText ?? "")
         field.frame.size.width = 280
         let answer = await ask(Self.says(frame), prompt, over: webView, buttons: ["OK", "Cancel"], accessory: field, focus: field)
@@ -751,6 +805,8 @@ extension Browser: WKUIDelegate {
 
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
                  initiatedByFrame frame: WKFrameInfo) async -> [URL]? {
+        // An Agent tab's panel never shows: the agent's staged files answer it.
+        if isForAgents { return AgentUploads.panel(on: tab(for: webView), multiple: parameters.allowsMultipleSelection) }
         guard let window = await window(showing: webView) else { return nil }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = parameters.allowsMultipleSelection
@@ -1054,6 +1110,7 @@ extension Browser: WKNavigationDelegate {
 
     private func track(_ download: WKDownload) {
         download.delegate = self
+        if isForAgents { AgentDownloads.started(download, in: self) }
         withAnimation(.slide) { downloads.insert(Download(download), at: 0) }
     }
 
@@ -1371,7 +1428,7 @@ extension Browser: WKDownloadDelegate {
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                   suggestedFilename: String) async -> URL? {
         if let item = item(for: download), item.isResuming, let file = item.file { return file }
-        guard let file = await whereToSave(suggestedFilename) else {
+        guard let file = await whereToSave(suggestedFilename, for: download) else {
             withAnimation(.slide) { downloads.removeAll { $0.task === download } }
             return nil
         }
@@ -1380,7 +1437,9 @@ extension Browser: WKDownloadDelegate {
     }
 
     /// The file a download named so goes to; nil when the question is cancelled.
-    private func whereToSave(_ name: String) async -> URL? {
+    /// An Agent tab's goes to its session's folder, never asked.
+    private func whereToSave(_ name: String, for download: WKDownload? = nil, from tab: Tab? = nil) async -> URL? {
+        if isForAgents { return AgentDownloads.destination(for: download, named: name, from: tab, in: self) }
         if downloadFolder == nil, Downloads.asks, let window {
             let panel = NSSavePanel()
             panel.directoryURL = Downloads.folder
@@ -1400,7 +1459,7 @@ extension Browser: WKDownloadDelegate {
     func saveData(_ webView: WKWebView, data: Data?, suggestedFilename: String?, mimeType: String?, originatingURL: URL?) {
         guard let data else { return }
         Task {
-            guard let file = await whereToSave(suggestedFilename ?? "") else { return }
+            guard let file = await whereToSave(suggestedFilename ?? "", from: tab(for: webView)) else { return }
             let item = Download(saving: file, size: Int64(data.count))
             withAnimation(.slide) { downloads.insert(item, at: 0) }
             do {
@@ -1414,6 +1473,7 @@ extension Browser: WKDownloadDelegate {
     }
 
     func downloadDidFinish(_ download: WKDownload) {
+        if isForAgents { AgentDownloads.finished(download, in: self) }
         guard let item = item(for: download) else { return }
         item.finish()
         if let file = item.file {
@@ -1422,6 +1482,7 @@ extension Browser: WKDownloadDelegate {
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        if isForAgents { AgentDownloads.failed(download, error, in: self) }
         item(for: download)?.fail(error, resumeData: resumeData)
     }
 
