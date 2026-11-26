@@ -51,8 +51,8 @@ nonisolated final class Watchdog: Sendable {
         self.recorder = recorder
     }
 
-    // The main thread writes these at each step of its loop, and the
-    // watching thread reads them.
+    // The watched thread (the main one in Nerda) writes these at each step
+    // of its loop, and the watching thread reads them.
     /// The last step, in mach ticks; 0 before the first.
     private let last = Atomic<UInt64>(0)
     /// The loop is asleep after its last step.
@@ -60,12 +60,13 @@ nonisolated final class Watchdog: Sendable {
     /// The step a stall the watching thread wrote down began at.
     private let told = Atomic<UInt64>(0)
     /// When the timer was last set, in mach ticks; 0 while it is off. The
-    /// main thread's alone.
+    /// watched thread's alone.
     private let setAt = Atomic<UInt64>(0)
     /// How many times the timer fired.
     private let fired = Atomic<Int>(0)
-    /// The main thread, set before the watching thread starts.
-    private let main = Atomic<UInt32>(0)
+    /// The watched thread (the main one in Nerda), set before the watching
+    /// thread starts.
+    private let watched = Atomic<UInt32>(0)
 
     /// The times the timer fired: each a second into a stall.
     var wakes: Int { fired.load(ordering: .relaxed) }
@@ -75,8 +76,11 @@ nonisolated final class Watchdog: Sendable {
     private static let (timerEvent, stopEvent) = (UInt(1), UInt(2))
     /// The log, written in order off the main thread.
     private let queue = DispatchQueue(label: "nerda.watchdog", qos: .utility)
-    /// The main thread's alone.
+    /// Set as it starts, on the watched thread: its loop, which `stop()`
+    /// takes the observer off from any thread, and what hears each hitch.
     private nonisolated(unsafe) var observer: CFRunLoopObserver?
+    private nonisolated(unsafe) var loop: CFRunLoop?
+    private nonisolated(unsafe) var hitched: (TimeInterval) -> Void = { _ in }
 
     /// Seconds in a mach tick.
     private static let ticks: Double = {
@@ -91,10 +95,23 @@ nonisolated final class Watchdog: Sendable {
     private static let slack: TimeInterval = 0.01
     private static let slackTicks = UInt64(slack / ticks)
 
-    /// Watches the main loop, from the main thread.
+    /// Watches the main loop, from the main thread, its hitches kept in
+    /// the record.
     @MainActor func start() {
+        start { [recorder] seconds in
+            MainActor.assumeIsolated { recorder.hitch(seconds) }
+        }
+    }
+
+    /// Watches the run loop of the thread this is called on: the main one
+    /// in Nerda; in tests, a thread of the test's own, so that the stalls
+    /// it makes hold up no other test. `hitch` hears each hitch, on that
+    /// thread.
+    func start(hitch: @escaping (TimeInterval) -> Void) {
         guard events >= 0, observer == nil else { return }
-        main.store(pthread_mach_thread_np(pthread_self()), ordering: .releasing)
+        let loop = CFRunLoopGetCurrent()
+        watched.store(pthread_mach_thread_np(pthread_self()), ordering: .releasing)
+        hitched = hitch
         let thread = Thread { [self] in watch() }
         thread.name = "nerda.watchdog"
         thread.qualityOfService = .utility
@@ -103,30 +120,31 @@ nonisolated final class Watchdog: Sendable {
         // entering and leaving a loop inside one adds nothing to measure.
         let steps: CFRunLoopActivity = [.afterWaiting, .beforeTimers, .beforeSources, .beforeWaiting]
         let made = CFRunLoopObserverCreateWithHandler(nil, steps.rawValue, true, Int.max) { [self] _, activity in
-            MainActor.assumeIsolated { step(going: activity == .beforeWaiting) }
+            step(going: activity == .beforeWaiting)
         }
-        CFRunLoopAddObserver(CFRunLoopGetMain(), made, .commonModes)
+        CFRunLoopAddObserver(loop, made, .commonModes)
         observer = made
+        self.loop = loop
     }
 
     /// Stops watching, for tests.
-    @MainActor func stop() {
-        guard let made = observer else { return }
+    func stop() {
+        guard let made = observer, let loop else { return }
         observer = nil
-        CFRunLoopRemoveObserver(CFRunLoopGetMain(), made, .commonModes)
+        CFRunLoopRemoveObserver(loop, made, .commonModes)
         change(Self.timerEvent, filter: EVFILT_TIMER, flags: EV_DELETE)
         change(Self.stopEvent, filter: EVFILT_USER, flags: EV_ADD | EV_ONESHOT, fflags: NOTE_TRIGGER)
     }
 
-    /// Each step of the main loop's pass, on the main thread.
-    @MainActor private func step(going: Bool) {
+    /// Each step of the watched loop's pass, on its thread.
+    private func step(going: Bool) {
         let now = mach_absolute_time()
         let was = last.load(ordering: .relaxed), wasAsleep = asleep.load(ordering: .relaxed)
         last.store(now, ordering: .releasing)
         asleep.store(going, ordering: .releasing)
         if !wasAsleep, was > 0, now > was, now - was >= Self.hitchLimit {
             let seconds = Double(now - was) * Self.ticks
-            recorder.hitch(seconds)
+            hitched(seconds)
             if now - was >= Self.limit { queue.async { [self] in ended(seconds, began: was) } }
         }
         let set = setAt.load(ordering: .relaxed)
@@ -164,7 +182,7 @@ nonisolated final class Watchdog: Sendable {
         close(events)
     }
 
-    /// A second after the main loop's last step, with no sleep since.
+    /// A second after the watched loop's last step, with no sleep since.
     private func stalling() {
         let now = mach_absolute_time()
         let stepped = last.load(ordering: .acquiring)
@@ -172,7 +190,7 @@ nonisolated final class Watchdog: Sendable {
         guard !asleep.load(ordering: .acquiring), stepped > 0, now > stepped, now - stepped >= Self.limit,
               told.load(ordering: .relaxed) != stepped else { return }
         told.store(stepped, ordering: .relaxed)
-        let stack = Self.stack(of: main.load(ordering: .acquiring))
+        let stack = Self.stack(of: watched.load(ordering: .acquiring))
         let line = String(format: "%@  stalling %.1f s so far\n", Self.stamp(), Double(now - stepped) * Self.ticks) + stack
         queue.async { [self] in write(line) }
     }
@@ -216,10 +234,10 @@ nonisolated final class Watchdog: Sendable {
         return kept.isEmpty ? nil : String(decoding: kept, as: UTF8.self)
     }
 
-    // MARK: - the main thread's stack
+    // MARK: - the watched thread's stack
 
-    /// The main thread held for the few microseconds it takes to follow its
-    /// frame pointers, then each address named from outside: the binary,
+    /// The watched thread held for the few microseconds it takes to follow
+    /// its frame pointers, then each address named from outside: the binary,
     /// the offset `./symbolicate.sh` reads, and the symbol where there is one.
     private static func stack(of port: thread_act_t) -> String {
         #if arch(arm64)

@@ -9,10 +9,16 @@ enum MemoryPressure {
     /// Calls `heard` with each level the system reports, for as long as
     /// `owner` lives.
     static func watch(_ owner: AnyObject, _ heard: @escaping (MemoryPressure) -> Void) {
-        _ = source
+        if hearsSystem { _ = source }
         watchers.removeAll { $0.owner == nil }
         watchers.append(Watcher(owner: owner, heard: heard))
     }
+
+    /// Whether the system's reports reach the watchers: not in a run that
+    /// says so with NERDA_SYSTEM_MEMORY_PRESSURE=0, read once, as the tests'
+    /// does (TestRun.c), so the Mac being short of memory puts none of their
+    /// tabs to sleep or drops their frames.
+    static let hearsSystem = ProcessInfo.processInfo.environment["NERDA_SYSTEM_MEMORY_PRESSURE"] != "0"
 
     private struct Watcher {
         weak var owner: AnyObject?

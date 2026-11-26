@@ -98,6 +98,10 @@ final class Browser: NSObject {
     /// stays in the list for the next arrow. Taken by the next pass of the
     /// pages (`PageView`), whichever tab is on screen then.
     @ObservationIgnored var keepsKeyboard: Tab.ID?
+    /// How long it waits on a page that stopped answering (HungPages):
+    /// Nerda's, or a test's own for its browser, which no other browser's
+    /// pages follow.
+    @ObservationIgnored var hangWaits = HungPages.Waits()
     /// A tab on its way to another window, which goes on playing there.
     @ObservationIgnored private var handedOver: Tab?
     let siteSettings: SiteSettings
@@ -115,6 +119,8 @@ final class Browser: NSObject {
     /// Find's options (the magnifying glass's menu), kept for every window.
     static let findMatchCaseKey = "findMatchCase"
     static let findWholeWordsKey = "findWholeWords"
+    /// Where they are kept: the app's settings, or a test's own.
+    @ObservationIgnored var findOptions = UserDefaults.standard
     /// Counts ⌘Fs, so one with the bar already open still puts the keyboard in it.
     var findRequests = 0
     /// A tab's name made editable in place, as a double-click does (its
@@ -619,8 +625,8 @@ final class Browser: NSObject {
         if foundOn !== page { clearFound() }
         foundOn = page
         let query = findQuery
-        let matchCase = UserDefaults.standard.bool(forKey: Self.findMatchCaseKey)
-        let wholeWords = UserDefaults.standard.bool(forKey: Self.findWholeWordsKey)
+        let matchCase = findOptions.bool(forKey: Self.findMatchCaseKey)
+        let wholeWords = findOptions.bool(forKey: Self.findWholeWordsKey)
         Task {
             var matches = await Find.look(for: query, matchCase: matchCase, wholeWords: wholeWords, step: step, on: page)
             if matches == nil {
@@ -1129,6 +1135,7 @@ extension Browser: WKNavigationDelegate {
             let page = selected?.page ?? tabs.lazy.compactMap(\.page).first ?? {
                 let configuration = WKWebViewConfiguration()
                 configuration.websiteDataStore = dataStore
+                Tab.leaveUserInstalledFontsOutIfAsked(configuration.preferences)
                 return WKWebView(frame: .zero, configuration: configuration)
             }()
             let task: WKDownload

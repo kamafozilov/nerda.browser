@@ -164,7 +164,7 @@ import WebKit
 /// An address picked under a box fills that box's run of the form, lists
 /// included, and leaves the billing address after it alone.
 @MainActor @Test func aPickedAddressFillsItsPartOfTheForm() async throws {
-    let configuration = WKWebViewConfiguration()
+    let configuration = testConfiguration()
     configuration.websiteDataStore = .nonPersistent()
     Passwords.install(in: configuration.userContentController)
     let page = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)

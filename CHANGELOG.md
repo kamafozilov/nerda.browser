@@ -12,6 +12,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Scrolling with two fingers no longer goes back or forward by itself. A swipe has to go sideways from the start and stay sideways, as in Safari and Chrome; once your fingers move up or down, it is a scroll until you lift them. Before, a scroll that set off a little sideways, or a quick flick down a feed, could leave the page.
 - A page that asks to keep sideways swipes to itself, as some maps, spreadsheets and editors do, keeps them: swiping there moves the page instead of going back, as in Chrome.
 - A video's full-screen button, on YouTube, X or any other site, goes full screen on the first click. Before, the video often grew for a moment and went straight back, and it took a few quick clicks in a row to stay in full screen.
+- Nerda's windows keep up while an agent reads a long page without opening it in a tab, where before they slowed down until the whole page had come in.
+- An agent acting on a page that was slow to answer is told what changed on it. Before, it was told it had gone to another page and was given the whole page again.
 
 ## [0.0.30] - 2026-11-26
 

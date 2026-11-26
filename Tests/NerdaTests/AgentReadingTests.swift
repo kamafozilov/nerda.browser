@@ -11,20 +11,29 @@ struct AgentReadingTests {
     /// `wait` waits for text to show on the page, up to its time limit,
     /// and answers with what changed meanwhile, as an action does; text
     /// that never comes fails as timed out once the limit passes, and a
-    /// wait for the page to load answers once it has.
+    /// wait for the page to load answers once it has. The order is
+    /// confirmed a second after the wait has begun (Nerda marks a page it
+    /// acts on), however long the page took to come.
     @Test func waitWaitsForTextOrALoad() async throws {
         let harness = try AgentHarness()
         defer { harness.close() }
-        let url = try await harness.pages.serve("/order", """
-            <title>Order</title>
-            <p>Placing your order</p>
-            <script>setTimeout(() => document.body.insertAdjacentHTML('beforeend', '<p>Order   confirmed</p><button>Track it</button>'), 1500)</script>
-            """)
+        let url = try await harness.pages.serve("/order", "<title>Order</title><p>Placing your order</p>")
         let agent = try await harness.agent()
         _ = try await agent.call("open", ["url": AgentJSON(url)])
+        let page = try #require(harness.agents?.tabs.first?.page)
+        // Whatever mark open left (one it couldn't take off in time, on a
+        // busy Mac), so the one waited for below is the wait's.
+        _ = try await page.callAsyncJavaScript("globalThis.nerdaAgentActs = 0", contentWorld: .defaultClient)
         let started = ContinuousClock.now
 
-        let waited = try await agent.call("wait", ["tab": "t1", "text": "order confirmed", "timeout": 10])
+        let wait = Task { try await agent.call("wait", ["tab": "t1", "text": "order confirmed", "timeout": 10]) }
+        try await waitFor("The wait begun") {
+            try await page.callAsyncJavaScript("return (globalThis.nerdaAgentActs ?? 0) > Date.now()", contentWorld: .defaultClient) as? Bool == true
+        }
+        try await Task.sleep(for: .seconds(1))
+        _ = try await page.callAsyncJavaScript(
+            "document.body.insertAdjacentHTML('beforeend', '<p>Order   confirmed</p><button>Track it</button>')", contentWorld: .page)
+        let waited = try await wait.value
 
         #expect(!waited.isError, "\(waited.text)")
         #expect(ContinuousClock.now - started >= .seconds(1))

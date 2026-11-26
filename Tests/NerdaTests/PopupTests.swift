@@ -17,7 +17,7 @@ private let somewhere = URL(string: "https://example.com")!
     browser.open(somewhere)
     let opener = browser.tabs[1]
     browser.select(opener.id)
-    let popup = browser.webView(opener.webView, createWebViewWith: WKWebViewConfiguration(),
+    let popup = browser.webView(opener.webView, createWebViewWith: testConfiguration(),
                                 for: WKNavigationAction(), windowFeatures: WKWindowFeatures())
     #expect(browser.selected?.webView === popup)
 
@@ -69,7 +69,7 @@ private let somewhere = URL(string: "https://example.com")!
     let browser = Browser(dataStore: .nonPersistent())
     let tab = Tab()
     browser.add(tab)
-    _ = browser.webView(tab.webView, createWebViewWith: WKWebViewConfiguration(),
+    _ = browser.webView(tab.webView, createWebViewWith: testConfiguration(),
                         for: WKNavigationAction(), windowFeatures: WKWindowFeatures())
     browser.webView(tab.webView, didCommit: nil)
     #expect(tab.blockedPopups.count == 1)

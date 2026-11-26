@@ -80,10 +80,14 @@ private func contrast(_ color: NSColor, on ground: NSColor) -> Double {
 @Test func paletteColoursFollowTheAppearance() {
     for (name, dark) in [(NSAppearance.Name.aqua, false), (.darkAqua, true)] {
         let appearance = NSAppearance(named: name)!
-        #expect(Palette.Look(appearance) == Palette.Look(dark: dark))
+        // With Increase Contrast off and on, whatever this Mac's.
+        #expect(Palette.Look(appearance, increaseContrast: false) == Palette.Look(dark: dark))
+        #expect(Palette.Look(appearance, increaseContrast: true) == Palette.Look(dark: dark, highContrast: true))
         appearance.performAsCurrentDrawingAppearance {
+            // Drawn as the table has it for the look the window is in, the
+            // Mac's Increase Contrast and all.
             let drawn = NSColor(Palette.muted).usingColorSpace(.sRGB)!
-            let table = Palette.color(.muted, .init(dark: dark)).usingColorSpace(.sRGB)!
+            let table = Palette.color(.muted, Palette.Look(appearance)).usingColorSpace(.sRGB)!
             #expect(abs(drawn.redComponent - table.redComponent) < 0.001, "\(name)")
         }
     }

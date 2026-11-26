@@ -84,27 +84,35 @@ struct HandoffTests {
 
     /// A client without one (Codex, whose calls end at 60 s) is answered
     /// needs_user after a short wait, saying what to tell the owner; the
-    /// Handoff stays, and calling again picks up where it is.
+    /// Handoff stays, and calling again picks up where it is. The short wait
+    /// is one of the shim's requests to Nerda here: had it waited as long as
+    /// for a client with a token, it would have asked again, and again.
     @Test func aClientWithoutAProgressTokenIsToldTheOwnerIsNeeded() async throws {
         #expect(AgentMCP.Waits().withoutProgress == .seconds(15))
         #expect(AgentMCP.Waits().withProgress == .seconds(600))
         let harness = try AgentHarness()
         defer { harness.close() }
         let url = try await harness.pages.serve("/pass", "<title>Passkey</title>")
-        let agent = try await harness.agent(client: "codex-mcp-client", waits: Self.quick)
+        // The wait with a token a few requests long, so one that waited it
+        // here would be told after a few seconds, not ten minutes.
+        let waits = AgentMCP.Waits(withProgress: .seconds(4), withoutProgress: .seconds(1),
+                                   poll: .seconds(1), progressEvery: .milliseconds(200))
+        let agent = try await harness.agent(client: "codex-mcp-client", waits: waits)
         _ = try await agent.call("open", ["url": AgentJSON(url)])
 
         let started = ContinuousClock.now
         let first = try await agent.call("handoff", ["tab": "t1", "step": "passkey", "reason": "Use your passkey"])
-        #expect(ContinuousClock.now - started < .seconds(5))
+        #expect(ContinuousClock.now - started >= waits.withoutProgress)
         #expect(!first.isError, "needs_user is no failure: \(first.text)")
         #expect(first.text.contains("needs_user"))
         #expect(first.text.contains("Use your passkey"))
         #expect(agent.notifications.progress.isEmpty)
         let request = try #require(harness.server.owner.waiting.first)
+        #expect(request.asked == 1)
 
         let again = try await agent.call("handoff", ["tab": "t1", "step": "passkey", "reason": "Use your passkey"])
         #expect(again.text.contains("needs_user"))
+        #expect(request.asked == 2)
         #expect(harness.notifier.posted.count == 1)
         #expect(harness.server.owner.waiting.count == 1)
 

@@ -82,6 +82,7 @@ final class Extensions: NSObject {
         configuration.defaultWebsiteDataStore = .default()
         let views = configuration.webViewConfiguration ?? WKWebViewConfiguration()
         views.websiteDataStore = .default()
+        Tab.leaveUserInstalledFontsOutIfAsked(views.preferences)
         // Changing the user agent can strand running extension workers.
         views.applicationNameForUserAgent = Tab.applicationName
         configuration.webViewConfiguration = views

@@ -652,8 +652,10 @@ final class Tab: Identifiable {
     /// Every page Nerda makes, a tab's or a spare: at the screen's rate,
     /// run out of sight as Low Power Mode has it, and following the mode.
     private static func newPage(_ configuration: WKWebViewConfiguration) -> SwipingWebView {
-        matchScreenRate(configuration.preferences)
-        applyHiddenPolicy(configuration.preferences)
+        matchScreenRate(configuration)
+        // Made as the mode changes, before Nerda hears of it: the store's
+        // pages open are told now, as they would have been then.
+        if applyHiddenPolicy(configuration) { reapplyHiddenPolicy(toPagesOf: [configuration.websiteDataStore]) }
         _ = powerWatch
         let page = SwipingWebView(frame: .zero, configuration: configuration)
         pages.add(page)
@@ -1072,6 +1074,7 @@ final class Tab: Identifiable {
         let configuration = prepared.copy() as! WKWebViewConfiguration
         configuration.websiteDataStore = dataStore
         configuration.userContentController = contents(of: dataStore)
+        configuration.preferences = preferences(of: dataStore)
         // Chrome extensions see the pages of Personal's window, not an
         // incognito one's, as in Chrome, nor another profile's (its store
         // has an identifier). The controller has to be there when the page
@@ -1079,6 +1082,19 @@ final class Tab: Identifiable {
         if dataStore.isPersistent, dataStore.identifier == nil, Extensions.enabledAtLaunch { configuration.webExtensionController = Extensions.shared.controller }
         return configuration
     }
+
+    /// A data store's preferences, one set shared by all its tabs, copied
+    /// from `prepared`'s: Low Power Mode is each store's (`LowPowerMode`),
+    /// and with it how its hidden pages run and how often they draw.
+    private static func preferences(of dataStore: WKWebsiteDataStore) -> WKPreferences {
+        if let kept = preferences.object(forKey: dataStore) { return kept }
+        let own = prepared.preferences.copy() as? WKPreferences ?? prepared.preferences
+        preferences.setObject(own, forKey: dataStore)
+        return own
+    }
+
+    /// Weak: a store's preferences go with it.
+    private static let preferences = NSMapTable<WKWebsiteDataStore, WKPreferences>.weakToStrongObjects()
 
     /// A data store's scripts, handlers, style sheets and block lists, one set
     /// shared by all its tabs, as Safari shares one per profile. Popups get
@@ -1170,8 +1186,15 @@ final class Tab: Identifiable {
         // (Browser.webViewWebContentProcessDidTerminate) and loads again when
         // next shown. Never one on screen, or playing sound.
         set(configuration, "_setCPULimit:", 0.5)
+        leaveUserInstalledFontsOutIfAsked(configuration.preferences)
         return configuration
     }()
+
+    /// Fonts installed on the Mac beyond its own are for pages unless the
+    /// run says not (`UserInstalledFonts`).
+    static func leaveUserInstalledFontsOutIfAsked(_ preferences: WKPreferences) {
+        if !UserInstalledFonts.allowed { set(preferences, "_setShouldAllowUserInstalledFonts:", false) }
+    }
 
     /// Calls a setter of WebKit's own (SPI, as Safari uses), if WebKit still has it.
     private static func set(_ object: NSObject, _ setter: String, _ value: Double) {
@@ -1200,12 +1223,13 @@ final class Tab: Identifiable {
     /// Power Mode they keep WebKit's 60: a page that animates draws half as
     /// often. WebKit reads it as the page is made, before its view is: a tab
     /// follows a change of mode once its page is made again (woken, or opened).
-    private static func matchScreenRate(_ preferences: WKPreferences) {
+    private static func matchScreenRate(_ configuration: WKWebViewConfiguration) {
+        let preferences = configuration.preferences
         let setter = NSSelectorFromString("_setEnabled:forFeature:")
         guard let near60, preferences.responds(to: setter) else { return }
         typealias Setter = @convention(c) (AnyObject, Selector, Bool, AnyObject) -> Void
         unsafeBitCast(preferences.method(for: setter), to: Setter.self)(
-            preferences, setter, ProcessInfo.processInfo.isLowPowerModeEnabled, near60)
+            preferences, setter, LowPowerMode.isOn(for: configuration.websiteDataStore), near60)
     }
 
     /// Every page made, while it lives.
@@ -1214,14 +1238,18 @@ final class Tab: Identifiable {
     /// Low Power Mode turned on or off reaches the pages already open too,
     /// not only those made from then on. The frame rate WebKit takes up as
     /// each is next loaded (reloaded, or gone somewhere), rather than when it
-    /// is woken; how a hidden page runs, at once (`reapplyHiddenPolicy`).
-    private static let powerWatch: Void = LowPowerMode.watch(pages) { _ in
-        let open = pages.allObjects
-        for page in open {
-            matchScreenRate(page.configuration.preferences)
-            applyHiddenPolicy(page.configuration.preferences)
+    /// is woken; how a hidden page runs, at once (`reapplyHiddenPolicy`),
+    /// for every page of each data store whose mode changed: the processes
+    /// of the others are left alone.
+    private static let powerWatch: Void = LowPowerMode.watch(pages) {
+        var changed: [WKWebsiteDataStore] = []
+        for page in pages.allObjects {
+            let configuration = page.configuration
+            matchScreenRate(configuration)
+            // A store's pages share its preferences: the first page changes them for all.
+            if applyHiddenPolicy(configuration) { changed.append(configuration.websiteDataStore) }
         }
-        reapplyHiddenPolicy(open)
+        reapplyHiddenPolicy(toPagesOf: changed)
     }
 
     /// How a page out of sight is run: it keeps running, where WebKit and
@@ -1231,19 +1259,23 @@ final class Tab: Identifiable {
     /// runaway page still ended (`prepared`). In Low Power Mode it is
     /// suspended, as before. NERDA_HIDDEN_RUN=0 leaves WebKit's own, to time
     /// switches with and without (`Speedups`).
-    static var hiddenPolicy: WKPreferences.InactiveSchedulingPolicy {
+    static func hiddenPolicy(for store: WKWebsiteDataStore) -> WKPreferences.InactiveSchedulingPolicy {
         guard Speedups.isOn(.hiddenRun) else { return webKitsHiddenPolicy }
-        return LowPowerMode.isOn ? .suspend : .none
+        return LowPowerMode.isOn(for: store) ? .suspend : .none
     }
 
     private static let webKitsHiddenPolicy = WKPreferences().inactiveSchedulingPolicy
 
-    /// Keeps a hidden page running, or suspends it, as `hiddenPolicy` says.
-    /// Each change of a preference is sent to every page's process, so only
-    /// a change is made.
-    private static func applyHiddenPolicy(_ preferences: WKPreferences) {
-        let policy = hiddenPolicy
-        if preferences.inactiveSchedulingPolicy != policy { preferences.inactiveSchedulingPolicy = policy }
+    /// Keeps a hidden page running, or suspends it, as `hiddenPolicy` says,
+    /// in the preferences its data store's pages share. Each change of a
+    /// preference is sent to every page's process, so only a change is
+    /// made; whether one was.
+    @discardableResult
+    private static func applyHiddenPolicy(_ configuration: WKWebViewConfiguration) -> Bool {
+        let policy = hiddenPolicy(for: configuration.websiteDataStore)
+        guard configuration.preferences.inactiveSchedulingPolicy != policy else { return false }
+        configuration.preferences.inactiveSchedulingPolicy = policy
+        return true
     }
 
     /// WebKit reads how a hidden page runs only as a page joins its process
@@ -1254,10 +1286,11 @@ final class Tab: Identifiable {
     /// stops within seconds, or runs again.
     // WebKit SPI: should it go, a page open follows the mode once it is next
     // made (woken) or moves to another site's process.
-    private static func reapplyHiddenPolicy(_ open: [WKWebView]) {
+    private static func reapplyHiddenPolicy(toPagesOf stores: [WKWebsiteDataStore]) {
+        guard !stores.isEmpty else { return }
         let related = NSSelectorFromString("_setRelatedWebView:")
         var reached = Set<pid_t>()
-        for page in open {
+        for page in pages.allObjects where stores.contains(where: { $0 === page.configuration.websiteDataStore }) {
             // No process (ended, or none started yet): one starts with the mode as it is.
             guard let pid = Processes.pid(of: page), reached.insert(pid).inserted else { continue }
             let configuration = page.configuration

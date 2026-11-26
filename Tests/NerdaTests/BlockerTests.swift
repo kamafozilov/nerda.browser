@@ -232,7 +232,7 @@ private final class PageLoads: NSObject, WKNavigationDelegate {
     }
     let loads = PageLoads()
     loads.lists = lists
-    let configuration = WKWebViewConfiguration()
+    let configuration = testConfiguration()
     configuration.websiteDataStore = .nonPersistent()
     lists.forEach(configuration.userContentController.add)
     let page = WKWebView(frame: .zero, configuration: configuration)

@@ -71,6 +71,20 @@ struct AgentClickTests {
         #expect(try await clicks(harness) == ["accept", "buy"])
     }
 
+    /// An action went to another document when its address did, or its
+    /// document's mark was read before and after and differs. A mark not
+    /// read in time, as a page busy on a busy Mac may be, says nothing: the
+    /// answer still lists what changed rather than the whole page.
+    @Test func onlyAMarkReadAndDifferentIsAnotherDocument() {
+        let page = URL(string: "https://shop.example/cart")!
+        #expect(!AgentPage.wentElsewhere(from: page, to: page, mark: "a", then: "a"))
+        #expect(AgentPage.wentElsewhere(from: page, to: page, mark: "a", then: "b"))
+        #expect(!AgentPage.wentElsewhere(from: page, to: URL(string: "https://shop.example/cart#top")!, mark: "a", then: "a"))
+        #expect(AgentPage.wentElsewhere(from: page, to: URL(string: "https://shop.example/checkout")!, mark: nil, then: nil))
+        #expect(!AgentPage.wentElsewhere(from: page, to: page, mark: "a", then: nil))
+        #expect(!AgentPage.wentElsewhere(from: page, to: page, mark: nil, then: "b"))
+    }
+
     /// After the click the page is let settle, even when it changes a while
     /// later, and the answer lists by ref what came, went and changed, and
     /// nothing that stayed as it was.

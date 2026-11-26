@@ -52,6 +52,9 @@ struct BrowserView: View {
     /// The window went full screen for a page, and comes back with it.
     @State private var fullScreenForPage = false
     @AppStorage(TabStyle.key) private var tabStyle = TabStyle.vertical
+    @Environment(\.motionReduced) private var motionReduced
+    /// Reduce Motion: the Mac's, unless the view is given its own.
+    private var reduced: Bool { motionReduced ?? Motion.reduced }
 
     init(browser: Browser, window: NSWindow) {
         self.browser = browser
@@ -96,7 +99,7 @@ struct BrowserView: View {
     /// its shadow goes too. With Reduce Motion it fades in and out where it
     /// is instead.
     private var sidebarSlid: CGFloat {
-        if sidebarShown || Motion.reduced { return 0 }
+        if sidebarShown || reduced { return 0 }
         return floating ? -(sidebarWidth + 32) : margin - sidebarWidth
     }
     /// Where the card's top edge is: under the tabs, when they are across the
@@ -106,7 +109,7 @@ struct BrowserView: View {
     /// page. With Reduce Motion it never slides clear of the page, but fades
     /// in and out where it is, so it wears it whenever the page isn't laid
     /// out beside it.
-    private var sidebarFloats: Bool { floating || (Motion.reduced && !(browser.sidebarOpen && docked)) }
+    private var sidebarFloats: Bool { floating || (reduced && !(browser.sidebarOpen && docked)) }
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -155,7 +158,7 @@ struct BrowserView: View {
                     // coming and going would have the whole window worked out again.
                     .onHover { over in if peeking || overPeek { overPeek = over } }
                     .offset(x: sidebarSlid)
-                    .animation(Motion.fade) { $0.opacity(sidebarShown || !Motion.reduced ? 1 : 0) }
+                    .animation(Motion.fade) { $0.opacity(sidebarShown || !reduced ? 1 : 0) }
                     .allowsHitTesting(sidebarShown)
                     .accessibilityHidden(!sidebarShown)
 
@@ -324,7 +327,7 @@ struct BrowserView: View {
     /// Motion it fades where it is, and keeps it meanwhile.
     private func unpeek() {
         withAnimation(.slide) { peeking = false } completion: {
-            if !peeking, !browser.sidebarOpen, !Motion.reduced { floating = false }
+            if !peeking, !browser.sidebarOpen, !reduced { floating = false }
         }
     }
 

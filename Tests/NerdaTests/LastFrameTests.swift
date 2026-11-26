@@ -16,7 +16,7 @@ struct LastFrameTests {
     /// A browser in a window behind the others, with `a` shown first, then
     /// `b` in front of it: `a`'s last frame kept, ready to come back to.
     private func twoTabs() async throws -> (Browser, NSWindow, Nerda.Tab, Nerda.Tab) {
-        let browser = Browser(dataStore: .nonPersistent())
+        let browser = browserRunningOutOfSight()
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

@@ -14,6 +14,8 @@ enum PageNotices {
         var lines: [String] = []
         /// Dialogs the page waits on now, by hold.
         var holds: [ObjectIdentifier: String] = [:]
+        /// Waits on the page that ran to their deadline while a dialog held it.
+        var waitedOut = 0
     }
 
     private static let boxes = NSMapTable<Tab, Box>.weakToStrongObjects()
@@ -52,6 +54,18 @@ enum PageNotices {
     /// What the tab's page waits on, if a dialog holds it.
     static func held(_ tab: Tab) -> String? {
         boxes.object(forKey: tab)?.holds.values.first
+    }
+
+    /// How many waits on the tab's page ran to their deadline while a
+    /// dialog held it: none should, as a held page runs no script, and an
+    /// action on it answers at once (`AgentPage.unlessHeld`). Tests read it.
+    static func waitsOutlastingADialog(on tab: Tab) -> Int {
+        boxes.object(forKey: tab)?.waitedOut ?? 0
+    }
+
+    /// A wait on the tab's page ran to its deadline: counted when a dialog held it.
+    fileprivate static func ranOut(on tab: Tab) {
+        if held(tab) != nil { box(tab).waitedOut += 1 }
     }
 
     final class DialogHold {
@@ -109,7 +123,7 @@ extension AgentPage {
         }
         let soon = ContinuousClock.now + .seconds(2)
         let before = await unlessHeld(tab, by: soon) { try await read(agentTab) }
-        let document = await unlessHeld(tab, by: soon) { try await documentMark(of: tab) }
+        let document = await documentMark(of: tab, by: soon)
         let address = tab.url
         let tabsBefore = Set(agentTab.agents.tabs.map(ObjectIdentifier.init))
 
@@ -134,8 +148,8 @@ extension AgentPage {
         let after = await unlessHeld(tab, by: .now + .seconds(3)) { try await read(agentTab) } ?? AgentReading()
         let navigated = answeringDialog
             ? !sameDocument(address, tab.url)
-            : await unlessHeld(tab, by: .now + .seconds(1)) { try await documentMark(of: tab) } != document
-                || !sameDocument(address, tab.url)
+            : wentElsewhere(from: address, to: tab.url, mark: document,
+                            then: await documentMark(of: tab, by: .now + .seconds(1)))
         if navigated {
             return await shown(agentTab, after, did: did, notices: notices, text: true)
         }
@@ -208,7 +222,12 @@ extension AgentPage {
             }
             Task {
                 while !race.isOver {
-                    if PageNotices.held(tab) != nil || ContinuousClock.now >= deadline { race.finish(nil) }
+                    if PageNotices.held(tab) != nil {
+                        race.finish(nil)
+                    } else if ContinuousClock.now >= deadline {
+                        PageNotices.ranOut(on: tab)
+                        race.finish(nil)
+                    }
                     try? await Task.sleep(for: .milliseconds(25))
                 }
             }
@@ -230,6 +249,7 @@ extension AgentPage {
     /// Waits until the page has loaded and then gone `quietFor` without a
     /// change in its document, or a dialog holds it, or `end`.
     private static func settle(_ tab: Tab, until end: ContinuousClock.Instant) async {
+        defer { if ContinuousClock.now >= end { PageNotices.ranOut(on: tab) } }
         while ContinuousClock.now < end, PageNotices.held(tab) == nil {
             guard let page = tab.page, !tab.isLoading, !page.isLoading else {
                 try? await Task.sleep(for: .milliseconds(25))
@@ -286,12 +306,26 @@ extension AgentPage {
     }
 
     /// A mark of the main frame's document, the same until another
-    /// document replaces it (a navigation, a reload).
-    private static func documentMark(of tab: Tab) async throws -> String? {
-        try await tab.page?.callAsyncJavaScript(
-            "return globalThis.nerdaDocument ??= Date.now().toString(36) + Math.random().toString(36).slice(2)",
-            contentWorld: world
-        ) as? String
+    /// document replaces it (a navigation, a reload); nil when it couldn't
+    /// be read by `deadline`, or while a dialog holds the page.
+    private static func documentMark(of tab: Tab, by deadline: ContinuousClock.Instant) async -> String? {
+        let read = await unlessHeld(tab, by: deadline) {
+            try await tab.page?.callAsyncJavaScript(
+                "return globalThis.nerdaDocument ??= Date.now().toString(36) + Math.random().toString(36).slice(2)",
+                contentWorld: world
+            ) as? String
+        }
+        return read ?? nil
+    }
+
+    /// Whether an action took the page to another document: its address
+    /// went elsewhere, or its document's mark (`documentMark`), read before
+    /// and after, differs. A mark not read in time, a page busy for a
+    /// moment, tells nothing either way.
+    static func wentElsewhere(from address: URL?, to url: URL?, mark: String?, then: String?) -> Bool {
+        guard sameDocument(address, url) else { return true }
+        guard let mark, let then else { return false }
+        return mark != then
     }
 
     /// Whether two addresses are of one document: the same but for the part

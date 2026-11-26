@@ -243,8 +243,9 @@ nonisolated enum AgentFetch {
     }
 
     /// The answer, as its header lines and the body's text (nil when it
-    /// isn't text), read off the main thread.
-    static func get(_ url: URL, cookies: [HTTPCookie], agent: String, timeout: Duration) async throws
+    /// isn't text), read off the main thread: read on it, byte by byte, a
+    /// long body waited on everything else the main thread had to do.
+    @concurrent static func get(_ url: URL, cookies: [HTTPCookie], agent: String, timeout: Duration) async throws
         -> (header: [String], text: String?) {
         let configuration = URLSessionConfiguration.ephemeral
         let seconds = max(1, Double(timeout.components.seconds))

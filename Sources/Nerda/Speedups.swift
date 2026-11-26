@@ -5,7 +5,7 @@ import Foundation
 /// without it on the same Mac (Recorder.swift). Tests set `overrides`.
 enum Speedups {
     /// Each switch, by the name its variable carries.
-    enum Name: String {
+    enum Name: String, CaseIterable {
         case sparePage = "SPARE_PAGE"
         case hiddenRun = "HIDDEN_RUN"
         case lastFrame = "LAST_FRAME"
@@ -18,6 +18,16 @@ enum Speedups {
     static var overrides: [Name: Bool] = [:]
 
     static func isOn(_ name: Name) -> Bool {
-        overrides[name] ?? (ProcessInfo.processInfo.environment["NERDA_" + name.rawValue] != "0")
+        overrides[name] ?? environment[name] ?? true
     }
+
+    /// The switches the run's environment sets, read once: the environment is copied whole each
+    /// time it is asked for, some 25 µs, and the recorder asks at every
+    /// timing.
+    private static let environment: [Name: Bool] = {
+        let variables = ProcessInfo.processInfo.environment
+        return Dictionary(uniqueKeysWithValues: Name.allCases.compactMap { name in
+            variables["NERDA_" + name.rawValue].map { (name, $0 != "0") }
+        })
+    }()
 }

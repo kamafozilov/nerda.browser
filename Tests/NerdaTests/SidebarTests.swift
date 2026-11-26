@@ -47,13 +47,14 @@ private func withAccessibility(_ body: () async throws -> Void) async rethrows {
     let shown = browser.open(URL(string: "data:text/html,<title>Shown</title>")!)
     let window = window(of: browser)
     defer { window.close() }
+    // Named by its address until its page has loaded.
+    try await waitFor("Shown loaded") { shown.title == "Shown" }
     try await withAccessibility {
         _ = window.contentView!.accessibilityChildren()
         var all: [AnyObject] = []
-        for _ in 0..<50 {
-            try await Task.sleep(for: .milliseconds(50))
+        try await waitFor("The tabs heard by their titles") {
             all = elements(under: window.contentView!)
-            if all.contains(where: { $0.accessibilityLabel?() == "One" }) { break }
+            return ["One", "Shown"].allSatisfy { title in all.contains { $0.accessibilityLabel?() == title } }
         }
         func element(_ label: String) -> AnyObject? { all.first { $0.accessibilityLabel?() == label } }
         func actions(_ label: String) -> [String] { (element(label)?.accessibilityCustomActions?() ?? []).map(\.name) }
@@ -95,23 +96,33 @@ private func withAccessibility(_ body: () async throws -> Void) async rethrows {
     let window = window(of: browser)
     defer { window.close() }
     let a = browser.open(URL(string: "data:text/html,a")!), b = browser.open(URL(string: "data:text/html,b")!)
-    try await Task.sleep(for: .milliseconds(500))
     func pageHasKeyboard(_ tab: Nerda.Tab) -> Bool {
         guard let responder = window.firstResponder as? NSView, let page = tab.page else { return false }
         return responder === page || responder.isDescendant(of: page)
     }
+    // On screen, with the keyboard, as a page that comes on screen takes it.
+    do { try await waitFor("B with the keyboard") { pageHasKeyboard(b) } } catch {
+        Issue.record("""
+            the keyboard on \(String(describing: window.firstResponder)); B selected \(browser.selectedID == b.id), \
+            in the window \(b.page?.window === window), hidden \(String(describing: b.page?.isHiddenOrHasHiddenAncestor)), \
+            command bar \(browser.commandBarOpen)
+            """)
+        throw error
+    }
 
     window.makeFirstResponder(nil)
     browser.select(keepingKeyboard: a.id)
-    for _ in 0..<100 where browser.keepsKeyboard != nil { try await Task.sleep(for: .milliseconds(20)) }
-    try await Task.sleep(for: .milliseconds(100))
+    // Put on screen: what kept the keyboard is used up then (`PageView`).
+    try await waitFor("A on screen") { browser.keepsKeyboard == nil && a.page?.isHiddenOrHasHiddenAncestor == false }
+    // A page given the keyboard is given it on the main queue's next turn
+    // after it comes on screen (`PageView`): once a turn queued after that
+    // has come, it would have it.
+    await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
     #expect(browser.selectedID == a.id)
     #expect(!pageHasKeyboard(a))
-    #expect(browser.keepsKeyboard == nil)
 
     browser.select(b.id)
-    for _ in 0..<50 where !pageHasKeyboard(b) { try await Task.sleep(for: .milliseconds(20)) }
-    #expect(pageHasKeyboard(b))
+    try await waitFor("B with the keyboard again") { pageHasKeyboard(b) }
 }
 
 /// Links dropped on the tabs open in new tabs where they are let go, in

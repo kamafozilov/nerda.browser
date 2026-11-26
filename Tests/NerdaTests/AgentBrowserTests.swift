@@ -172,6 +172,12 @@ struct AgentBrowserTests {
         defer { ownerWindow.close() }
         let mine = owner.open(try await server.url("/mine"))
         try await waitFor { !server.requests(for: "/mine").isEmpty }
+        // On screen, with the keyboard, as the owner left it: a page coming on
+        // screen takes the keyboard a moment later (`PageView`).
+        try await waitFor("The owner's page with the keyboard") {
+            guard let page = mine.page, let responder = ownerWindow.firstResponder as? NSView else { return false }
+            return responder === page || responder.isDescendant(of: page)
+        }
         let tabs = owner.tabs.map(\.id), selected = owner.selectedID
         let windows = NSApp.orderedWindows.filter { $0 is BrowserWindow }
         let key = NSApp.keyWindow, main = NSApp.mainWindow, active = NSApp.isActive

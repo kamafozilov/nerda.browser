@@ -57,9 +57,28 @@ private let notArticles = [
     """,
 ]
 
+/// Blocks every load a page here would make: the article's video frame
+/// would load YouTube's player, and the page wait on it, as long as the
+/// network takes. Compiled once, into a folder of the run's own.
+@MainActor
+private func offline() async throws -> WKContentRuleList {
+    if let offlineRules { return offlineRules }
+    let folder = FileManager.default.temporaryDirectory.appending(path: "nerda-reader-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let store = try #require(WKContentRuleListStore(url: folder))
+    let rules = #"[{"trigger": {"url-filter": ".*"}, "action": {"type": "block"}}]"#
+    let list = try #require(try await store.compileContentRuleList(forIdentifier: "offline", encodedContentRuleList: rules))
+    offlineRules = list
+    return list
+}
+
+@MainActor private var offlineRules: WKContentRuleList?
+
 @MainActor
 private func loaded(_ html: String) async throws -> WKWebView {
-    let page = WKWebView()
+    let configuration = testConfiguration()
+    configuration.userContentController.add(try await offline())
+    let page = WKWebView(frame: .zero, configuration: configuration)
     page.loadHTMLString(html, baseURL: address)
     try await waitFor { !page.isLoading }
     return page

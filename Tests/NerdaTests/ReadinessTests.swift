@@ -259,7 +259,7 @@ struct ReadinessTests {
         let server = try ReadinessServer()
         defer { server.listener.cancel() }
         let frame = LoginFrame()
-        let configuration = WKWebViewConfiguration()
+        let configuration = testConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         Passwords.install(in: configuration.userContentController)
         configuration.userContentController.add(frame, contentWorld: .defaultClient, name: "readinessFrame")
@@ -290,7 +290,7 @@ struct ReadinessTests {
         var options = SiteSettings.Options()
         options.blocksAds = false
         navigation.settings.set(options, for: url)
-        let configuration = WKWebViewConfiguration()
+        let configuration = testConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController.add(rule)
         configuration.userContentController.add(extensionRule)
@@ -456,7 +456,7 @@ struct ReadinessTests {
     @Test func draftsClearOnceThePageNoLongerHoldsThem() async throws {
         let server = try ReadinessServer()
         defer { server.listener.cancel() }
-        let browser = Browser(dataStore: .nonPersistent())
+        let browser = browserRunningOutOfSight()
         defer { browser.closeAll() }
         let tab = browser.open(try await server.url("/chat"))
         try await waitFor { !tab.webView.isLoading && tab.url != nil }

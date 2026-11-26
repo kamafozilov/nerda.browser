@@ -425,7 +425,7 @@ private let somewhere = URL(string: "https://example.com")!
     let page = folder.appending(path: "page.html")
     try #"<video src="tone.wav" loop autoplay></video>"#.write(to: page, atomically: true, encoding: .utf8)
 
-    let browser = Browser()
+    let browser = browserRunningOutOfSight()
     browser.open(page)
     let held = browser.tabs[0].webView
     for _ in 0..<100 where await held.requestMediaPlaybackState() != .playing {
@@ -677,7 +677,7 @@ func framesFromAnotherSiteDownloadOnlyWhenClicked(scheme: String, host: String, 
 @MainActor
 @Test(arguments: [("", true), ("event.stopPropagation()", true), ("event.preventDefault()", false)])
 func aMiddleClickOpensTheLinkBehind(page handler: String, opens: Bool) async throws {
-    let browser = Browser()
+    let browser = browserRunningOutOfSight()
     let tab = Tab()
     browser.add(tab)
     let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 400, height: 300), styleMask: .borderless,
@@ -943,21 +943,21 @@ func iconsAreKeptPerOrigin(url: String, origin: String?) {
 private func found(in browser: Browser, by look: () -> Void) async throws -> Find.Matches? {
     let before = browser.findMatches
     look()
-    for _ in 0..<100 where browser.findMatches == before { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor("The look back") { browser.findMatches != before }
     return browser.findMatches
 }
 
 /// Find counts the matches shown, across the page's tags but not from one
 /// paragraph into the next, goes round past either end, and keeps to case
-/// and whole words when asked.
+/// and whole words when asked. The options are kept in settings of the
+/// test's own: another test run beside this one shares the app's.
 @MainActor
 @Test func findCountsWhatIsShown() async throws {
-    let defaults = UserDefaults.standard
-    defer {
-        defaults.removeObject(forKey: Browser.findMatchCaseKey)
-        defaults.removeObject(forKey: Browser.findWholeWordsKey)
-    }
+    let suite = "dev.nerda.tests.find.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
     let browser = Browser()
+    browser.findOptions = defaults
     let tab = Tab()
     browser.add(tab)
     let page = tab.webView
@@ -1007,7 +1007,11 @@ private func found(in browser: Browser, by look: () -> Void) async throws -> Fin
 /// after; a frame of the page's own site is looked in too.
 @MainActor
 @Test func putAwayFindTakesItsLightsOff() async throws {
+    let suite = "dev.nerda.tests.find.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
     let browser = Browser()
+    browser.findOptions = defaults
     let tab = Tab()
     browser.add(tab)
     let page = tab.webView
@@ -1022,8 +1026,7 @@ private func found(in browser: Browser, by look: () -> Void) async throws -> Fin
     #expect(try await found(in: browser) { browser.find() }?.count == 4)
     #expect(try await lit() == [3, 1])
     browser.hideFindBar()
-    for _ in 0..<100 where try await lit() != [0, 0] { try await Task.sleep(for: .milliseconds(20)) }
-    #expect(try await lit() == [0, 0])
+    try await waitFor("The lights off") { try await lit() == [0, 0] }
 }
 
 /// Pages see nothing of Nerda that Safari doesn't show them: no
@@ -1094,7 +1097,7 @@ private func found(in browser: Browser, by look: () -> Void) async throws -> Fin
         + #"onclick="box.requestFullscreen()">Full screen</button>"#, host: "localhost")
     let url = try await pages.serve("/", #"<iframe allowfullscreen src="\#(frame)" "#
         + #"style="position: fixed; left: 0; top: 0; width: 300px; height: 200px; border: 0"></iframe>"#)
-    let browser = Browser()
+    let browser = browserRunningOutOfSight()
     let tab = Tab()
     browser.add(tab)
     let page = tab.webView
@@ -1436,6 +1439,10 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
 
 // MARK: - Reliability
 
+/// A page of the tests' own, for those that wait for it to load, again and
+/// again: example.com loads as slowly as the network answers.
+private let ownPage = URL(string: "data:text/html,<title>Own</title><p>A page of the test's own</p>")!
+
 /// A page whose process dies is loaded again, and again; the third time
 /// within a minute it stops, and says so, instead of reloading for ever.
 @MainActor
@@ -1443,7 +1450,7 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     let browser = Browser()
     var now: TimeInterval = 1000
     browser.pageEnds = PageEnds(clock: { now })
-    browser.open(somewhere)
+    browser.open(ownPage)
     let tab = browser.tabs[0]
     // Ended once loaded: a page whose process is gone commits nothing more.
     func end() async throws {
@@ -1458,7 +1465,7 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     #expect(tab.failure == nil)
     now += 20
     try await end()
-    #expect(tab.failure?.url.host == "example.com")
+    #expect(tab.failure?.url == ownPage)
     #expect(tab.failure?.message == "The page crashed each time it was opened.")
 
     // A minute after the last, a crash is a one-off again.
@@ -1502,15 +1509,15 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
 @Test(arguments: [true, false])
 func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) async throws {
     let browser = Browser()
-    browser.open(somewhere)
-    browser.open(somewhere)
+    browser.open(ownPage)
+    browser.open(ownPage)
     let tab = browser.tabs[onScreen ? 0 : 1]
     try await waitFor { tab.page?.isLoading == false }
     tab.hasUnsavedWork = true
     browser.webViewWebContentProcessDidTerminate(tab.webView)
-    #expect(tab.failure?.url.host == "example.com")
+    #expect(tab.failure?.url == ownPage)
     try await waitFor { !browser.pageEnds.gathering }
-    #expect(tab.failure?.url.host == "example.com")
+    #expect(tab.failure?.url == ownPage)
     #expect(!tab.isAsleep)
     #expect(!tab.hasUnsavedWork)
 }
@@ -2103,14 +2110,20 @@ func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) async throws {
 
 /// Pages are let past WebKit's 60 frames a second (Tab.matchScreenRate), but
 /// for Low Power Mode. Fails once WebKit takes the switch away or renames it.
+/// The mode is set here, whatever the Mac's, for a store of the test's own.
 @MainActor
 @Test func pagesAreDrawnAtTheScreensRate() throws {
     let flag = try #require(Nerda.Tab.near60)
-    let preferences = Nerda.Tab(url: somewhere).webView.configuration.preferences
-    let get = NSSelectorFromString("_isEnabledForFeature:")
-    typealias Getter = @convention(c) (AnyObject, Selector, AnyObject) -> Bool
-    let near60 = unsafeBitCast(preferences.method(for: get), to: Getter.self)(preferences, get, flag)
-    #expect(near60 == ProcessInfo.processInfo.isLowPowerModeEnabled)
+    let near60 = { (lowPower: Bool) -> Bool in
+        let store = WKWebsiteDataStore.nonPersistent()
+        LowPowerMode.force(lowPower, for: store)
+        let preferences = Nerda.Tab.sparePage(for: store).configuration.preferences
+        let get = NSSelectorFromString("_isEnabledForFeature:")
+        typealias Getter = @convention(c) (AnyObject, Selector, AnyObject) -> Bool
+        return unsafeBitCast(preferences.method(for: get), to: Getter.self)(preferences, get, flag)
+    }
+    #expect(!near60(false))
+    #expect(near60(true))
 }
 
 /// An incognito window's tabs, a page's popups among them, keep their cookies
@@ -2177,7 +2190,7 @@ func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) async throws {
         /frame-ad$subdocument,script
         """))
     let list = try #require(try await store.compileContentRuleList(forIdentifier: "navigation", encodedContentRuleList: encoded))
-    let configuration = WKWebViewConfiguration()
+    let configuration = testConfiguration()
     configuration.websiteDataStore = .nonPersistent()
     let page = WKWebView(frame: .zero, configuration: configuration)
     page.navigationDelegate = navigation
@@ -2600,7 +2613,7 @@ private final class BlockerNavigation: NSObject, WKNavigationDelegate {
 @MainActor
 @Test(arguments: [("http://localhost:5173/", 2), ("https://example.com/", 0)])
 func errorsAreCountedOnThisMacOnly(address: String, counted: Int) async throws {
-    let browser = Browser()
+    let browser = browserRunningOutOfSight()
     let tab = Tab()
     browser.add(tab)
     tab.webView.loadHTMLString("<script>setTimeout(() => { throw new Error('boom') }); Promise.reject(new Error('nope'))</script>",

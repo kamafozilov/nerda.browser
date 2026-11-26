@@ -3,7 +3,9 @@ import Testing
 import WebKit
 @testable import Nerda
 
-private let somewhere = URL(string: "https://example.com")!
+/// A page of the test's own: one off the network would load as slowly as
+/// the network, and each page here is loaded again after it ends.
+private let somewhere = URL(string: "data:text/html,<title>Somewhere</title><p>A page</p>")!
 
 /// Ends the pages of `tabs` in one moment, each once it has loaded (a page
 /// whose process is gone commits nothing more), `reason` as WebKit's private

@@ -41,16 +41,20 @@ private final class HangServer {
 @MainActor
 private final class HungTab {
     let server: HangServer
-    let browser = Browser(dataStore: .nonPersistent())
+    /// Its page loads out of sight, before the window has it.
+    let browser = browserRunningOutOfSight()
     let tab = Nerda.Tab()
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
                           styleMask: [.titled, .resizable], backing: .buffered, defer: false)
     /// Every page process the tab had, ended at the close so no loop outlives the test.
     var pids: Set<pid_t> = []
 
-    init(server: HangServer, after paths: [String] = []) async throws {
+    init(server: HangServer, after paths: [String] = [], askAfter: TimeInterval? = nil) async throws {
         self.server = server
-        HungPages.patience = 0.5
+        if let askAfter { browser.hangWaits.askAfter = askAfter }
+        // Quick to give up on a page, this browser only: other tests' pages,
+        // slow to answer on a busy Mac, keep Nerda's patience.
+        browser.hangWaits.patience = 0.5
         window.isReleasedWhenClosed = false
         browser.add(tab)
         browser.select(tab.id)
@@ -74,7 +78,6 @@ private final class HungTab {
     }
 
     func close() {
-        HungPages.patience = 2
         if let pid = tab.pid { pids.insert(pid) }
         for pid in pids { kill(pid, SIGKILL) }
         window.contentView = nil
@@ -110,9 +113,7 @@ struct HungPagesTests {
     }
 
     @Test func theOwnerReachingForAHungPageIsAskedToWaitOrReload() async throws {
-        HungPages.askAfter = 0.5
-        defer { HungPages.askAfter = 12 }
-        let hung = try await HungTab(server: HangServer())
+        let hung = try await HungTab(server: HangServer(), askAfter: 0.5)
         defer { hung.close() }
         #expect(!hung.tab.asksAboutHang)
         try await waitFor(timeout: .seconds(15)) { hung.tab.asksAboutHang }
@@ -239,7 +240,10 @@ struct HungPagesTests {
 
     /// A tab on screen and one out of sight at `path`, its page loaded.
     private func hiddenTab(_ path: String, on server: HangServer) async throws -> (Browser, Nerda.Tab) {
-        let browser = Browser(dataStore: .nonPersistent())
+        // A hidden page spins, or works, as it would with the Mac's Low
+        // Power Mode off: on, it would be suspended.
+        let browser = browserRunningOutOfSight()
+        browser.hangWaits.patience = 0.5
         let shown = Nerda.Tab()
         browser.add(shown)
         shown.go(to: try await server.url("/a"))
@@ -252,8 +256,6 @@ struct HungPagesTests {
     }
 
     @Test func aHiddenPageSpinningInALoopIsEndedAndPutToSleep() async throws {
-        HungPages.patience = 0.5
-        defer { HungPages.patience = 2 }
         let (browser, tab) = try await hiddenTab("/loop", on: HangServer())
         let old = try #require(tab.pid)
         defer { kill(old, SIGKILL) }
@@ -268,8 +270,6 @@ struct HungPagesTests {
     }
 
     @Test func aHiddenPageWorkingOnPurposeIsLeftRunning() async throws {
-        HungPages.patience = 0.5
-        defer { HungPages.patience = 2 }
         let (browser, tab) = try await hiddenTab("/a", on: HangServer())
         let pid = try #require(tab.pid)
         defer { kill(pid, SIGKILL) }
@@ -288,11 +288,7 @@ struct HungPagesTests {
 
     @Test func turningHangHandlingOffLeavesAHungPageAsWebKitDoes() async throws {
         Speedups.overrides[.hangHandling] = false
-        HungPages.patience = 0.5
-        defer {
-            Speedups.overrides = [:]
-            HungPages.patience = 2
-        }
+        defer { Speedups.overrides[.hangHandling] = nil }
         let hung = try await HungTab(server: HangServer())
         defer { hung.close() }
         let pid = try #require(hung.tab.pid)

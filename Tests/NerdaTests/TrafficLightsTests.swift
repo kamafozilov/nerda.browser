@@ -51,21 +51,25 @@ import Testing
 func theAddressBarRunsUnderTheWindowButtons(incognito: Bool) throws {
     let browser = incognito ? Browser(dataStore: .nonPersistent()) : Browser()
     browser.sidebarOpen = false
-    // Off screen, drawn into a picture only.
+    // Off screen, drawn into a picture only, and only the row looked at: the
+    // whole window, as big as the screen, holds the main thread up for a
+    // second, and every other test with it.
     let window = BrowserWindow(browser: browser)
     defer { window.close() }
     let content = try #require(window.contentView)
     content.layoutSubtreeIfNeeded()
-    let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
-    content.cacheDisplay(in: content.bounds, to: bitmap)
-    let scale = CGFloat(bitmap.pixelsWide) / content.bounds.width
-    // In points from the top left, as the window is laid out.
-    let colour = { (x: CGFloat, y: CGFloat) in bitmap.colorAt(x: Int(x * scale), y: Int(y * scale)) }
     // Just under the bar's top edge, clear of its controls: between the
-    // window's buttons, and halfway across the bar.
+    // window's buttons, and halfway across the bar. In points from the top
+    // left, as the window is laid out.
     let y = BrowserView.margin + 2
-    let underButtons = try #require(colour(BrowserView.trafficLightsWidth / 2, y))
-    let bar = try #require(colour(content.bounds.width / 2, y))
+    let row = CGRect(x: 0, y: y, width: content.bounds.width, height: 1)
+    let drawn = content.isFlipped ? row : CGRect(x: 0, y: content.bounds.height - row.maxY, width: row.width, height: 1)
+    let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: drawn))
+    content.cacheDisplay(in: drawn, to: bitmap)
+    let scale = CGFloat(bitmap.pixelsWide) / row.width
+    let colour = { (x: CGFloat) in bitmap.colorAt(x: Int(x * scale), y: 0) }
+    let underButtons = try #require(colour(BrowserView.trafficLightsWidth / 2))
+    let bar = try #require(colour(content.bounds.width / 2))
     #expect(underButtons == bar, "\(underButtons) under the buttons, \(bar) on the bar")
 }
 
@@ -83,17 +87,20 @@ func theAddressBarRunsUnderTheWindowButtons(incognito: Bool) throws {
 
 /// Opened with nothing to type into (a settings page), the window keeps the
 /// keyboard to itself rather than ring its first button, as though Tab had
-/// been pressed; Tab then goes on into the controls.
+/// been pressed; Tab then goes on into the controls. With Keyboard
+/// navigation on, as only then does Tab go to buttons, whatever this Mac's.
 @MainActor
 @Test func aWindowDoesntPutTheKeyboardOnItsFirstButton() throws {
-    // Off screen: a window ordered in would take part in other tests' focus.
-    let window = BrowserWindow(browser: Browser(dataStore: .nonPersistent()))
-    defer { window.close() }
-    let rest = try #require(window.initialFirstResponder as? KeyboardRest)
-    #expect(!rest.canBecomeKeyView)
-    #expect(window.makeFirstResponder(rest))
-    window.selectNextKeyView(nil)
-    #expect(window.firstResponder !== rest)
+    try withKeyboardNavigation {
+        // Off screen: a window ordered in would take part in other tests' focus.
+        let window = BrowserWindow(browser: Browser(dataStore: .nonPersistent()))
+        defer { window.close() }
+        let rest = try #require(window.initialFirstResponder as? KeyboardRest)
+        #expect(!rest.canBecomeKeyView)
+        #expect(window.makeFirstResponder(rest))
+        window.selectNextKeyView(nil)
+        #expect(window.firstResponder !== rest)
+    }
 }
 
 /// Holds an animation at one point of its way for a few seconds, the slide
@@ -121,24 +128,30 @@ func theCardHasOneEdgeAsTheSidebarSlides(way: (coming: Bool, incognito: Bool), f
     let coming = way.coming
     let browser = way.incognito ? Browser(dataStore: .nonPersistent()) : Browser()
     browser.sidebarOpen = !coming
+    // The sidebar's width in settings of the test's own, not the run's
+    // (shared with the other tests and another run beside this one).
+    let suite = "dev.nerda.tests.cardEdge.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let sidebar = Sidebar.defaultWidth + 30
+    defaults.set(sidebar, forKey: "sidebarWidth")
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 300),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
     window.titlebarAppearsTransparent = true
+    // With Reduce Motion off, whatever this Mac's: with it on, the sidebar
+    // fades where it is rather than slide with the card.
     let content = NSHostingView(rootView: BrowserView(browser: browser, window: window)
-        .environment(\.incognito, browser.isPrivate))
+        .environment(\.incognito, browser.isPrivate)
+        .environment(\.motionReduced, false)
+        .defaultAppStorage(defaults))
     window.contentView = content
     defer { window.close() }
-    content.layoutSubtreeIfNeeded()
-    try await Task.sleep(for: .milliseconds(200))
-
-    withAnimation(Animation(Held(fraction: fraction))) { browser.sidebarOpen = coming }
 
     // Where the card's left edge is at this point of the slide.
     let margin = BrowserView.margin
-    let stored = UserDefaults.standard.double(forKey: "sidebarWidth")
-    let sidebar = stored > 0 ? stored : Sidebar.defaultWidth
+    let start = coming ? margin : sidebar
     let edge = coming ? margin + (sidebar - margin) * fraction : sidebar + (margin - sidebar) * fraction
 
     // A line along the bar's row, under its buttons and above its hairline,
@@ -154,7 +167,7 @@ func theCardHasOneEdgeAsTheSidebarSlides(way: (coming: Bool, incognito: Bool), f
     /// What is wrong along the line as it is drawn now: none, when it is
     /// glass up to the edge and the bar from it on. A point or two either
     /// side of the edge is its hairline and the rounding of the pixels.
-    let look = { () throws -> [String] in
+    let look = { (edge: CGFloat) throws -> [String] in
         content.layoutSubtreeIfNeeded()
         let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: drawn))
         content.cacheDisplay(in: drawn, to: bitmap)
@@ -172,12 +185,21 @@ func theCardHasOneEdgeAsTheSidebarSlides(way: (coming: Bool, incognito: Bool), f
         }
         return wrong
     }
+    // Drawn as it starts, the card's edge where the sidebar leaves it.
+    var before: [String] = []
+    try await waitFor("drawn as it starts, with the card's edge at \(start): \(before.prefix(3))") {
+        before = try look(start)
+        return before.isEmpty
+    }
+
+    withAnimation(Animation(Held(fraction: fraction))) { browser.sidebarOpen = coming }
+
     // Looked at until the slide is drawn where it is held: with the other
     // tests running, that takes the window a moment longer at times.
-    var wrong = try look()
+    var wrong = try look(edge)
     for _ in 0..<40 where !wrong.isEmpty {
         try await Task.sleep(for: .milliseconds(50))
-        wrong = try look()
+        wrong = try look(edge)
     }
     #expect(wrong.isEmpty, "with the card's edge at \(edge): \(wrong.count) points, e.g. \(wrong.prefix(3))")
 }

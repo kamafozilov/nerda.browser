@@ -11,6 +11,8 @@ private func withSpare(_ body: (WKWebsiteDataStore, Browser) async throws -> Voi
     let id = UUID()
     var browser: Browser? = Browser(dataStore: WKWebsiteDataStore(forIdentifier: id))
     let store = browser!.dataStore
+    // Off, whatever the Mac's: in Low Power Mode no spare is kept.
+    LowPowerMode.force(false, for: store)
     SparePages.keep(for: store, in: 0)
     do {
         // Running already: its process started before it has anything to load.
@@ -28,7 +30,8 @@ private func withSpare(_ body: (WKWebsiteDataStore, Browser) async throws -> Voi
     try? await WKWebsiteDataStore.remove(forIdentifier: id)
 }
 
-/// One at a time: Low Power Mode, and the spares it lets go, are every store's.
+/// One at a time, each with a store of its own and Low Power Mode set for
+/// that store only (`LowPowerMode.force`), so no other test's spare goes.
 @Suite(.serialized) @MainActor
 struct SparePageTests {
     /// A link opened in a new tab is loaded in the spare page, already running,
@@ -79,14 +82,13 @@ struct SparePageTests {
     /// the mode comes on, none is made while it is, and one comes back after.
     @Test func lowPowerModeKeepsNoSpare() async throws {
         try await withSpare { store, browser in
-            defer { LowPowerMode.forced = nil; LowPowerMode.changed() }
-            LowPowerMode.forced = true
+            LowPowerMode.force(true, for: store)
             LowPowerMode.changed()
             #expect(SparePages.page(for: store) == nil)
             SparePages.keep(for: store, in: 0)
             try await Task.sleep(for: .milliseconds(300))
             #expect(SparePages.page(for: store) == nil)
-            LowPowerMode.forced = false
+            LowPowerMode.force(false, for: store)
             LowPowerMode.changed()
             try await waitFor("A spare again", timeout: .seconds(10)) { SparePages.page(for: store) != nil }
         }
@@ -131,20 +133,32 @@ struct SparePageTests {
     @Test func noSpareIsMadeDuringADrag() async throws {
         try await withSpare { store, browser in
             _ = browser.open(URL(string: "about:blank")!)
-            drag(for: SparePages.renewal + 1)
-            #expect(SparePages.page(for: store) == nil)
+            let madeMeanwhile = await drag(for: SparePages.renewal + 1) { SparePages.page(for: store) != nil }
+            #expect(!madeMeanwhile)
             try await waitFor("A spare after the drag", timeout: .seconds(10)) { SparePages.page(for: store) != nil }
         }
     }
 }
 
 /// A drag lasting `seconds`: the run loop turning in event tracking only,
-/// as AppKit has it while the mouse is held.
+/// as AppKit has it while the mouse is held, and `then` as it ends, before
+/// the loop turns in its default mode again. Run from the run loop, as
+/// AppKit runs one from an event, rather than from this test's turn of the
+/// main queue: the queue then goes on in event tracking, as it does in a
+/// real drag, and the other tests on the main thread with it.
 @MainActor
-private func drag(for seconds: TimeInterval) {
-    let held = Timer(timeInterval: 0.05, repeats: true) { _ in }
-    RunLoop.main.add(held, forMode: .eventTracking)
-    let end = Date.now.addingTimeInterval(seconds)
-    while Date.now < end { RunLoop.main.run(mode: .eventTracking, before: end) }
-    held.invalidate()
+private func drag<T: Sendable>(for seconds: TimeInterval, then: @escaping @MainActor () -> T) async -> T {
+    await withCheckedContinuation { (done: CheckedContinuation<T, Never>) in
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue) {
+            MainActor.assumeIsolated {
+                let held = Timer(timeInterval: 0.05, repeats: true) { _ in }
+                RunLoop.main.add(held, forMode: .eventTracking)
+                let end = Date.now.addingTimeInterval(seconds)
+                while Date.now < end { RunLoop.main.run(mode: .eventTracking, before: end) }
+                held.invalidate()
+                done.resume(returning: then())
+            }
+        }
+        CFRunLoopWakeUp(CFRunLoopGetMain())
+    }
 }

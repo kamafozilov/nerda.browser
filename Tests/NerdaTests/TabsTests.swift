@@ -10,12 +10,6 @@ private func temporaryFolder() throws -> URL {
     return folder
 }
 
-/// Waits up to two seconds for `done`.
-@MainActor
-private func until(_ done: () -> Bool) async throws {
-    for _ in 0..<100 where !done() { try await Task.sleep(for: .milliseconds(20)) }
-}
-
 private func saved(_ host: String, pinned: Bool = false) -> Session.Tab {
     Session.Tab(url: URL(string: "https://\(host)/")!, title: host, state: nil, zoom: 1,
                 pinned: pinned ? true : nil, home: nil)
@@ -155,7 +149,7 @@ private func saved(_ host: String, pinned: Bool = false) -> Session.Tab {
 
     let tab = Nerda.Tab(url: URL(string: "about:blank")!)
     tab.sleep(keeping: image)
-    try await until { tab.look != nil }
+    try await waitFor { tab.look != nil }
     #expect(tab.look.flatMap { $0.cgImage(forProposedRect: nil, context: nil, hints: nil)?.width } == pixels.width)
     _ = tab.webView
     #expect(tab.look == nil)
@@ -165,11 +159,11 @@ private func saved(_ host: String, pinned: Bool = false) -> Session.Tab {
 /// again; what was let go of first doesn't.
 @MainActor
 @Test func anElementMovedInThePageKeepsTheKeyboard() async throws {
-    let configuration = WKWebViewConfiguration()
+    let configuration = testConfiguration()
     configuration.userContentController.addUserScript(Nerda.Tab.keepFocus)
     let page = WKWebView(frame: NSRect(x: 0, y: 0, width: 400, height: 300), configuration: configuration)
     page.loadHTMLString("<input id=field><div id=elsewhere></div>", baseURL: nil)
-    try await until { !page.isLoading && page.url != nil }
+    try await waitFor { !page.isLoading && page.url != nil }
     try await Task.sleep(for: .milliseconds(100))
 
     let move = """
@@ -191,17 +185,17 @@ private func saved(_ host: String, pinned: Bool = false) -> Session.Tab {
 /// screen, and is answered then, not before.
 @MainActor
 @Test func aHiddenTabsQuestionWaitsForItsTab() async throws {
-    let browser = Browser()
+    let browser = browserRunningOutOfSight()
     browser.open(URL(string: "about:blank")!)
     let asking = browser.open(URL(string: "data:text/html,<title>waiting</title>")!, inBackground: true)
-    try await until { asking.title == "waiting" }
+    try await waitFor { asking.title == "waiting" }
     _ = try await asking.webView.evaluateJavaScript("setTimeout(() => { confirm('Leave?'); document.title = 'answered'; })")
     try await Task.sleep(for: .milliseconds(300))
     #expect(asking.title == "waiting")
 
     // With no window to show it in, the question is let go once its tab is on screen.
     browser.select(asking.id)
-    try await until { asking.title == "answered" }
+    try await waitFor { asking.title == "answered" }
     #expect(asking.title == "answered")
 }
 
@@ -222,7 +216,7 @@ private func saved(_ host: String, pinned: Bool = false) -> Session.Tab {
     let tab = Nerda.Tab(url: file)
     func sharedRan() async throws -> Bool {
         let page = tab.webView
-        try await until { !page.isLoading && page.url == file }
+        try await waitFor { !page.isLoading && page.url == file }
         return try await page.callAsyncJavaScript("return window.shared === true", contentWorld: .page) as? Bool == true
     }
     #expect(try await sharedRan())
@@ -245,7 +239,7 @@ private final class LinkOpener: NSObject {
 @MainActor
 @Test func openLinkInNewTabStaysBehindUnlessOptionIsHeld() throws {
     _ = NSApplication.shared
-    let page = SwipingWebView(frame: .zero, configuration: WKWebViewConfiguration())
+    let page = SwipingWebView(frame: .zero, configuration: testConfiguration())
     let opener = LinkOpener()
     let menu = NSMenu()
     let item = NSMenuItem(title: "Open Link in New Window", action: #selector(LinkOpener.open(_:)), keyEquivalent: "")
@@ -299,7 +293,7 @@ private final class UnclickedAction: WKNavigationAction {
     let page = try #require(tab.webView as? SwipingWebView)
     let link = URL(string: "https://example.com/next")!
     func open() -> WKWebView? {
-        browser.webView(page, createWebViewWith: WKWebViewConfiguration(), for: UnclickedAction(link),
+        browser.webView(page, createWebViewWith: testConfiguration(), for: UnclickedAction(link),
                         windowFeatures: WKWindowFeatures())
     }
     #expect(open() == nil)
@@ -345,7 +339,10 @@ private final class UnclickedAction: WKNavigationAction {
     browser.select(waiting.id)
     // On screen, PageView asks for the page, which wakes it to its address.
     let page = waiting.webView
-    try await until { waiting.title == "Arrived" }
+    do { try await waitFor { waiting.title == "Arrived" } } catch {
+        Issue.record("title \(waiting.title), page at \(String(describing: page.url)), loading \(page.isLoading), the same page \(waiting.page === page)")
+        throw error
+    }
     #expect(page.url == file)
     #expect(site.page == nil)
 }

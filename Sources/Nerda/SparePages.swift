@@ -80,12 +80,12 @@ enum SparePages {
     }
 
     private static let watcher = NSObject()
-    private static let watchingPower: Void = LowPowerMode.watch(watcher) { powerChanged($0) }
+    private static let watchingPower: Void = LowPowerMode.watch(watcher) { powerChanged() }
 
     /// Low Power Mode on, the spares go; off, they come back.
-    private static func powerChanged(_ on: Bool) {
+    private static func powerChanged() {
         for spare in kept {
-            if on {
+            if LowPowerMode.isOn(for: spare.store) {
                 letGo(spare)
             } else if spare.page == nil {
                 renew(spare, in: renewal)
@@ -101,7 +101,7 @@ enum SparePages {
             MainActor.assumeIsolated {
                 guard let spare else { return }
                 spare.timer = nil
-                guard spare.page == nil, !spare.held, !LowPowerMode.isOn, kept.contains(where: { $0 === spare }) else { return }
+                guard spare.page == nil, !spare.held, !LowPowerMode.isOn(for: spare.store), kept.contains(where: { $0 === spare }) else { return }
                 spare.page = Tab.sparePage(for: spare.store)
             }
         }

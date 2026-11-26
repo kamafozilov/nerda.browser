@@ -7,7 +7,7 @@ import WebKit
 /// look through its boxes; the first edit, the page's own or Nerda's, and
 /// they do, as before.
 @MainActor @Test func clicksLookThroughBoxesOnlyOnceSomethingIsFilledIn() async throws {
-    let configuration = WKWebViewConfiguration()
+    let configuration = testConfiguration()
     configuration.websiteDataStore = .nonPersistent()
     Passwords.install(in: configuration.userContentController)
     let page = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)

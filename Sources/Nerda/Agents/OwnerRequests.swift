@@ -51,6 +51,10 @@ final class OwnerRequest: Identifiable {
     /// A sign-in Handoff's site (Site.of), which the tab is to be back on.
     let site: String?
     fileprivate(set) var answer: Answer?
+    /// How many of its agent's requests asked for it: the first, and one
+    /// more each time an agent's wait for it ended unanswered and it asked
+    /// again.
+    fileprivate(set) var asked = 1
 
     fileprivate init(session: AgentSession, tab: AgentTab?, kind: Kind, text: String, canSkip: Bool, site: String?) {
         self.session = session
@@ -137,7 +141,7 @@ final class OwnerRequests {
     /// one, the owner told of it.
     func handoff(_ step: OwnerRequest.Step, _ reason: String, optional: Bool, site: String?,
                  on tab: AgentTab, for session: AgentSession) -> OwnerRequest {
-        if let same = (waiting + untold).first(where: { $0.isHandoff && $0.tab?.ref == tab.ref }) { return same }
+        if let same = asked(again: { $0.isHandoff && $0.tab?.ref == tab.ref }) { return same }
         let host = tab.tab.url?.host()
         let site = step == .signIn ? (site.flatMap(Self.site) ?? host.map(Site.of)) : nil
         return begin(OwnerRequest(session: session, tab: tab, kind: .handoff(step), text: reason,
@@ -146,11 +150,19 @@ final class OwnerRequests {
 
     /// The same question, open or answered and not yet told; else asked.
     func ask(_ question: String, choices: [String], on tab: AgentTab?, for session: AgentSession) -> OwnerRequest {
-        if let same = (waiting + untold).first(where: {
+        if let same = asked(again: {
             $0.session === session && $0.text == question && $0.kind == .question(choices: choices)
         }) { return same }
         return begin(OwnerRequest(session: session, tab: tab, kind: .question(choices: choices), text: question,
                                   canSkip: false, site: nil))
+    }
+
+    /// The request open, or answered and not yet told, that `matches`,
+    /// counted as asked once more.
+    private func asked(again matches: (OwnerRequest) -> Bool) -> OwnerRequest? {
+        guard let same = (waiting + untold).first(where: matches) else { return nil }
+        same.asked += 1
+        return same
     }
 
     /// A page's dialog its agent left unanswered, put to the owner: always
