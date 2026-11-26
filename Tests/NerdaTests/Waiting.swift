@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import Nerda
 
@@ -11,44 +12,63 @@ import Testing
 @MainActor
 func waitFor(_ comment: Comment = "Timed out waiting", timeout: Duration = .seconds(6),
              sourceLocation: SourceLocation = #_sourceLocation, _ condition: () async throws -> Bool) async throws {
-    let clock = ContinuousClock()
-    var budget = WaitBudget(timeout: timeout)
-    while true {
-        let looked = clock.now
-        if try await condition() { return }
-        let slept = clock.now
-        guard !budget.isOver else { break }
-        try await Task.sleep(for: WaitBudget.look)
-        let excused = budget.excused
-        budget.spend(looking: slept - looked, sleeping: clock.now - slept)
-        if budget.excused > excused {
-            print("waitFor at \(sourceLocation): the main thread stalled, \(budget.excused - excused) not counted")
-        }
+    let budget = WaitBudget(timeout: timeout)
+    let start = ContinuousClock.now
+    var stalled = Duration.zero
+    func isOver() -> Bool {
+        stalled = MainStalls.during(start, ContinuousClock.now)
+        return budget.isOver(after: ContinuousClock.now - start, stalled: stalled)
     }
-    try #require(try await condition(), "\(comment.rawValue) (\(budget.excused) of main thread stalls not counted)", sourceLocation: sourceLocation)
+    while try await !condition() {
+        // A stall that just ended is noted at its loop's next step: one more look after that.
+        if isOver() {
+            try await Task.sleep(for: .milliseconds(20))
+            if isOver() { break }
+        }
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    let letOff = budget.letOff(stalled)
+    if letOff > .zero { print("waitFor at \(sourceLocation): the main thread stalled, \(letOff) not counted") }
+    try #require(try await condition(), "\(comment.rawValue) (\(letOff) of main thread stalls not counted)", sourceLocation: sourceLocation)
 }
 
-/// How much of a wait's limit its steps have used: the time spent looking
-/// and the time asleep between looks, but for a look that came back a stall
-/// late (`Watchdog.threshold`, a second or more): only its own 20 ms count,
-/// until as much has been let off as the limit itself.
+/// A wait's limit: the time it took, less the main thread's stalls
+/// meanwhile, up to as much as the limit itself, so a wait that never comes
+/// true still ends.
 struct WaitBudget {
-    static let look = Duration.milliseconds(20)
-    static let stall = Duration.seconds(Watchdog.threshold)
-
     let timeout: Duration
-    private(set) var spent = Duration.zero
-    private(set) var excused = Duration.zero
 
-    init(timeout: Duration) { self.timeout = timeout }
+    func letOff(_ stalled: Duration) -> Duration { min(stalled, timeout) }
 
-    var isOver: Bool { spent >= timeout }
+    func isOver(after elapsed: Duration, stalled: Duration) -> Bool {
+        elapsed - letOff(stalled) >= timeout
+    }
+}
 
-    mutating func spend(looking: Duration, sleeping: Duration) {
-        spent += looking
-        let late = sleeping - Self.look
-        let letOff = late >= Self.stall ? min(late, timeout - excused) : .zero
-        excused += letOff
-        spent += sleeping - letOff
+/// The main thread's stalls in this test run, each a second or more
+/// without a step of its loop (`Watchdog.threshold`), as a watchdog of the
+/// tests' own sees them, writing to a file of its own.
+@MainActor
+enum MainStalls {
+    private static var stalls: [(from: ContinuousClock.Instant, to: ContinuousClock.Instant)] = []
+
+    private static let watchdog: Watchdog = {
+        let file = FileManager.default.temporaryDirectory.appending(path: "stalls-tests-\(ProcessInfo.processInfo.processIdentifier).log")
+        let watchdog = Watchdog(file: file, recorder: Recorder())
+        watchdog.start { seconds in
+            guard seconds >= Watchdog.threshold else { return }
+            let now = ContinuousClock.now
+            MainActor.assumeIsolated { stalls.append((now - .seconds(seconds), now)) }
+        }
+        return watchdog
+    }()
+
+    /// How long the main thread stalled between `start` and `end`.
+    static func during(_ start: ContinuousClock.Instant, _ end: ContinuousClock.Instant) -> Duration {
+        _ = watchdog
+        return stalls.reduce(.zero) { total, stall in
+            let from = max(stall.from, start), to = min(stall.to, end)
+            return to > from ? total + (to - from) : total
+        }
     }
 }

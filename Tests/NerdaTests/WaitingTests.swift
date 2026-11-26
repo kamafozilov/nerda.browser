@@ -1,40 +1,23 @@
 import Testing
 @testable import Nerda
 
-/// What a wait (`waitFor`) counts against its limit: everything, but a
-/// look that came back a stall late, which it lets off up to its limit
-/// once more. Fed the lengths of a wait's steps, no time passes.
+/// What a wait (`waitFor`) counts against its limit: the time it took,
+/// less the main thread's stalls meanwhile, up to the limit once more.
 struct WaitingTests {
+    private let budget = WaitBudget(timeout: .seconds(6))
+
     @Test func aStallOfTheMainThreadIsLetOff() {
-        var budget = WaitBudget(timeout: .seconds(6))
-        budget.spend(looking: .zero, sleeping: .milliseconds(5020))
-        #expect(budget.excused == .seconds(5))
-        #expect(budget.spent == .milliseconds(20))
-        #expect(!budget.isOver)
+        #expect(!budget.isOver(after: .seconds(10), stalled: .seconds(5)))
+        #expect(budget.isOver(after: .seconds(11), stalled: .seconds(5)))
     }
 
-    @Test func aBusyMainThreadIsCounted() {
-        var budget = WaitBudget(timeout: .seconds(6))
-        budget.spend(looking: .zero, sleeping: .milliseconds(900))
-        #expect(budget.excused == .zero)
-        #expect(budget.spent == .milliseconds(900))
-    }
-
-    @Test func theConditionsOwnTimeIsCounted() {
-        var budget = WaitBudget(timeout: .seconds(6))
-        budget.spend(looking: .seconds(2), sleeping: .milliseconds(20))
-        #expect(budget.spent == .milliseconds(2020))
+    @Test func aWaitWithoutAStallTakesItsLimit() {
+        #expect(!budget.isOver(after: .milliseconds(5990), stalled: .zero))
+        #expect(budget.isOver(after: .seconds(6), stalled: .zero))
     }
 
     @Test func noMoreThanTheLimitIsLetOff() {
-        var budget = WaitBudget(timeout: .seconds(2))
-        budget.spend(looking: .zero, sleeping: .seconds(5))
-        #expect(budget.excused == .seconds(2))
-        #expect(budget.isOver)
-        budget = WaitBudget(timeout: .seconds(2))
-        budget.spend(looking: .zero, sleeping: .milliseconds(1520))
-        budget.spend(looking: .zero, sleeping: .milliseconds(1520))
-        #expect(budget.excused == .seconds(2))
-        #expect(budget.spent == .milliseconds(1040))
+        #expect(budget.letOff(.seconds(20)) == .seconds(6))
+        #expect(budget.isOver(after: .seconds(12), stalled: .seconds(20)))
     }
 }
