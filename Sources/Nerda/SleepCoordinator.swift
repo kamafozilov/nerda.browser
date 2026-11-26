@@ -46,13 +46,13 @@ final class SleepCoordinator {
 
     /// The minute's check: tabs unseen past the setting sleep, unless gone
     /// to more than `Browser.revisited` times, and ones taking more than
-    /// `Browser.heavy` after `Browser.heavyAfter`, pinned or not.
+    /// `Browser.heavy` after `Browser.heavyAfter`. Never pinned ones.
     func check() {
         let after = TabSleep.current.interval
         let sparing = Speedups.isOn(.pressurePolicy)
         for browser in browsers.allObjects {
             if let after { browser.sleepIdleTabs(unseenFor: after, sparingRevisited: sparing) }
-            browser.sleepIdleTabs(unseenFor: Browser.heavyAfter, pinsToo: true, over: Browser.heavy)
+            browser.sleepIdleTabs(unseenFor: Browser.heavyAfter, over: Browser.heavy)
         }
     }
 
@@ -112,11 +112,11 @@ final class SleepCoordinator {
     /// Whether memory pressure may put `tab` to sleep. Never the tab on
     /// screen, the last five used in its window (what you go back and forth
     /// between), one seen in the last ten minutes, one heard in the last
-    /// minute, one with changes not sent, or an Agent tab its agent is at
-    /// work in. Pinned tabs no differently.
+    /// minute, one with changes not sent, an Agent tab its agent is at work
+    /// in, or a pinned tab: being always ready is what it is for.
     private func mayRelieve(_ tab: Tab, in browser: Browser) -> Bool {
         let now = Date.now
-        return tab.id != browser.selectedID && !tab.isAsleep && !tab.hasUnsavedWork && !tab.playsAudio && !tab.isKeptAwake
+        return tab.id != browser.selectedID && !tab.isPinned && !tab.isAsleep && !tab.hasUnsavedWork && !tab.playsAudio && !tab.isKeptAwake
             && now.timeIntervalSince(tab.lastSeen) >= Self.seenGrace
             && tab.lastHeard.map { now.timeIntervalSince($0) >= Self.heardGrace } ?? true
             && !browser.recent.lazy.filter { $0.id != browser.selectedID }.suffix(Self.keepRecent).contains { $0 === tab }
@@ -147,13 +147,13 @@ final class SleepCoordinator {
     }
 
     /// The policy before spec #118 (`NERDA_PRESSURE_POLICY=0`): when the Mac
-    /// runs short of memory, every tab out of sight sleeps at once; when it
-    /// runs out, as in Safari, pinned ones too.
+    /// runs short of memory, every tab out of sight sleeps at once, but
+    /// pinned ones.
     private func sleepAll(_ level: MemoryPressure) {
         guard level != .normal else { return }
         for browser in browsers.allObjects {
             // No picture for the hover card: it takes memory there is none of.
-            browser.sleepIdleTabs(unseenFor: 0, pinsToo: level == .critical, picturing: false)
+            browser.sleepIdleTabs(unseenFor: 0, picturing: false)
         }
     }
 }

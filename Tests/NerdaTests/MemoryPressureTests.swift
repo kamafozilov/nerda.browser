@@ -88,7 +88,7 @@ private func weigh(_ tab: Nerda.Tab, megabytes: Int) async throws {
 
 /// Pressure never takes the tab on screen, the last five tabs used, one seen
 /// in the last ten minutes, one heard in the last minute or one with
-/// changes not sent. Pinned tabs have the same protections and no more.
+/// changes not sent, nor a pinned tab.
 @MainActor
 @Test func criticalPressureLeavesProtectedTabsAwake() async throws {
     let (browser, hidden) = try await browser(hidden: 11)
@@ -106,7 +106,7 @@ private func weigh(_ tab: Nerda.Tab, megabytes: Int) async throws {
 
     coordinator.pressure(.critical)
     // The sixth tab back is no longer one of the last five.
-    let free = [hidden[0], hidden[9], hidden[10]]
+    let free = [hidden[0], hidden[10]]
     try await waitFor("Unprotected tabs asleep") { free.allSatisfy(\.isAsleep) }
     try await Task.sleep(for: .seconds(1))
     #expect(!front.isAsleep)

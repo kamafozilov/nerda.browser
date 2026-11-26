@@ -9,6 +9,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Changed
 
+- Pinned tabs never go to sleep by themselves. Gmail, x.com and other heavy pinned sites used to sleep after 10 minutes out of sight, or when the Mac ran short of memory, and loaded again when you came back to them.
+
 - The agent row at the foot of the sidebar shows each agent's own mark, Claude's or Codex's, and says what it is doing, such as "Reading github.com" or "Thinking", with a light running across the words and an arc turning round the mark while it works. It goes as soon as the agent closes its last tab, instead of staying two minutes with "At work in 0 tabs". Once an agent is done with tabs still open, the row shows a tick and "Done".
 
 ## [0.0.29] - 2026-11-26

@@ -45,20 +45,39 @@ private func coordinator(for browsers: Browser...) -> SleepCoordinator {
     #expect(first.selected?.isAsleep == false && second.selected?.isAsleep == false)
 }
 
-/// With the pressure policy off, critical pressure puts pinned tabs out of
-/// sight to sleep too, as in Safari.
+/// With the pressure policy off, critical pressure puts the tabs out of
+/// sight to sleep, but never pinned ones.
 @MainActor
-@Test func criticalPressureSleepsPinnedTabsToo() async throws {
-    let browser = try await browser(tabs: 2)
-    let pinned = browser.tabs.first { $0.id != browser.selectedID }!
+@Test func criticalPressureLeavesPinnedTabsAwake() async throws {
+    let browser = try await browser(tabs: 3)
+    let hidden = browser.tabs.filter { $0.id != browser.selectedID }
+    let pinned = hidden[0]
     pinned.isPinned = true
 
     let coordinator = coordinator(for: browser)
     Speedups.overrides[.pressurePolicy] = false
     coordinator.pressure(.critical)
     Speedups.overrides[.pressurePolicy] = nil
-    try await waitFor("Pinned tab asleep") { pinned.isAsleep }
+    try await waitFor("Hidden tab asleep") { hidden[1].isAsleep }
+    try await Task.sleep(for: .milliseconds(200))
+    #expect(!pinned.isAsleep)
     #expect(browser.selected?.isAsleep == false)
+}
+
+/// A pinned tab stays awake however long unseen: the minute's check
+/// leaves it, as it puts an unpinned one to sleep.
+@MainActor
+@Test func theIdleCheckLeavesPinnedTabsAwake() async throws {
+    let browser = try await browser(tabs: 3)
+    let hidden = browser.tabs.filter { $0.id != browser.selectedID }
+    let pinned = hidden[0]
+    pinned.isPinned = true
+    for tab in hidden { tab.lastSeen = .now.addingTimeInterval(-5 * 60 * 60) }
+
+    coordinator(for: browser).check()
+    try await waitFor("Unpinned tab asleep") { hidden[1].isAsleep }
+    try await Task.sleep(for: .milliseconds(200))
+    #expect(!pinned.isAsleep)
 }
 
 /// Pressure back to normal puts nothing to sleep.
