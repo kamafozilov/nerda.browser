@@ -7,6 +7,14 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- Settings › Agents connects Claude Code and Codex to Nerda with one click, and shows which ones are connected, with no command to type in Terminal. A connected agent disconnects from there too, and the `nerda-browser` command installs and goes the same way.
+
+### Changed
+
+- Agents can use Nerda, and the other programs you allowed or refused, moved from Settings › Security & Privacy to Settings › Agents.
+
 ## [0.0.28] - 2026-11-26
 
 ### Added

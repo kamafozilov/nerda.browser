@@ -1,8 +1,10 @@
 import Foundation
 import os
 
-/// Setup (`Nerda setup`, `nerda-browser setup`): connects Nerda to the
-/// owner's agents in one go. It registers the MCP server (`Nerda mcp`) with
+/// Setup (Settings › Agents, `Nerda setup`, `nerda-browser setup`):
+/// connects Nerda to the owner's agents, in one go from the command line or
+/// one agent at a time from Settings (`AgentConnections`), which can also
+/// disconnect one. It registers the MCP server (`Nerda mcp`) with
 /// Claude Code at user scope and with Codex, with a long tool timeout,
 /// writes the skill for both (`AgentSkill`), and puts the `nerda-browser`
 /// command on PATH. Run again, it changes nothing that is already so. The
@@ -131,6 +133,102 @@ nonisolated struct AgentSetup {
         return report
     }
 
+    // MARK: One part at a time (Settings › Agents)
+
+    /// What Settings › Agents lists: the two agents, and the command.
+    enum Part: String, CaseIterable, Identifiable, Sendable {
+        case claude, codex, command
+        var id: Self { self }
+    }
+
+    /// How a part stands, read without changing anything.
+    enum Link: Equatable, Sendable {
+        /// The agent isn't on this Mac.
+        case missing
+        /// Not connected, or only partly (the skill is gone).
+        case off
+        /// Connected to this copy of Nerda.
+        case on
+        /// Connected to another copy of Nerda (one that moved, or an older
+        /// setup's): connecting again points it here.
+        case other
+        /// The command's file is there and isn't Nerda's: left alone.
+        case taken
+    }
+
+    func link(_ part: Part) -> Link {
+        switch part {
+        case .claude:
+            guard places.claude != nil else { return .missing }
+            guard let server = claudeServer() else { return .off }
+            guard isOurs(server) else { return .other }
+            return hasSkill(in: places.claudeFolder) ? .on : .off
+        case .codex:
+            guard FileManager.default.fileExists(atPath: places.codexFolder.path) else { return .missing }
+            let read = (try? String(contentsOf: codexFile, encoding: .utf8)) ?? ""
+            // As setup writes it: ending in a new line.
+            let text = read.isEmpty || read.hasSuffix("\n") ? read : read + "\n"
+            if Self.codexConfig(text, server: name, command: executable.path) == text {
+                return hasSkill(in: places.codexFolder) ? .on : .off
+            }
+            return Self.codexConfig(text, server: name, command: nil) == text ? .off : .other
+        case .command:
+            guard let script = try? String(contentsOf: commandFile, encoding: .utf8) else {
+                return FileManager.default.fileExists(atPath: commandFile.path) ? .taken : .off
+            }
+            guard script.contains(Self.commandMark) else { return .taken }
+            return script == commandScript && FileManager.default.isExecutableFile(atPath: commandFile.path) ? .on : .other
+        }
+    }
+
+    /// Sets up one part, as `run` sets up all three.
+    func connect(_ part: Part) -> Report {
+        var report = Report()
+        switch part {
+        case .claude: setUpClaude(&report)
+        case .codex: setUpCodex(&report)
+        case .command: installCommand(&report)
+        }
+        return report
+    }
+
+    /// Undoes what connecting did: the server's registration, the skill
+    /// setup wrote, or the command. Nothing else of the agent's is touched,
+    /// and a command file that isn't Nerda's stays.
+    func disconnect(_ part: Part) -> Report {
+        var report = Report()
+        switch part {
+        case .claude:
+            if let claude = places.claude, claudeServer() != nil {
+                let removed = runProgram(claude, ["mcp", "remove", "--scope", "user", name])
+                if claudeServer() == nil {
+                    report.did("Claude Code: removed \(name).")
+                } else {
+                    report.failed("Claude Code: couldn't remove \(name): \(removed.output.trimmingCharacters(in: .whitespacesAndNewlines))")
+                }
+            }
+            removeSkill(in: places.claudeFolder, for: "Claude Code", &report)
+        case .codex:
+            let before = (try? String(contentsOf: codexFile, encoding: .utf8)) ?? ""
+            let after = Self.codexConfig(before, server: name, command: nil)
+            do {
+                if after != before, try write(after, to: codexFile) { report.did("Codex: removed \(name) from \(places.show(codexFile)).") }
+            } catch {
+                report.failed("Codex: couldn't write \(places.show(codexFile)): \(error.localizedDescription)")
+            }
+            removeSkill(in: places.codexFolder, for: "Codex", &report)
+        case .command:
+            guard link(.command) != .taken, FileManager.default.fileExists(atPath: commandFile.path) else { break }
+            do {
+                try FileManager.default.removeItem(at: commandFile)
+                report.did("Command: removed \(places.show(commandFile)).")
+            } catch {
+                report.failed("Command: couldn't remove \(places.show(commandFile)): \(error.localizedDescription)")
+            }
+        }
+        return report
+    }
+
     /// At launch: the skill, where setup wrote it, written again when its
     /// text changed (Nerda updated). Nowhere setup didn't write it. Answers
     /// the files written.
@@ -160,6 +258,9 @@ nonisolated struct AgentSetup {
             exit(1)
         }
     }
+
+    private var codexFile: URL { places.codexFolder.appending(path: "config.toml") }
+    private var commandFile: URL { places.commands.appending(path: name) }
 
     private var skillFiles: [URL] {
         [places.claudeFolder, places.codexFolder].map { $0.appending(path: "skills/\(name)/SKILL.md") }
@@ -211,7 +312,7 @@ nonisolated struct AgentSetup {
             report.kept("Codex: not found (no \(places.show(places.codexFolder))), skipped.")
             return
         }
-        let file = places.codexFolder.appending(path: "config.toml")
+        let file = codexFile
         let before = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
         let after = Self.codexConfig(before, server: name, command: executable.path)
         do {
@@ -228,14 +329,14 @@ nonisolated struct AgentSetup {
 
     /// Codex's config with the server's table, `[mcp_servers.<name>]`, set:
     /// where it stood (with any tables under it, `….env`, gone), or at the
-    /// end. Every other line is kept as it was.
-    static func codexConfig(_ text: String, server name: String, command: String) -> String {
-        let table = [
+    /// end; with no `command`, taken out. Every other line is kept as it was.
+    static func codexConfig(_ text: String, server name: String, command: String?) -> String {
+        let table = command.map { command in [
             "[mcp_servers.\(name)]",
             "command = \(tomlString(command))",
             #"args = ["mcp"]"#,
             "tool_timeout_sec = \(codexToolTimeout)",
-        ]
+        ] } ?? []
         var kept: [String] = []
         var at: Int?
         var inOurs = false
@@ -247,6 +348,13 @@ nonisolated struct AgentSetup {
             if !inOurs { kept.append(line) }
         }
         let isBlank = { (line: String) in line.trimmingCharacters(in: .whitespaces).isEmpty }
+        if table.isEmpty {
+            // Out: one blank line where the table stood, not two.
+            if let at, at > 0, at < kept.count, isBlank(kept[at - 1]), isBlank(kept[at]) { kept.remove(at: at) }
+            if at == nil { return text }
+            let result = kept.joined(separator: "\n")
+            return result.isEmpty || result.hasSuffix("\n") ? result : result + "\n"
+        }
         if let at {
             let after = at < kept.count && !isBlank(kept[at]) ? [""] : []
             let before = at > 0 && !isBlank(kept[at - 1]) ? [""] : []
@@ -291,13 +399,38 @@ nonisolated struct AgentSetup {
         }
     }
 
+    private func hasSkill(in folder: URL) -> Bool {
+        FileManager.default.fileExists(atPath: folder.appending(path: "skills/\(name)/SKILL.md").path)
+    }
+
+    /// The skill setup wrote, and its folder once nothing else is in it.
+    private func removeSkill(in folder: URL, for agent: String, _ report: inout Report) {
+        let skills = folder.appending(path: "skills/\(name)")
+        let file = skills.appending(path: "SKILL.md")
+        guard FileManager.default.fileExists(atPath: file.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: file)
+            if (try? FileManager.default.contentsOfDirectory(atPath: skills.path))?.isEmpty == true {
+                try? FileManager.default.removeItem(at: skills)
+            }
+            report.did("\(agent): removed the \(name) skill.")
+        } catch {
+            report.failed("\(agent): couldn't remove the skill: \(error.localizedDescription)")
+        }
+    }
+
     /// The first lines of the command, by which setup knows it as Nerda's.
     private static let commandMark = "# Nerda's command line for agents and scripts, put here by Nerda's setup."
 
-    private func installCommand(_ report: inout Report) {
-        let file = places.commands.appending(path: name)
+    /// The command's two lines: the app's binary, run as the command line.
+    private var commandScript: String {
         let quoted = "'" + executable.path.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
-        let script = "#!/bin/sh\n\(Self.commandMark)\nexec \(quoted) cli \"$@\"\n"
+        return "#!/bin/sh\n\(Self.commandMark)\nexec \(quoted) cli \"$@\"\n"
+    }
+
+    private func installCommand(_ report: inout Report) {
+        let file = commandFile
+        let script = commandScript
         if FileManager.default.fileExists(atPath: file.path),
            (try? String(contentsOf: file, encoding: .utf8))?.contains(Self.commandMark) != true {
             report.failed("Command: \(places.show(file)) is there and isn't Nerda's; left alone.")
@@ -339,6 +472,11 @@ nonisolated struct AgentSetup {
         process.arguments = arguments
         var environment = environment
         environment["HOME"] = places.home.path
+        // Run from Settings, Nerda has the bare PATH apps get from launchd,
+        // where a `claude` installed with npm wouldn't find node.
+        let path = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+        let wanted = [program.deletingLastPathComponent().path, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+        environment["PATH"] = (path + wanted.filter { !path.contains($0) }).joined(separator: ":")
         process.environment = environment
         process.currentDirectoryURL = FileManager.default.temporaryDirectory
         let pipe = Pipe()

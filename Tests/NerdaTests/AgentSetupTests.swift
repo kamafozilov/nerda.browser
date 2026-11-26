@@ -212,6 +212,124 @@ struct AgentSetupTests {
         #expect(FileManager.default.fileExists(atPath: home.folder.appending(path: ".local/bin/nerda-browser-dev").path))
         #expect(try home.read(".claude/skills/nerda-browser/SKILL.md").hasPrefix("---\nname: nerda-browser\n"))
     }
+
+    // MARK: One part at a time (Settings › Agents)
+
+    /// Each part reads as it stands without anything being written, and
+    /// connecting one leaves the others as they were.
+    @Test func eachPartIsReadAndConnectedOnItsOwn() throws {
+        let home = try TestHome()
+        defer { home.remove() }
+        try home.write(".codex/config.toml", "model = \"gpt-6\"\n")
+        let setup = try home.setup()
+        let before = try home.snapshot(".codex/config.toml")
+
+        #expect(AgentSetup.Part.allCases.map(setup.link) == [.off, .off, .off])
+        #expect(try home.snapshot(".codex/config.toml") == before)
+        #expect(home.claudeCalls.isEmpty)
+
+        let report = setup.connect(.claude)
+
+        #expect(!report.failed, "\(report.lines)")
+        #expect(AgentSetup.Part.allCases.map(setup.link) == [.on, .off, .off])
+        #expect(try home.snapshot(".codex/config.toml") == before)
+        #expect(!FileManager.default.fileExists(atPath: home.folder.appending(path: ".local/bin/nerda-browser").path))
+
+        _ = setup.connect(.codex)
+        _ = setup.connect(.command)
+        #expect(AgentSetup.Part.allCases.map(setup.link) == [.on, .on, .on])
+        // The skill gone by hand: not connected all the way, until connected again.
+        try FileManager.default.removeItem(at: home.folder.appending(path: ".codex/skills/nerda-browser/SKILL.md"))
+        #expect(setup.link(.codex) == .off)
+    }
+
+    /// Disconnecting takes out only what setup put in: the server, the
+    /// skill and the command go, every other line and file stays.
+    @Test func disconnectingTakesOutOnlyWhatSetupPutIn() throws {
+        let home = try TestHome()
+        defer { home.remove() }
+        let codexBefore = """
+            model = "gpt-6"
+
+            [mcp_servers.pencil]
+            command = "pencil"
+
+            """
+        try home.write(".codex/config.toml", codexBefore)
+        try home.write(".claude/skills/mine/SKILL.md", "---\nname: mine\n---\n")
+        let setup = try home.setup()
+        _ = setup.run()
+
+        for part in AgentSetup.Part.allCases {
+            let report = setup.disconnect(part)
+            #expect(!report.failed, "\(report.lines)")
+            #expect(report.changed)
+        }
+
+        #expect(AgentSetup.Part.allCases.map(setup.link) == [.off, .off, .off])
+        #expect(home.claudeCalls.contains("mcp remove --scope user nerda-browser"))
+        #expect(try home.read(".codex/config.toml") == codexBefore)
+        for gone in [".claude/skills/nerda-browser", ".codex/skills/nerda-browser", ".local/bin/nerda-browser"] {
+            #expect(!FileManager.default.fileExists(atPath: home.folder.appending(path: gone).path), "\(gone)")
+        }
+        #expect(try home.read(".claude/skills/mine/SKILL.md") == "---\nname: mine\n---\n")
+        // Disconnected already: nothing more to do.
+        #expect(AgentSetup.Part.allCases.map { setup.disconnect($0).changed } == [false, false, false])
+    }
+
+    /// Set up from another copy of Nerda (one that moved), each part reads
+    /// as connected elsewhere, and connecting points it here; an agent not
+    /// on the Mac, or a command file that isn't Nerda's, is said so.
+    @Test func anotherCopysSetupAndWhatIsntThereAreToldApart() throws {
+        let home = try TestHome()
+        defer { home.remove() }
+        try FileManager.default.createDirectory(at: home.folder.appending(path: ".codex"), withIntermediateDirectories: true)
+        _ = try home.setup(executable: URL(fileURLWithPath: "/Users/me/Downloads/Nerda.app/Contents/MacOS/Nerda")).run()
+        let setup = try home.setup()
+
+        #expect(AgentSetup.Part.allCases.map(setup.link) == [.other, .other, .other])
+        for part in AgentSetup.Part.allCases { _ = setup.connect(part) }
+        #expect(AgentSetup.Part.allCases.map(setup.link) == [.on, .on, .on])
+
+        let bare = try TestHome(claude: false)
+        defer { bare.remove() }
+        try bare.write(".local/bin/nerda-browser", "#!/bin/sh\necho someone else's\n")
+        let alone = try bare.setup()
+        #expect(AgentSetup.Part.allCases.map(alone.link) == [.missing, .missing, .taken])
+        #expect(!alone.disconnect(.command).changed)
+        #expect(try bare.read(".local/bin/nerda-browser") == "#!/bin/sh\necho someone else's\n")
+    }
+
+    /// Searching Settings for an agent finds the Agents page, not Security & Privacy.
+    @MainActor @Test func settingsSearchFindsTheAgentsPage() {
+        for word in ["claude", "codex", "mcp", "setup", "nerda-browser"] {
+            #expect(SettingsPage.agents.matches(word), "\(word)")
+            #expect(!SettingsPage.privacy.matches(word), "\(word)")
+        }
+    }
+
+    /// Settings › Agents: a part connected from the page reads as connected
+    /// after, and one that couldn't be says why.
+    @MainActor @Test func theSettingsPageConnectsAPartAndSaysWhatWentWrong() async throws {
+        let home = try TestHome()
+        defer { home.remove() }
+        try FileManager.default.createDirectory(at: home.folder.appending(path: ".codex"), withIntermediateDirectories: true)
+        try home.write(".local/bin/nerda-browser", "#!/bin/sh\n")
+        let connections = AgentConnections(setup: try home.setup())
+
+        await connections.refresh()
+        #expect(connections.links == [.claude: .off, .codex: .off, .command: .taken])
+
+        await connections.connect(.codex)
+        #expect(connections.links[.codex] == .on)
+        #expect(connections.problems.isEmpty)
+        #expect(connections.busy.isEmpty)
+
+        await connections.connect(.command)
+        #expect(connections.problems[.command]?.contains("isn't Nerda's") == true)
+        await connections.disconnect(.codex)
+        #expect(connections.links[.codex] == .off)
+    }
 }
 
 /// A home folder of a test's own, with a stand-in `claude` that keeps what
@@ -232,8 +350,13 @@ struct TestHome {
         self.claude = program
         try write("programs/claude", #"""
             #!/bin/sh
-            # Called as: mcp add --scope user <name> -- <command> <argument>
+            # Called as: mcp add --scope user <name> -- <command> <argument>,
+            # or mcp remove --scope user <name>
             echo "$*" >> "$HOME/claude-calls.log"
+            if [ "$2" = "remove" ]; then
+              /usr/bin/plutil -remove "mcpServers.$5" "$HOME/.claude.json" 2>/dev/null
+              exit 0
+            fi
             [ "$2" = "add" ] || exit 0
             [ -f "$HOME/.claude.json" ] || echo '{"mcpServers":{}}' > "$HOME/.claude.json"
             /usr/bin/plutil -remove "mcpServers.$5" "$HOME/.claude.json" 2>/dev/null

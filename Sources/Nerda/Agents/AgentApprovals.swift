@@ -47,7 +47,7 @@ nonisolated struct AgentProgram: Codable, Hashable, Sendable {
 /// The owner's say over which other programs may drive Nerda: each one is
 /// asked about once, on a sheet, and gets status only until allowed. Allow
 /// once lasts until Nerda quits; Always and Don't allow are kept, and listed
-/// in Settings › Security & Privacy › Agents to be removed.
+/// in Settings › Agents to be removed.
 @MainActor
 @Observable
 final class AgentApprovals {

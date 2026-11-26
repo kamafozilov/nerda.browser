@@ -3,7 +3,7 @@ import SwiftUI
 /// The pages of Nerda's settings, listed down the settings tab's left. Only
 /// what works is listed: a page comes once it has something in it.
 enum SettingsPage: String, CaseIterable, Identifiable, Codable {
-    case general, appearance, tabs, passwords, autofill, siteSettings, privacy, profiles, extensions, shortcuts, releaseNotes
+    case general, appearance, tabs, passwords, autofill, siteSettings, privacy, profiles, extensions, agents, shortcuts, releaseNotes
 
     var id: Self { self }
 
@@ -18,6 +18,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .privacy: "Security & Privacy"
         case .profiles: "Profiles"
         case .extensions: "Extensions"
+        case .agents: "Agents"
         case .shortcuts: "Keyboard Shortcuts"
         case .releaseNotes: "Release Notes"
         }
@@ -34,6 +35,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
         case .privacy: "lock"
         case .profiles: "person.crop.circle"
         case .extensions: "puzzlepiece.extension"
+        case .agents: "sparkles"
         case .shortcuts: "keyboard"
         case .releaseNotes: "sparkles"
         }
@@ -42,7 +44,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
     /// The heading it is listed under.
     var section: String {
         switch self {
-        case .general, .appearance, .tabs, .passwords, .autofill, .siteSettings, .privacy, .profiles, .extensions, .shortcuts: "Personal"
+        case .general, .appearance, .tabs, .passwords, .autofill, .siteSettings, .privacy, .profiles, .extensions, .agents, .shortcuts: "Personal"
         case .releaseNotes: "Nerda"
         }
     }
@@ -60,10 +62,10 @@ enum SettingsPage: String, CaseIterable, Identifiable, Codable {
                          "shipping", "billing", "checkout"]
         case .siteSettings: ["permissions", "camera", "microphone", "location", "notifications", "pop-ups", "popups", "sites", "allow", "block", "ads"]
         case .privacy: ["security", "https", "secure connections", "upgrade", "history", "keep history", "delete", "clear", "cookies", "cache", "site data", "ads", "trackers", "adblock", "blocking",
-                        "filters", "easylist", "ublock", "adguard", "incognito", "private", "lock",
-                        "agents", "ai", "mcp", "claude", "codex", "nerda-browser"]
+                        "filters", "easylist", "ublock", "adguard", "incognito", "private", "lock"]
         case .profiles: ["work", "personal", "school", "separate", "new profile", "window", "accounts", "cookies", "rename", "delete"]
         case .extensions: ["chrome web store", "add-ons", "plugins", "unpacked", "developer"] + Extensions.shared.installed.map(\.name)
+        case .agents: ["ai", "mcp", "claude", "claude code", "codex", "nerda-browser", "setup", "connect", "command line", "terminal", "programs", "allowed"]
         case .shortcuts: ["keyboard", "keys", "hotkeys"] + ShortcutsSettings.groups.flatMap { $0.shortcuts.map(\.title) }
         case .releaseNotes: ["what's new", "changelog", "changes", "version", "updates"]
         }
@@ -160,6 +162,8 @@ struct SettingsView: View {
                         ProfilesSettings(browser: browser) { editingProfile = $0 }
                     case .extensions:
                         ExtensionsSettings(browser: browser)
+                    case .agents:
+                        AgentsSettings()
                     case .shortcuts:
                         ShortcutsSettings()
                     case .releaseNotes:

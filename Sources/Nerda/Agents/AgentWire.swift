@@ -192,17 +192,17 @@ nonisolated extension AgentWire {
     }
 
     private static let unreachable = AgentError(.unreachable, """
-        Nerda isn't running, or agents are turned off in its Settings › Security & Privacy. \
+        Nerda isn't running, or agents are turned off in its Settings › Agents. \
         Ask the user to open Nerda.
         """)
 
     private static let agentsOff = AgentError(.unreachable, """
-        Agents are turned off in Nerda's Settings › Security & Privacy. \
+        Agents are turned off in Nerda's Settings › Agents. \
         Ask the user to turn on Agents can use Nerda there.
         """)
 
     private static let notStarted = AgentError(.unreachable, """
-        Nerda didn't start, or agents are turned off in its Settings › Security & Privacy. \
+        Nerda didn't start, or agents are turned off in its Settings › Agents. \
         Ask the user to open Nerda.
         """)
 }

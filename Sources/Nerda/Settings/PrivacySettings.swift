@@ -10,9 +10,6 @@ struct PrivacySettings: View {
     @AppStorage(HistoryKeep.key) private var keep = HistoryKeep.threeMonths
     @AppStorage(IncognitoAutoLock.key) private var lock = IncognitoAutoLock.minute
     @AppStorage(HTTPSUpgrade.key) private var upgradesToHTTPS = true
-    @AppStorage(AgentServer.isOnKey) private var agentsCanUseNerda = true
-    /// Other programs the owner allowed or not, when they asked to use Nerda.
-    private let approvals = AgentServer.shared.approvals
 
     var body: some View {
         SettingsGroup(title: "Browsing history") {
@@ -46,23 +43,6 @@ struct PrivacySettings: View {
                         detail: "Open http:// sites over HTTPS when they support it, and over HTTP when they don't",
                         icon: "lock") {
                 SettingsToggle(title: "Upgrade connections to HTTPS", isOn: $upgradesToHTTPS)
-            }
-        }
-        SettingsGroup(title: "Agents") {
-            SettingsRow(title: "Agents can use Nerda",
-                        detail: "AI agents such as Claude Code and Codex open pages in tabs of their own, signed in as you are, out of your way",
-                        icon: "sparkles") {
-                SettingsToggle(title: "Agents can use Nerda", isOn: $agentsCanUseNerda)
-            }
-            ForEach(approvals.remembered) { choice in
-                SettingsRow(title: choice.program.name,
-                            detail: (choice.allowed ? "Always allowed to use Nerda" : "Not allowed to use Nerda") + ". " + choice.program.path,
-                            icon: choice.allowed ? "terminal" : "nosign") {
-                    Button("Remove") { approvals.forget(choice.program) }
-                        .buttonStyle(SettingsButtonStyle())
-                        .fixedSize()
-                        .help("Ask again the next time \(choice.program.name) tries to use Nerda")
-                }
             }
         }
         SettingsGroup(title: "Incognito") {
