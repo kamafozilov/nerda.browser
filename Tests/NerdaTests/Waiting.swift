@@ -11,6 +11,7 @@ import Testing
 @MainActor
 func waitFor(_ comment: @autoclosure () -> Comment = "Timed out waiting", timeout: Duration = .seconds(6),
              sourceLocation: SourceLocation = #_sourceLocation, _ condition: () async throws -> Bool) async throws {
+    MainStalls.watch()
     let start = ContinuousClock.now
     let deadline = start + timeout
     while ContinuousClock.now < deadline, try await !condition() { try await Task.sleep(for: .milliseconds(20)) }
@@ -39,9 +40,12 @@ enum MainStalls {
         return watchdog
     }()
 
+    /// Watched from now on, if not yet: from the first wait's start.
+    static func watch() { _ = watchdog }
+
     /// How long the main thread stalled between `start` and `end`.
     static func during(_ start: ContinuousClock.Instant, _ end: ContinuousClock.Instant) -> Duration {
-        _ = watchdog
+        watch()
         return stalls.reduce(.zero) { total, stall in
             let from = max(stall.from, start), to = min(stall.to, end)
             return to > from ? total + (to - from) : total
