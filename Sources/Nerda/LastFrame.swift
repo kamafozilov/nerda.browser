@@ -219,7 +219,7 @@ final class LastFrame {
     /// `done` once WebKit has put on screen what it draws next. WebKit SPI,
     /// as Safari's tests use it: should it go, a one-point picture drawn
     /// after the screen's next update tells the same.
-    private static func afterNextDrawing(_ page: WKWebView, _ done: @escaping @MainActor () -> Void) {
+    static func afterNextDrawing(_ page: WKWebView, _ done: @escaping @MainActor () -> Void) {
         let name = NSSelectorFromString("_doAfterNextPresentationUpdate:")
         guard page.responds(to: name) else {
             let configuration = WKSnapshotConfiguration()

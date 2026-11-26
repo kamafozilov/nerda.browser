@@ -239,6 +239,8 @@ final class PageStage: NSView {
     /// While a grip is pulled: the size it started from, and the scale, kept
     /// as it was, so the edge stays under the pointer.
     private var pull: (size: CGSize, scale: CGFloat)?
+    /// Over what WebKit hasn't drawn yet of a page just made wider (`veilGrowth`).
+    private var veil: (view: NSView, from: CGFloat, armed: Bool)?
     static let margin: CGFloat = 16
 
     init() {
@@ -266,6 +268,42 @@ final class PageStage: NSView {
     /// None while WebKit has it in its own full screen.
     private var page: WKWebView? { subviews.lazy.compactMap { $0 as? WKWebView }.first }
 
+    /// The page is about to be made wider in one step, as the sidebar goes.
+    /// WebKit draws the part it is given a few frames after, and until then
+    /// shows its own ground there, black or white whatever the page's: a
+    /// strip of it down the card's right edge as the slide starts. That part
+    /// is covered with the page's own colour until WebKit has drawn it, or
+    /// half a second at most. (After driceroland/Search.)
+    func veilGrowth() {
+        guard device == nil, veil == nil, let page, page.frame.width > 0 else { return }
+        let from = page.frame.width
+        // No wider than a sidebar is: the card cuts what is past its edge.
+        let view = NSView(frame: CGRect(x: from, y: 0, width: Sidebar.widths.upperBound, height: bounds.height))
+        view.wantsLayer = true
+        page.effectiveAppearance.performAsCurrentDrawingAppearance {
+            view.layer?.backgroundColor = page.underPageBackgroundColor.cgColor
+        }
+        addSubview(view, positioned: .above, relativeTo: page)
+        veil = (view, from, false)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self, weak view] in
+            if let view, self?.veil?.view === view { self?.liftVeil() }
+        }
+    }
+
+    /// Once the page has its new width: the veil goes with what WebKit draws next.
+    private func armVeil(over page: WKWebView) {
+        guard let veil, !veil.armed, page.frame.width > veil.from else { return }
+        self.veil?.armed = true
+        LastFrame.afterNextDrawing(page) { [weak self, weak view = veil.view] in
+            if let view, self?.veil?.view === view { self?.liftVeil() }
+        }
+    }
+
+    private func liftVeil() {
+        veil?.view.removeFromSuperview()
+        veil = nil
+    }
+
     private var room: CGSize { CGSize(width: bounds.width - 2 * Self.margin, height: bounds.height - 2 * Self.margin) }
 
     func place() {
@@ -276,6 +314,7 @@ final class PageStage: NSView {
             scale = 1
             Self.scale(page, 1)
             page.frame = bounds
+            armVeil(over: page)
             return
         }
         let room = room

@@ -106,16 +106,18 @@ private struct Held: CustomAnimation {
     }
 }
 
-/// At every moment of the sidebar sliding away and coming back, what is
-/// round the window's buttons is one surface: no edge, corner or step of
-/// the sidebar's or the card's passes under them or beside them. The slide
-/// is held at points along its way and drawn off screen, in an incognito
-/// and a regular window, one at a time. The window's view is drawn in a
-/// small plain window of its own, which other tests, looking for browser
-/// windows, don't count.
+/// Putting the sidebar away and bringing it back moves one edge, the
+/// card's left one, and nothing else changes on the way: at every moment
+/// the address bar's row is the window's glass up to that edge, and the
+/// bar's own ground from it on, as far as the card goes. No patch of
+/// another colour, no ground that fades or is switched, no second edge. The
+/// slide is held at points along its way and drawn off screen, in an
+/// incognito and a regular window, one at a time. The window's view is drawn
+/// in a small plain window of its own, which other tests, looking for
+/// browser windows, don't count.
 @MainActor
 @Test(.serialized, arguments: [(false, true), (true, true), (false, false), (true, false)], [0.1, 0.3, 0.5, 0.7, 0.9])
-func theWindowButtonsSitOnOneSurfaceAsTheSidebarSlides(way: (coming: Bool, incognito: Bool), fraction: Double) async throws {
+func theCardHasOneEdgeAsTheSidebarSlides(way: (coming: Bool, incognito: Bool), fraction: Double) async throws {
     let coming = way.coming
     let browser = way.incognito ? Browser(dataStore: .nonPersistent()) : Browser()
     browser.sidebarOpen = !coming
@@ -132,32 +134,50 @@ func theWindowButtonsSitOnOneSurfaceAsTheSidebarSlides(way: (coming: Bool, incog
     try await Task.sleep(for: .milliseconds(200))
 
     withAnimation(Animation(Held(fraction: fraction))) { browser.sidebarOpen = coming }
-    try await Task.sleep(for: .milliseconds(200))
-    content.layoutSubtreeIfNeeded()
 
-    // Where the buttons sit, from the content's top left, and round them: on
-    // the bar's row, from just inside its rounded corner to where its own
-    // buttons start.
+    // Where the card's left edge is at this point of the slide.
     let margin = BrowserView.margin
-    let around = CGRect(x: margin + 8, y: margin + 6, width: BrowserView.trafficLightsWidth - margin - 10,
-                        height: AddressBar.height - 10)
-    let drawn = content.isFlipped ? around
-        : CGRect(x: around.minX, y: content.bounds.height - around.maxY, width: around.width, height: around.height)
-    let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: drawn))
-    content.cacheDisplay(in: drawn, to: bitmap)
-    let scale = CGFloat(bitmap.pixelsWide) / around.width
-    var colours: [NSColor] = []
-    for x in stride(from: 0, to: around.width, by: 2) {
-        for y in stride(from: 0, to: around.height, by: 2) {
-            if let colour = bitmap.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB) {
-                colours.append(colour)
-            }
+    let stored = UserDefaults.standard.double(forKey: "sidebarWidth")
+    let sidebar = stored > 0 ? stored : Sidebar.defaultWidth
+    let edge = coming ? margin + (sidebar - margin) * fraction : sidebar + (margin - sidebar) * fraction
+
+    // A line along the bar's row, under its buttons and above its hairline,
+    // where nothing but its ground is drawn; the sidebar's top row has
+    // nothing there either.
+    let line = CGRect(x: 0, y: margin + AddressBar.height - 4, width: content.bounds.width, height: 1)
+    let drawn = content.isFlipped ? line
+        : CGRect(x: line.minX, y: content.bounds.height - line.maxY, width: line.width, height: line.height)
+    let alike = { (a: NSColor, b: NSColor) in
+        abs(a.redComponent - b.redComponent) <= 0.01 && abs(a.greenComponent - b.greenComponent) <= 0.01
+            && abs(a.blueComponent - b.blueComponent) <= 0.01 && abs(a.alphaComponent - b.alphaComponent) <= 0.01
+    }
+    /// What is wrong along the line as it is drawn now: none, when it is
+    /// glass up to the edge and the bar from it on. A point or two either
+    /// side of the edge is its hairline and the rounding of the pixels.
+    let look = { () throws -> [String] in
+        content.layoutSubtreeIfNeeded()
+        let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: drawn))
+        content.cacheDisplay(in: drawn, to: bitmap)
+        let scale = CGFloat(bitmap.pixelsWide) / line.width
+        let colour = { (x: CGFloat) in bitmap.colorAt(x: Int(x * scale), y: 0)?.usingColorSpace(.sRGB) }
+        // The bar's ground, far from the edge, and the glass, in the window's margin.
+        let bar = try #require(colour(content.bounds.width - margin - 40))
+        let glass = try #require(colour(2))
+        try #require(!alike(bar, glass), "the bar's ground and the glass are drawn alike here: \(bar)")
+        var wrong: [String] = []
+        for x in stride(from: CGFloat(1), to: content.bounds.width - margin - 2, by: 1) where abs(x - edge) > 2 {
+            guard let here = colour(x) else { continue }
+            if x < edge, !alike(here, glass) { wrong.append("\(x): \(here), not the glass") }
+            if x > edge, !alike(here, bar) { wrong.append("\(x): \(here), not the bar") }
         }
+        return wrong
     }
-    let first = try #require(colours.first)
-    let off = colours.filter { colour in
-        abs(colour.redComponent - first.redComponent) > 0.01 || abs(colour.greenComponent - first.greenComponent) > 0.01
-            || abs(colour.blueComponent - first.blueComponent) > 0.01
+    // Looked at until the slide is drawn where it is held: with the other
+    // tests running, that takes the window a moment longer at times.
+    var wrong = try look()
+    for _ in 0..<40 where !wrong.isEmpty {
+        try await Task.sleep(for: .milliseconds(50))
+        wrong = try look()
     }
-    #expect(off.isEmpty, "\(off.count) of \(colours.count) points differ from \(first) round the buttons, e.g. \(off.prefix(3))")
+    #expect(wrong.isEmpty, "with the card's edge at \(edge): \(wrong.count) points, e.g. \(wrong.prefix(3))")
 }

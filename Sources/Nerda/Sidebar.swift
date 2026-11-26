@@ -12,15 +12,14 @@ import SwiftUI
 /// the tabs is one of them again.
 struct Sidebar: View {
     let browser: Browser
-    /// Beside the page (true), or floating over it (false).
+    /// Beside the page (true), or put away, to come out over it (false).
     let pinned: Bool
-    /// The page laid out beside it, done sliding into place (`BrowserView.docked`).
-    var docked = false
-    /// How far it is slid off to the window's left (`BrowserView.sidebarSlid`).
-    var slid: CGFloat = 0
-    /// Wanted on screen, pinned or out over the page: its top row, which
-    /// stays where it is, fades in and out with this as the rest slides.
-    var shown = true
+    /// Out over the page, or on its way there or back: it wears glass of its
+    /// own, as the page is under it, and until it is pinned, an edge and a
+    /// shadow that lift it off the page. Otherwise it is on the window's
+    /// glass, with nothing of its own under it: pinned, and all the way as
+    /// it slides off and back beside the card (`BrowserView.floating`).
+    var floating = false
     @Binding var downloadsShown: Bool
     @Binding var aiChatsShown: Bool
     /// The menu in the bottom corner (see `SidebarMenu`), drawn over the whole window.
@@ -33,9 +32,6 @@ struct Sidebar: View {
     /// As tall as the window's title bar, so the traffic lights sit in its
     /// middle, level with the middle of the address bar below the margin.
     static let topRow = 2 * (BrowserView.margin + AddressBar.height / 2)
-    /// The address bar's row, from the window's top to the bar's bottom:
-    /// the top row's part of it stays put while the rest slides.
-    static let barRow = BrowserView.margin + AddressBar.height
     static let rowHeight: CGFloat = 32
     private static let rowGap: CGFloat = 2
     nonisolated static let tileHeight: CGFloat = 40
@@ -117,13 +113,7 @@ struct Sidebar: View {
             // The traffic lights sit on this row, and it moves the window, as
             // the title bar under it would. The sidebar's button is on the
             // address bar; out over the page, the sidebar has its own, to keep it.
-            //
-            // The row never slides: the window's buttons sit on it, and the
-            // sidebar's edge, or the card's corner, passing under them would
-            // show. It stays where it is, counter to the slide, and fades in
-            // and out over the address bar's ground, which the window draws
-            // from its left corner meanwhile (`BrowserView.reaching`): under
-            // the buttons, at every moment, one surface.
+            // The row slides with the rest, under the window's buttons, which stay.
             ZStack(alignment: .trailing) {
                 Color.clear
                     .contentShape(Rectangle())
@@ -135,24 +125,19 @@ struct Sidebar: View {
                 #endif
                 HStack(spacing: 0) {
                     // The gap goes with the badge, so the button stays put without it.
-                    ZoomBadge(browser: browser, gap: pinned ? 0 : 6)
-                    if !pinned {
-                        SidebarToggle(open: false, toggle: browser.toggleSidebar)
-                    }
+                    ZoomBadge(browser: browser, gap: lifted ? 6 : 0)
+                    // Always there, shown or not: one added as the sidebar
+                    // comes out would stand where it ends up, not slide with it.
+                    SidebarToggle(open: false, toggle: browser.toggleSidebar)
+                        .frame(width: lifted ? nil : 0)
+                        .opacity(lifted ? 1 : 0)
+                        // Out of the pointer's and the Tab key's way meanwhile.
+                        .disabled(!lifted)
+                        .accessibilityHidden(!lifted)
                 }
                 .padding(.trailing, 10)
             }
             .frame(height: Self.topRow)
-            .overlay(alignment: .topLeading) { cardCorner.offset(x: width) }
-            // Its own glass, down to the bar's bottom; the rest's starts there.
-            // Taller than that and cut, so its shadow carries on into the rest's.
-            .background(alignment: .top) {
-                background
-                    .frame(height: Self.barRow + 32)
-                    .mask(alignment: .topLeading) { Rectangle().frame(width: width + 40, height: Self.barRow) }
-            }
-            .offset(x: -slid)
-            .opacity(shown ? 1 : 0)
 
             // Incognito tabs go with their window: nothing there to keep pinned.
             // A secondary window leaves them to the profile's own.
@@ -313,16 +298,7 @@ struct Sidebar: View {
         .coordinateSpace(.named(Self.space))
         // Off the tabs: their own menus are the ones that show on them.
         .contextMenu { TabsMenu(browser: browser) }
-        // Below the top row's: the part that slides.
-        .background {
-            background.mask(alignment: .topLeading) {
-                VStack(spacing: 0) {
-                    Color.clear.frame(height: Self.barRow)
-                    Rectangle()
-                }
-                .frame(width: width + 40)
-            }
-        }
+        .background { background }
         .overlay(alignment: .trailing) { SidebarResizer(width: $width) }
         // What is dragged follows the pointer, over everything in the sidebar.
         // A tab over the tiles turns into one, the size of the gap opened for it.
@@ -779,68 +755,24 @@ struct Sidebar: View {
         return min(max(row, 0), count - 1)
     }
 
-    /// The card's top left corner, just past the top row's right edge, as it
-    /// is beside the pinned sidebar. While the bar's ground reaches under the
-    /// row to the window's corner (`BrowserView.reaching`), the card's own
-    /// corner is under it, so the row carries one in its place, fading out as
-    /// the sidebar goes and in as it comes, rather than have the corner go
-    /// and come in one frame. At rest, pinned, it is the card's own that shows.
-    private var cardCorner: some View {
-        let reaching = !(pinned && docked)
-        let notch = CornerNotch(top: BrowserView.margin, radius: BrowserView.cornerRadius)
-        return ZStack(alignment: .topLeading) {
-            SidebarGlass(incognito: browser.isPrivate, clear: !reaching)
-                .mask { notch.fill(style: FillStyle(eoFill: true)) }
-            if reaching {
-                RoundedRectangle(cornerRadius: BrowserView.cornerRadius, style: .continuous)
-                    .strokeBorder(BrowserView.edge)
-                    .frame(width: CornerNotch.width * 4, height: Self.barRow * 2)
-                    .padding(.top, BrowserView.margin)
-                    // Clear of the bar's own top edge, which runs on along it.
-                    .mask(alignment: .topLeading) {
-                        ZStack(alignment: .topLeading) {
-                            Rectangle().padding(.top, BrowserView.margin + 1)
-                            notch.fill(style: FillStyle(eoFill: true))
-                        }
-                    }
-            }
-        }
-        .frame(width: CornerNotch.width, height: Self.barRow, alignment: .topLeading)
-        .clipped()
-        .opacity(pinned ? 1 : 0)
-        .allowsHitTesting(false)
-    }
+    /// Out over the page and not pinned: an edge and a shadow lift it off
+    /// the page, and it has its own button to pin it.
+    private var lifted: Bool { floating && !pinned }
 
-    /// The system's sidebar glass, pinned or floating alike, so it looks the
-    /// same sliding as at rest. Pinned, it is one with the window's glass
-    /// around the page; floating, an edge and a shadow lift it off the page.
+    /// Beside the card it is on the window's glass, with none of its own:
+    /// nothing but what is on it moves as it slides off and back, and there
+    /// is no second sheet of glass to blur what is behind the window twice
+    /// over. Out over the page it wears the same glass itself, so it looks
+    /// the same there; pinned from there, it keeps it until the page has
+    /// moved aside from under it.
     private var background: some View {
-        // Pinned, with the page beside it, the window's glass under it shows
-        // instead: the same glass, without blurring what is behind the window
-        // twice over. Not while the page slides aside, still under it.
-        SidebarGlass(incognito: browser.isPrivate, clear: pinned && docked)
+        SidebarGlass(incognito: browser.isPrivate, clear: !floating)
+            // The edge is always there, shown or not, to slide with the rest
+            // (see the button in the top row).
             .overlay(alignment: .trailing) {
-                if !pinned { Rectangle().fill(Palette.hairline).frame(width: 1) }
+                Rectangle().fill(Palette.hairline).frame(width: 1).opacity(lifted ? 1 : 0)
             }
-            .shadow(color: .black.opacity(pinned ? 0 : 0.25), radius: 16, x: 4)
-    }
-}
-
-/// What the card's top left corner leaves of the glass beside it, in the
-/// address bar's row, from the card's left edge: the corner's continuous
-/// curve has run straight by `width`.
-private nonisolated struct CornerNotch: Shape {
-    static let width: CGFloat = 16
-    /// The card's top edge, from the row's, and its corners' radius.
-    var top: CGFloat
-    var radius: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path(CGRect(x: rect.minX, y: rect.minY + top, width: Self.width, height: rect.height - top))
-        path.addPath(RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: CGRect(
-            x: rect.minX, y: rect.minY + top, width: Self.width * 4, height: rect.height * 2
-        )))
-        return path
+            .shadow(color: .black.opacity(lifted ? 0.25 : 0), radius: 16, x: 4)
     }
 }
 
