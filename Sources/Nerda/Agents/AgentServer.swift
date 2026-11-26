@@ -198,7 +198,7 @@ final class AgentServer {
             return .failed(AgentError(.unknown, "Nerda has no \(request.verb). Ask the user to update Nerda."))
         }
         if !verb.forAnyCaller, let refusal = refusal(for: access) { return .failed(refusal) }
-        let session = sessions.began(name)
+        let session = sessions.began(name, request.verb, request.args)
         defer { sessions.finished(session) }
         if session.isStopped { return stopped(session) }
         let call = AgentCall(server: self, session: session, arguments: request.args, deadline: .now + verb.deadline)

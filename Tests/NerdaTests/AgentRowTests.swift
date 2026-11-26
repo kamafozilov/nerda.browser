@@ -48,6 +48,38 @@ struct AgentRowTests {
         #expect(harness.server.activity().earlier.count == 2)
     }
 
+    /// The row says what the agent does: its request, for a moment after
+    /// it is answered, then that it is thinking. An agent that closes its
+    /// last tab is done at once, and the row goes.
+    @Test func theRowSaysWhatTheAgentDoesAndGoesWhenItIsDone() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        let url = try await harness.pages.serve("/a", "<title>A</title><p>Hello</p>")
+        let site = try #require(History.site(of: url))
+        let agent = try await harness.agent()
+        _ = try await agent.call("open", ["url": AgentJSON(url)])
+        let session = try #require(harness.server.sessions.all.first)
+        #expect(harness.server.doing(session) == "Opening \(site)")
+
+        _ = try await agent.call("text", ["tab": "t1"])
+        #expect(harness.server.doing(session) == "Reading \(site)")
+        harness.clock.advance(by: .seconds(5))
+        #expect(harness.server.doing(session) == "Thinking")
+        #expect(harness.server.activity().state == .atWork)
+
+        _ = try await agent.call("close", ["tab": "t1"])
+        #expect(harness.server.activity().state == nil)
+        #expect(harness.server.activity().earlier.first === session)
+    }
+
+    /// Steps in the owner's words, with the site where there is one.
+    @Test func stepsAreSaidInTheOwnersWords() {
+        #expect(AgentStep(verb: "click", site: "github.com").words == "Clicking on github.com")
+        #expect(AgentStep(verb: "click", site: nil).words == "Clicking")
+        #expect(AgentStep(verb: "tabs", site: "github.com").words == "Checking its tabs")
+        #expect(AgentStep(verb: "something_new", site: nil).words == "Working")
+    }
+
     /// A session waiting on the owner is listed under Needs you, and the
     /// row says so; the others stay at work.
     @Test func theRowSaysWhenAnAgentNeedsTheOwner() async throws {

@@ -18,6 +18,11 @@ final class AgentSession: Identifiable {
     /// Requests of its being done now: while there are any, it is at work,
     /// however long one takes.
     @ObservationIgnored fileprivate(set) var working = 0
+    /// What its request being done now is, the latest of them; nil between
+    /// requests, as its agent works out the next.
+    fileprivate(set) var step: AgentStep?
+    /// What its last request was, done or not.
+    fileprivate(set) var lastStep: AgentStep?
     /// The owner stopped it (`AgentSessions.stop`). Its agent is told so
     /// once, after which its name starts a session afresh.
     fileprivate(set) var stop: Stop?
@@ -28,13 +33,24 @@ final class AgentSession: Identifiable {
 
     var id: AgentSessionName { name }
 
+    /// Which agent it is, by its MCP client's name: its mark in the Agent row.
+    enum Kind { case claude, codex, other }
+
+    var kind: Kind {
+        let client = name.client.lowercased()
+        if client.contains("claude") { return .claude }
+        if client.contains("codex") { return .codex }
+        return .other
+    }
+
     /// What the owner sees it called: Claude for Claude Code, Codex for
     /// Codex, else the client's own name.
     var title: String {
-        let client = name.client.lowercased()
-        if client.contains("claude") { return "Claude" }
-        if client.contains("codex") { return "Codex" }
-        return name.client
+        switch kind {
+        case .claude: "Claude"
+        case .codex: "Codex"
+        case .other: name.client
+        }
     }
 
     fileprivate init(name: AgentSessionName, at now: SuspendingClock.Instant) {
@@ -88,13 +104,16 @@ final class AgentSessions {
         return session
     }
 
-    /// The session of that name starting a request: a use, and at work (and
-    /// no longer detached) until `finished`.
-    func began(_ name: AgentSessionName) -> AgentSession {
+    /// The session of that name starting a request for `verb`: a use, and
+    /// at work (and no longer detached) until `finished`.
+    func began(_ name: AgentSessionName, _ verb: String = "", _ arguments: [String: AgentJSON] = [:]) -> AgentSession {
         let session = session(name)
         session.working += 1
         session.isDetached = false
         session.lastUsed = now()
+        let step = AgentStep.of(verb, arguments, tabs: session.tabs)
+        session.step = step
+        session.lastStep = step
         return session
     }
 
@@ -102,6 +121,7 @@ final class AgentSessions {
     func finished(_ session: AgentSession) {
         session.working -= 1
         session.lastUsed = now()
+        if session.working == 0 { session.step = nil }
     }
 
     /// Its agent went away. No use of its tabs: their 15 minutes still count
