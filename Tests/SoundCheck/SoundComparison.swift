@@ -235,12 +235,13 @@ public struct SoundComparison: Sendable, Equatable, Codable, CustomStringConvert
         return runs
     }
 
-    /// `pieces` in parts each going at one pace: while one piece lies
-    /// further than `fit` off the line through them all, split where two
-    /// lines fit them best, each keeping 40 ms of pieces, and so on.
+    /// `pieces` in parts each going at one pace: while four pieces or more
+    /// lie further than `fit` off the line through them all (one alone is
+    /// a piece read badly, as at the turn of the fast tone's second), split
+    /// where two lines fit them best, each keeping 40 ms of pieces, and so on.
     private static func paces(_ pieces: ArraySlice<Piece>) -> [ArraySlice<Piece>] {
         let least = 16
-        guard pieces.count >= 2 * least, let worst = Line(pieces).worst(pieces), worst > fit else { return [pieces] }
+        guard pieces.count >= 2 * least, Line(pieces).off(pieces, by: fit) >= 4 else { return [pieces] }
         // Sums from the first piece to each, so that each split's two lines
         // and their squares come without going over the pieces again.
         var sums = [Sums()]
@@ -312,8 +313,8 @@ public struct SoundComparison: Sendable, Equatable, Codable, CustomStringConvert
 
         func off(_ piece: Piece) -> Double { abs(piece.media - media(at: piece.seconds)) }
 
-        /// How far the piece furthest off the line lies.
-        func worst(_ pieces: some Collection<Piece>) -> Double? { pieces.map(off).max() }
+        /// How many pieces lie further than `fit` off the line.
+        func off(_ pieces: some Collection<Piece>, by fit: Double) -> Int { pieces.count { off($0) > fit } }
     }
 
     // MARK: Faults
