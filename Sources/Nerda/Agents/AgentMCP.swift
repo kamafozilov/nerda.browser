@@ -150,7 +150,8 @@ actor AgentMCP {
     }
 
     /// `run`, done here (`AgentScript`): each step is a call of this shim's
-    /// to the app. With a progress token, the client hears of each step.
+    /// to the app, a step waiting on the owner as such a call without
+    /// progress waits. With a progress token, the client hears of each step.
     private func runScript(_ arguments: [String: AgentJSON], progressToken: AgentJSON?) async -> AgentReply {
         guard let script = arguments["script"]?.string, !script.isEmpty else {
             return .failed(AgentError(.invalid, "Give script as a string."))
@@ -167,7 +168,12 @@ actor AgentMCP {
             }
         }
         let outcome = await AgentScript.run(script, state: scriptState, time: AgentScript.time(arguments), step: { verb, arguments in
-            await self.call(verb, arguments: arguments)
+            // A step waiting on the owner (eval, a payment's press) waits
+            // as long as a call of it without progress would.
+            if AgentVerb.named[verb]?.waitsForOwner == true {
+                return await self.waitForOwner(verb, arguments: arguments, progressToken: nil)
+            }
+            return await self.call(verb, arguments: arguments)
         }, progress: progress)
         scriptState = outcome.state
         return outcome.reply

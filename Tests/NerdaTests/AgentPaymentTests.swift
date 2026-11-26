@@ -94,7 +94,7 @@ struct AgentPaymentTests {
     /// it presses as ever.
     @Test func aPaymentPressedFromEvalIsHeldToo() async throws {
         let payer = TestPayer()
-        let harness = try AgentHarness(approvePayment: payer.approve)
+        let harness = try AgentHarness(approvePayment: payer.approve, approveScript: AgentHarness.allowsScripts)
         defer { harness.close() }
         let url = try await harness.pages.serve("/eval", Self.shop("""
             <p>Total: 300 000 so'm</p>

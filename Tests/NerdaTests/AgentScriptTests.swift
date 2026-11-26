@@ -43,7 +43,7 @@ struct AgentScriptTests {
     /// The verbs that type, press, choose, hover, drag and scroll are steps
     /// of a script too, each acting on the page as when called alone.
     @Test func aScriptTypesChoosesHoversDragsAndScrolls() async throws {
-        let harness = try AgentHarness()
+        let harness = try AgentHarness(approveScript: AgentHarness.allowsScripts)
         defer { harness.close() }
         let url = try await harness.pages.serve("/form", """
             <title>Form</title>
@@ -176,7 +176,7 @@ struct AgentScriptTests {
     /// eval runs in the page and answers what it returned, as JSON, even
     /// where the page's own policy forbids its scripts eval.
     @Test func evalAnswersWhatItReturned() async throws {
-        let harness = try AgentHarness()
+        let harness = try AgentHarness(approveScript: AgentHarness.allowsScripts)
         defer { harness.close() }
         let url = try await harness.pages.serve("/numbers", """
             <meta http-equiv="Content-Security-Policy" content="script-src 'unsafe-inline'">
@@ -204,7 +204,7 @@ struct AgentScriptTests {
 
     /// eval changing the page answers with what changed, as an action does.
     @Test func evalAnswersWhatItChanged() async throws {
-        let harness = try AgentHarness()
+        let harness = try AgentHarness(approveScript: AgentHarness.allowsScripts)
         defer { harness.close() }
         let url = try await harness.pages.serve("/form", "<title>Form</title><button>Send</button>")
         let agent = try await harness.agent()
@@ -225,7 +225,7 @@ struct AgentScriptTests {
     /// itself, not a form's data, not a changed type, not another realm's
     /// getter, not script put in the page's own world.
     @Test func evalCantReadAPasswordsValue() async throws {
-        let harness = try AgentHarness()
+        let harness = try AgentHarness(approveScript: AgentHarness.allowsScripts)
         defer { harness.close() }
         let url = try await harness.pages.serve("/login", """
             <title>Sign in</title>

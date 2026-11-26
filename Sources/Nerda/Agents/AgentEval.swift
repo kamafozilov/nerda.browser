@@ -20,12 +20,16 @@ import WebKit
 /// document that replaces one the guard was set up in is reached through
 /// `window[0]` before it is guarded. Script determined to get round it
 /// can; what it stops is the plain read and the common ways round it.
+/// So no eval runs before the owner allowed its script
+/// (`AgentEvalApprovals`), and the guard is the second line.
 @MainActor
 enum AgentEval {
     static let world = WKContentWorld.world(name: "nerda-agents-eval")
 
     /// The most characters of a result answered.
     static let mostResult = 40_000
+    /// The most characters of a script: the owner reads it whole first.
+    nonisolated static let mostScript = 20_000
 
     /// Runs `code` as the body of an async function in the tab's page, and
     /// answers what it returned as JSON (nil for nothing). Fails with what
