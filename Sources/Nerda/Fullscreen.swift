@@ -19,21 +19,26 @@ enum Fullscreen {
     /// page's world would show every page `window.webkit`, which Safari never
     /// does: the mark of an app's web view, which Google answers with CAPTCHAs
     /// and some sign-ins with "This browser or app may not be secure".
+    /// Going full screen, it says whether a click or key press was what
+    /// asked: WebKit's own word, which the page can't touch from its world,
+    /// as it can its own `navigator`, or send the word itself.
     static let bridge = WKUserScript(source: """
-        document.addEventListener('\(event)-enter', () => webkit.messageHandlers.fullscreen.postMessage(true), true);
-        document.addEventListener('\(event)-exit', () => webkit.messageHandlers.fullscreen.postMessage(false), true);
+        document.addEventListener('\(event)-enter', () => webkit.messageHandlers.fullscreen.postMessage(navigator.userActivation.isActive ? 'enter' : 'unasked'), true);
+        document.addEventListener('\(event)-exit', () => webkit.messageHandlers.fullscreen.postMessage('exit'), true);
         """, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .defaultClient)
     private static let event = "nerda-fullscreen"
     static let messages = Messages()
     /// What takes a page out of full screen, as its own Esc would.
     static let exit = "document.exitFullscreen().catch(() => {})"
 
-    /// The page's word that it went full screen (true) or came back, for the browser showing it.
+    /// The page's word that it went full screen, on a click or not, or came
+    /// back, for the browser showing it.
     final class Messages: NSObject, WKScriptMessageHandler {
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
             // Frames go through the page, which checks they are allowed to.
             guard message.frameInfo.isMainFrame, let page = message.webView else { return }
-            (page.uiDelegate as? Browser)?.page(page, wantsFullscreen: message.body as? Bool == true)
+            let word = message.body as? String
+            (page.uiDelegate as? Browser)?.page(page, wantsFullscreen: word != "exit", asked: word == "enter")
         }
     }
 

@@ -7,6 +7,15 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Scrolling with two fingers no longer goes back or forward by itself. A swipe has to go sideways from the start and stay sideways, as in Safari and Chrome; once your fingers move up or down, it is a scroll until you lift them. Before, a scroll that set off a little sideways, or a quick flick down a feed, could leave the page.
+- A page that asks to keep sideways swipes to itself, as some maps, spreadsheets and editors do, keeps them: swiping there moves the page instead of going back, as in Chrome.
+- A video's full-screen button, on YouTube, X or any other site, goes full screen on the first click. Before, the video often grew for a moment and went straight back, and it took a few quick clicks in a row to stay in full screen.
+- An agent reading a long address with fetch no longer holds up Nerda's windows while the answer comes in.
+
+## [0.0.30] - 2026-11-26
+
 ### Changed
 
 - Pinned tabs never go to sleep by themselves. Gmail, x.com and other heavy pinned sites used to sleep after 10 minutes out of sight, or when the Mac ran short of memory, and loaded again when you came back to them.
@@ -18,7 +27,6 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Collapsing and showing the tabs (⌘S) is one clean slide: the tabs slide off whole and the page follows them, under the window's buttons. Before, the address bar lost its colour for a moment, the top of the tabs stayed behind as a grey block while the rest slid, a second sidebar button showed beside the first, and a dark strip could flash down the right edge of a light page.
 - The tabs coming out over the page from the window's left edge slide out as one sheet, their top row with them. Before, the top row faded in where it was while the rest slid.
 - Window › Downloads (⌥⌘L) with the tabs collapsed brings them out and opens the list. Before, they came half out and went back unless the pointer was over them.
-- An agent reading a long address with fetch no longer holds up Nerda's windows while the answer comes in.
 
 ## [0.0.29] - 2026-11-26
 
@@ -508,7 +516,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.29...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.30...HEAD
+[0.0.30]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.29...v0.0.30
 [0.0.29]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.28...v0.0.29
 [0.0.28]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.27...v0.0.28
 [0.0.27]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.26...v0.0.27
