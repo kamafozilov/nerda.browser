@@ -163,7 +163,7 @@ struct SettingsView: View {
                     case .extensions:
                         ExtensionsSettings(browser: browser)
                     case .agents:
-                        AgentsSettings()
+                        AgentsSettings(browser: browser)
                     case .shortcuts:
                         ShortcutsSettings()
                     case .releaseNotes:
