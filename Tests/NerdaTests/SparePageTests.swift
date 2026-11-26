@@ -133,20 +133,32 @@ struct SparePageTests {
     @Test func noSpareIsMadeDuringADrag() async throws {
         try await withSpare { store, browser in
             _ = browser.open(URL(string: "about:blank")!)
-            drag(for: SparePages.renewal + 1)
-            #expect(SparePages.page(for: store) == nil)
+            let madeMeanwhile = await drag(for: SparePages.renewal + 1) { SparePages.page(for: store) != nil }
+            #expect(!madeMeanwhile)
             try await waitFor("A spare after the drag", timeout: .seconds(10)) { SparePages.page(for: store) != nil }
         }
     }
 }
 
 /// A drag lasting `seconds`: the run loop turning in event tracking only,
-/// as AppKit has it while the mouse is held.
+/// as AppKit has it while the mouse is held, and `then` as it ends, before
+/// the loop turns in its default mode again. Run from the run loop, as
+/// AppKit runs one from an event, rather than from this test's turn of the
+/// main queue: the queue then goes on in event tracking, as it does in a
+/// real drag, and the other tests on the main thread with it.
 @MainActor
-private func drag(for seconds: TimeInterval) {
-    let held = Timer(timeInterval: 0.05, repeats: true) { _ in }
-    RunLoop.main.add(held, forMode: .eventTracking)
-    let end = Date.now.addingTimeInterval(seconds)
-    while Date.now < end { RunLoop.main.run(mode: .eventTracking, before: end) }
-    held.invalidate()
+private func drag<T: Sendable>(for seconds: TimeInterval, then: @escaping @MainActor () -> T) async -> T {
+    await withCheckedContinuation { (done: CheckedContinuation<T, Never>) in
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue) {
+            MainActor.assumeIsolated {
+                let held = Timer(timeInterval: 0.05, repeats: true) { _ in }
+                RunLoop.main.add(held, forMode: .eventTracking)
+                let end = Date.now.addingTimeInterval(seconds)
+                while Date.now < end { RunLoop.main.run(mode: .eventTracking, before: end) }
+                held.invalidate()
+                done.resume(returning: then())
+            }
+        }
+        CFRunLoopWakeUp(CFRunLoopGetMain())
+    }
 }
