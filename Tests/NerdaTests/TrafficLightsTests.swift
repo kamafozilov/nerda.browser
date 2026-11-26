@@ -83,17 +83,20 @@ func theAddressBarRunsUnderTheWindowButtons(incognito: Bool) throws {
 
 /// Opened with nothing to type into (a settings page), the window keeps the
 /// keyboard to itself rather than ring its first button, as though Tab had
-/// been pressed; Tab then goes on into the controls.
+/// been pressed; Tab then goes on into the controls. With Keyboard
+/// navigation on, as only then does Tab go to buttons, whatever this Mac's.
 @MainActor
 @Test func aWindowDoesntPutTheKeyboardOnItsFirstButton() throws {
-    // Off screen: a window ordered in would take part in other tests' focus.
-    let window = BrowserWindow(browser: Browser(dataStore: .nonPersistent()))
-    defer { window.close() }
-    let rest = try #require(window.initialFirstResponder as? KeyboardRest)
-    #expect(!rest.canBecomeKeyView)
-    #expect(window.makeFirstResponder(rest))
-    window.selectNextKeyView(nil)
-    #expect(window.firstResponder !== rest)
+    try withKeyboardNavigation {
+        // Off screen: a window ordered in would take part in other tests' focus.
+        let window = BrowserWindow(browser: Browser(dataStore: .nonPersistent()))
+        defer { window.close() }
+        let rest = try #require(window.initialFirstResponder as? KeyboardRest)
+        #expect(!rest.canBecomeKeyView)
+        #expect(window.makeFirstResponder(rest))
+        window.selectNextKeyView(nil)
+        #expect(window.firstResponder !== rest)
+    }
 }
 
 /// Holds an animation at one point of its way for a few seconds, the slide
