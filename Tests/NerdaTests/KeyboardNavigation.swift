@@ -1,4 +1,5 @@
 import AppKit
+import Testing
 
 /// Runs `body` as with Keyboard navigation on (System Settings › Keyboard),
 /// whatever the Mac's setting: every control a key view, so Tab goes through
@@ -8,11 +9,9 @@ import AppKit
 /// `body` isn't async: nothing else runs on the main thread meanwhile, so no
 /// other test sees the setting changed.
 @MainActor
-func withKeyboardNavigation<T>(_ body: () throws -> T) rethrows -> T {
+func withKeyboardNavigation<T>(_ body: () throws -> T) throws -> T {
     let selector = NSSelectorFromString("_allowsAnyValidResponder")
-    guard let method = class_getInstanceMethod(NSWindow.self, selector) else {
-        preconditionFailure("AppKit no longer asks windows \(selector)")
-    }
+    let method = try #require(class_getInstanceMethod(NSWindow.self, selector), "AppKit no longer asks windows \(selector)")
     let on: @convention(block) (NSWindow) -> Bool = { _ in true }
     let before = method_setImplementation(method, imp_implementationWithBlock(on))
     defer { method_setImplementation(method, before) }
