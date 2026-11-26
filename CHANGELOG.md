@@ -18,6 +18,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Collapsing and showing the tabs (⌘S) is one clean slide: the tabs slide off whole and the page follows them, under the window's buttons. Before, the address bar lost its colour for a moment, the top of the tabs stayed behind as a grey block while the rest slid, a second sidebar button showed beside the first, and a dark strip could flash down the right edge of a light page.
 - The tabs coming out over the page from the window's left edge slide out as one sheet, their top row with them. Before, the top row faded in where it was while the rest slid.
 - Window › Downloads (⌥⌘L) with the tabs collapsed brings them out and opens the list. Before, they came half out and went back unless the pointer was over them.
+- An agent reading a long address with fetch no longer holds up Nerda's windows while the answer comes in.
 
 ## [0.0.29] - 2026-11-26
 
