@@ -6,19 +6,27 @@ import WebKit
 
 /// Serves a page that hears a stream of events, ten a second, as a chat or
 /// a dashboard hears its server, and keeps the time of each one heard and
-/// each tick of its own 100 ms timer. On a queue of its own, so a busy main
-/// thread in other tests never holds the stream up.
+/// each tick of its own 100 ms timer. The page answers each event it hears
+/// with a request of its own, which the server keeps the time of: what the
+/// page did is known without asking the page, which would wake it. On a
+/// queue of its own, so a busy main thread in other tests never holds the
+/// stream up.
 private final class StreamServer: @unchecked Sendable {
     let listener: NWListener
     private let queue = DispatchQueue(label: "HiddenPagesTests.stream")
     private let timer: DispatchSourceTimer
     /// Only on `queue`.
     private var streams: [NWConnection] = []
+    /// When the page answered an event, only on `queue`.
+    private var answers: [Date] = []
 
     static let page = """
         <script>
         window.heard = []; window.ticked = [];
-        new EventSource('/events').onmessage = () => heard.push(Date.now());
+        new EventSource('/events').onmessage = () => {
+            heard.push(Date.now());
+            fetch('/heard', {cache: 'no-store'}).catch(() => {});
+        };
         setInterval(() => ticked.push(Date.now()), 100);
         </script>
         """
@@ -36,6 +44,10 @@ private final class StreamServer: @unchecked Sendable {
                     let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\n"
                     connection.send(content: Data(head.utf8), completion: .contentProcessed { _ in })
                     streams.append(connection)
+                } else if request.hasPrefix("GET /heard") {
+                    answers.append(Date())
+                    let head = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"
+                    connection.send(content: Data(head.utf8), completion: .contentProcessed { _ in connection.cancel() })
                 } else {
                     let body = Data(Self.page.utf8)
                     let head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
@@ -55,6 +67,20 @@ private final class StreamServer: @unchecked Sendable {
     func url() async throws -> URL {
         try await waitFor { listener.port != nil && listener.port != .any }
         return URL(string: "http://127.0.0.1:\(try #require(listener.port).rawValue)/")!
+    }
+
+    /// How many events the page answered after `date`.
+    func answered(after date: Date) -> Int {
+        queue.sync { answers.filter { $0 > date }.count }
+    }
+
+    /// The longest the page went without answering an event, from `date`
+    /// to now.
+    func longestQuiet(since date: Date) -> TimeInterval {
+        queue.sync {
+            let times = [date] + answers.filter { $0 > date } + [Date()]
+            return zip(times, times.dropFirst()).map { $1.timeIntervalSince($0) }.max() ?? 0
+        }
     }
 
     func stop() {
@@ -103,27 +129,28 @@ struct HiddenPagesTests {
     }
 
     /// Out of sight for longer than WebKit takes to suspend a page, the page
-    /// still hears each event as it comes. Its own timers stay slowed, as
-    /// WebKit slows a hidden page's: far fewer than ten ticks a second.
+    /// still hears the events as they come: it answers twenty more, unasked.
+    /// A suspended page answers none until something wakes it, and nothing
+    /// here does. Its own timers stay slowed, as WebKit slows a hidden
+    /// page's: far fewer than ten ticks a second.
     @Test func aHiddenPageKeepsRunning() async throws {
         let server = try StreamServer()
         defer { server.stop() }
         let (browser, tab) = try await listeningTab(server)
         try await Task.sleep(for: .seconds(8))
 
-        let heard = try await heard(tab, over: 6)
-        #expect(heard.longestWait < 1.5, "\(heard)")
-        #expect(heard.events >= 20, "\(heard)")
-        #expect(heard.ticks < 30, "\(heard)")
+        let since = Date()
+        try await waitFor("Twenty events answered out of sight") { server.answered(after: since) >= 20 }
+        let heard = try await heard(tab, over: Date().timeIntervalSince(since))
+        #expect(heard.ticks < 10 * Int(Date().timeIntervalSince(since)) / 2, "\(heard)")
         withExtendedLifetime(browser) {}
     }
 
     /// Low Power Mode turned on suspends a page already out of sight, and
     /// turned off lets it run again, without the page being made anew.
-    /// WebKit suspends it about a second after the mode comes on, and the
-    /// page hears what came meanwhile only once it runs again. The mode is
-    /// on for as short a time as shows that, as other tests' spare pages
-    /// go while it is.
+    /// WebKit suspends it about a second after the mode comes on: the page
+    /// then answers no event for seconds on end, where a running one answers
+    /// ten a second. Turned off, it answers again.
     @Test func hiddenPagesFollowLowPowerMode() async throws {
         let server = try StreamServer()
         defer { server.stop() }
@@ -134,15 +161,13 @@ struct HiddenPagesTests {
 
         LowPowerMode.force(true, for: browser.dataStore)
         LowPowerMode.changed()
-        try await Task.sleep(for: .seconds(4))
+        let on = Date()
+        try await waitFor("Three seconds without an answer", timeout: .seconds(10)) { server.longestQuiet(since: on) >= 3 }
+
         LowPowerMode.force(false, for: browser.dataStore)
         LowPowerMode.changed()
-        let suspended = try await heard(tab, over: 5)
-        #expect(suspended.longestWait >= 2, "\(suspended)")
-
-        try await Task.sleep(for: .seconds(6))
-        let running = try await heard(tab, over: 5)
-        #expect(running.longestWait < 1.5, "\(running)")
+        let off = Date()
+        try await waitFor("Twenty events answered again") { server.answered(after: off) >= 20 }
         #expect(tab.webView === page)
         withExtendedLifetime(browser) {}
     }
