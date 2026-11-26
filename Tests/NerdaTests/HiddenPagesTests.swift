@@ -122,13 +122,17 @@ struct HiddenPagesTests {
     private func listeningTab(_ server: StreamServer) async throws -> (Browser, Nerda.Tab) {
         let browser = Browser(dataStore: .nonPersistent())
         LowPowerMode.force(false, for: browser.dataStore)
-        browser.open(try await server.url())
-        let tab = try #require(browser.tabs.last)
+        return (browser, try await listeningTab(server, in: browser))
+    }
+
+    /// Another tab of `browser` out of sight on the server's page.
+    private func listeningTab(_ server: StreamServer, in browser: Browser) async throws -> Nerda.Tab {
+        let tab = browser.open(try await server.url())
         try await waitFor("Hearing") {
             guard !tab.webView.isLoading, let heard = try? await heard(tab, over: 1) else { return false }
             return heard.events > 0
         }
-        return (browser, tab)
+        return tab
     }
 
     /// Out of sight for longer than WebKit takes to suspend a page, the page
@@ -173,6 +177,54 @@ struct HiddenPagesTests {
         let off = Date()
         try await waitFor("Twenty events answered again") { server.answered(after: off) >= 20 }
         #expect(tab.webView === page)
+        withExtendedLifetime(browser) {}
+    }
+
+    /// Low Power Mode reaches every page of a profile out of sight, not
+    /// only its first: each process with a page of the profile's is told,
+    /// so a page in a process of its own is suspended too, and runs again.
+    @Test func lowPowerModeReachesEveryHiddenPageOfAProfile() async throws {
+        let first = try StreamServer(), second = try StreamServer()
+        defer { first.stop(); second.stop() }
+        let (browser, tab) = try await listeningTab(first)
+        let other = try await listeningTab(second, in: browser)
+        let pids = (try #require(tab.pid), try #require(other.pid))
+        try #require(pids.0 != pids.1, "the two pages share a process: the test can't tell")
+        try await Task.sleep(for: .seconds(3))
+
+        LowPowerMode.force(true, for: browser.dataStore)
+        LowPowerMode.changed()
+        let on = Date()
+        try await waitFor("Both pages quiet", timeout: .seconds(10)) {
+            first.longestQuiet(since: on) >= 3 && second.longestQuiet(since: on) >= 3
+        }
+
+        LowPowerMode.force(false, for: browser.dataStore)
+        LowPowerMode.changed()
+        let off = Date()
+        try await waitFor("Both pages answering again") {
+            first.answered(after: off) >= 20 && second.answered(after: off) >= 20
+        }
+        withExtendedLifetime(browser) {}
+    }
+
+    /// A page made as the mode changes, before Nerda hears of it (the Mac's
+    /// notice comes a moment after), changes it for the pages of its
+    /// profile already open too: they are suspended with it, not left
+    /// running until the next change.
+    @Test func aPageMadeAsTheModeChangesTakesTheOpenOnesWithIt() async throws {
+        let server = try StreamServer()
+        defer { server.stop() }
+        let (browser, _) = try await listeningTab(server)
+        try await Task.sleep(for: .seconds(3))
+
+        LowPowerMode.force(true, for: browser.dataStore)
+        browser.open(URL(string: "about:blank")!)
+        LowPowerMode.changed()
+        let on = Date()
+        try await waitFor("Three seconds without an answer", timeout: .seconds(10)) { server.longestQuiet(since: on) >= 3 }
+        LowPowerMode.force(false, for: browser.dataStore)
+        LowPowerMode.changed()
         withExtendedLifetime(browser) {}
     }
 
