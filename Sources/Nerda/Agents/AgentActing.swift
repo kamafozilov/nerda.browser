@@ -134,8 +134,8 @@ extension AgentPage {
         let after = await unlessHeld(tab, by: .now + .seconds(3)) { try await read(agentTab) } ?? AgentReading()
         let navigated = answeringDialog
             ? !sameDocument(address, tab.url)
-            : await unlessHeld(tab, by: .now + .seconds(1)) { try await documentMark(of: tab) } != document
-                || !sameDocument(address, tab.url)
+            : wentElsewhere(from: address, to: tab.url, mark: document ?? nil,
+                            then: await unlessHeld(tab, by: .now + .seconds(1)) { try await documentMark(of: tab) } ?? nil)
         if navigated {
             return await shown(agentTab, after, did: did, notices: notices, text: true)
         }
@@ -292,6 +292,16 @@ extension AgentPage {
             "return globalThis.nerdaDocument ??= Date.now().toString(36) + Math.random().toString(36).slice(2)",
             contentWorld: world
         ) as? String
+    }
+
+    /// Whether an action took the page to another document: its address
+    /// went elsewhere, or its document's mark (`documentMark`), read before
+    /// and after, differs. A mark not read in time, a page busy for a
+    /// moment, tells nothing either way.
+    static func wentElsewhere(from address: URL?, to url: URL?, mark: String?, then: String?) -> Bool {
+        guard sameDocument(address, url) else { return true }
+        guard let mark, let then else { return false }
+        return mark != then
     }
 
     /// Whether two addresses are of one document: the same but for the part
