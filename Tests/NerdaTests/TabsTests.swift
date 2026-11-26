@@ -339,7 +339,10 @@ private final class UnclickedAction: WKNavigationAction {
     browser.select(waiting.id)
     // On screen, PageView asks for the page, which wakes it to its address.
     let page = waiting.webView
-    try await waitFor { waiting.title == "Arrived" }
+    do { try await waitFor { waiting.title == "Arrived" } } catch {
+        Issue.record("title \(waiting.title), page at \(String(describing: page.url)), loading \(page.isLoading), the same page \(waiting.page === page)")
+        throw error
+    }
     #expect(page.url == file)
     #expect(site.page == nil)
 }
