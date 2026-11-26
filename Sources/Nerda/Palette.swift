@@ -46,14 +46,17 @@ enum Palette {
             self.highContrast = highContrast
         }
 
-        init(_ appearance: NSAppearance) {
+        /// `appearance`'s, with Increase Contrast as the Mac has it unless
+        /// given.
+        init(_ appearance: NSAppearance,
+             increaseContrast: Bool = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast) {
             let match = appearance.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua,
                                                     .accessibilityHighContrastDarkAqua])
             dark = match == .darkAqua || match == .accessibilityHighContrastDarkAqua
             // An incognito window's appearance is set to plain Dark Aqua, which
             // never matches a high-contrast one: the setting itself decides too.
             highContrast = match == .accessibilityHighContrastAqua || match == .accessibilityHighContrastDarkAqua
-                || NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+                || increaseContrast
         }
     }
 
