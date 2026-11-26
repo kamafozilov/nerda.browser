@@ -36,9 +36,11 @@ private final class StreamServer: @unchecked Sendable {
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
         timer = DispatchSource.makeTimerSource(queue: queue)
-        listener.newConnectionHandler = { [unowned self] connection in
+        // Weak: requests the page sent may come in after the test has ended.
+        listener.newConnectionHandler = { [weak self, queue] connection in
             connection.start(queue: queue)
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [unowned self] data, _, _, _ in
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, _ in
+                guard let self else { return connection.cancel() }
                 let request = String(decoding: data ?? Data(), as: UTF8.self)
                 if request.hasPrefix("GET /events") {
                     let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\n"
@@ -57,7 +59,8 @@ private final class StreamServer: @unchecked Sendable {
         }
         listener.start(queue: queue)
         timer.schedule(deadline: .now(), repeating: .milliseconds(100))
-        timer.setEventHandler { [unowned self] in
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
             for stream in streams { stream.send(content: Data("data: news\n\n".utf8), completion: .contentProcessed { _ in }) }
         }
         timer.resume()
@@ -141,8 +144,9 @@ struct HiddenPagesTests {
 
         let since = Date()
         try await waitFor("Twenty events answered out of sight") { server.answered(after: since) >= 20 }
-        let heard = try await heard(tab, over: Date().timeIntervalSince(since))
-        #expect(heard.ticks < 10 * Int(Date().timeIntervalSince(since)) / 2, "\(heard)")
+        let over = Date().timeIntervalSince(since)
+        let heard = try await heard(tab, over: over)
+        #expect(Double(heard.ticks) < 10 * over / 2, "\(heard) over \(over) s")
         withExtendedLifetime(browser) {}
     }
 
