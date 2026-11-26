@@ -1135,6 +1135,7 @@ extension Browser: WKNavigationDelegate {
             let page = selected?.page ?? tabs.lazy.compactMap(\.page).first ?? {
                 let configuration = WKWebViewConfiguration()
                 configuration.websiteDataStore = dataStore
+                Tab.leaveUserInstalledFontsOutIfAsked(configuration.preferences)
                 return WKWebView(frame: .zero, configuration: configuration)
             }()
             let task: WKDownload

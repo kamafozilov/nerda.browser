@@ -90,7 +90,7 @@ import WebKit
 /// A page with Nerda's translation script in it.
 @MainActor
 private func translatable(_ html: String) async throws -> WKWebView {
-    let page = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+    let page = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600), configuration: testConfiguration())
     page.loadHTMLString(html, baseURL: URL(string: "https://example.com"))
     try await waitFor { !page.isLoading }
     _ = try await page.run(Translator.script)

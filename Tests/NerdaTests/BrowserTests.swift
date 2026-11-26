@@ -2190,7 +2190,7 @@ func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) async throws {
         /frame-ad$subdocument,script
         """))
     let list = try #require(try await store.compileContentRuleList(forIdentifier: "navigation", encodedContentRuleList: encoded))
-    let configuration = WKWebViewConfiguration()
+    let configuration = testConfiguration()
     configuration.websiteDataStore = .nonPersistent()
     let page = WKWebView(frame: .zero, configuration: configuration)
     page.navigationDelegate = navigation

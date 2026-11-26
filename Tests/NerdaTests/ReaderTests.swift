@@ -76,7 +76,7 @@ private func offline() async throws -> WKContentRuleList {
 
 @MainActor
 private func loaded(_ html: String) async throws -> WKWebView {
-    let configuration = WKWebViewConfiguration()
+    let configuration = testConfiguration()
     configuration.userContentController.add(try await offline())
     let page = WKWebView(frame: .zero, configuration: configuration)
     page.loadHTMLString(html, baseURL: address)

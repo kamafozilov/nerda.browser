@@ -159,7 +159,7 @@ private func saved(_ host: String, pinned: Bool = false) -> Session.Tab {
 /// again; what was let go of first doesn't.
 @MainActor
 @Test func anElementMovedInThePageKeepsTheKeyboard() async throws {
-    let configuration = WKWebViewConfiguration()
+    let configuration = testConfiguration()
     configuration.userContentController.addUserScript(Nerda.Tab.keepFocus)
     let page = WKWebView(frame: NSRect(x: 0, y: 0, width: 400, height: 300), configuration: configuration)
     page.loadHTMLString("<input id=field><div id=elsewhere></div>", baseURL: nil)
@@ -239,7 +239,7 @@ private final class LinkOpener: NSObject {
 @MainActor
 @Test func openLinkInNewTabStaysBehindUnlessOptionIsHeld() throws {
     _ = NSApplication.shared
-    let page = SwipingWebView(frame: .zero, configuration: WKWebViewConfiguration())
+    let page = SwipingWebView(frame: .zero, configuration: testConfiguration())
     let opener = LinkOpener()
     let menu = NSMenu()
     let item = NSMenuItem(title: "Open Link in New Window", action: #selector(LinkOpener.open(_:)), keyEquivalent: "")
@@ -293,7 +293,7 @@ private final class UnclickedAction: WKNavigationAction {
     let page = try #require(tab.webView as? SwipingWebView)
     let link = URL(string: "https://example.com/next")!
     func open() -> WKWebView? {
-        browser.webView(page, createWebViewWith: WKWebViewConfiguration(), for: UnclickedAction(link),
+        browser.webView(page, createWebViewWith: testConfiguration(), for: UnclickedAction(link),
                         windowFeatures: WKWindowFeatures())
     }
     #expect(open() == nil)

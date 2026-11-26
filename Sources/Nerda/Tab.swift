@@ -1186,8 +1186,15 @@ final class Tab: Identifiable {
         // (Browser.webViewWebContentProcessDidTerminate) and loads again when
         // next shown. Never one on screen, or playing sound.
         set(configuration, "_setCPULimit:", 0.5)
+        leaveUserInstalledFontsOutIfAsked(configuration.preferences)
         return configuration
     }()
+
+    /// Fonts installed on the Mac beyond its own are for pages unless the
+    /// run says not (`UserInstalledFonts`).
+    static func leaveUserInstalledFontsOutIfAsked(_ preferences: WKPreferences) {
+        if !UserInstalledFonts.allowed { set(preferences, "_setShouldAllowUserInstalledFonts:", false) }
+    }
 
     /// Calls a setter of WebKit's own (SPI, as Safari uses), if WebKit still has it.
     private static func set(_ object: NSObject, _ setter: String, _ value: Double) {

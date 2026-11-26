@@ -16,3 +16,16 @@ __attribute__((constructor))
 static void limitTestsAtOnce(void) {
     setenv("SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH", "16", 0);
 }
+
+// Pages without the fonts installed on the Mac beyond its own
+// (`UserInstalledFonts`). With them, a page started in a process already
+// running (the one kept ready, a spare) has WebKit issue two sandbox
+// extensions for its fonts on the main thread, each "with user intent",
+// which the kernel has sandboxd approve, asking TCC. Some 600 asks a run,
+// and now and then one goes unanswered for 5 s, the main thread held all
+// the while and every test's wait with it. Set once for the whole run,
+// before any page is made, so no test flips it under another.
+__attribute__((constructor))
+static void leaveUserInstalledFontsOut(void) {
+    setenv("NERDA_USER_INSTALLED_FONTS", "0", 0);
+}

@@ -45,6 +45,7 @@ enum Reader {
         configuration.setValue(Tab.processPool, forKey: "processPool")
         configuration.applicationNameForUserAgent = Tab.applicationName
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        Tab.leaveUserInstalledFontsOutIfAsked(configuration.preferences)
         Find.install(in: configuration.userContentController)
         let page = ReaderPage(frame: .zero, configuration: configuration)
         page.tab = tab
