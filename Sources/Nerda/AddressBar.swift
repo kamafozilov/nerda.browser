@@ -13,9 +13,6 @@ struct AddressBar: View {
     /// Left free at its start, on its own ground, for the window's buttons
     /// over it while the sidebar is put away.
     var room: CGFloat = 0
-    /// Wears its own ground. Not while the window draws it from its left
-    /// corner instead (`BrowserView.reaching`), where the bar is slid aside.
-    var grounded = true
 
     @Environment(\.colorScheme) private var scheme
 
@@ -117,12 +114,7 @@ struct AddressBar: View {
         }
         // Light or dark to suit the page's colour, whatever the window's.
         .environment(\.colorScheme, color.map(Self.colorScheme) ?? scheme)
-        // Switched, never faded: the window's own takes over in the same frame.
-        .background {
-            BarGround(browser: browser)
-                .opacity(grounded ? 1 : 0)
-                .animation(nil, value: grounded)
-        }
+        .background { BarGround(browser: browser) }
         .overlay(alignment: .bottom) { LoadLine(browser: browser) }
     }
 
@@ -145,9 +137,8 @@ struct AddressBar: View {
 
 /// The address bar's ground: the page's colour, or its own, with the card's
 /// upper corners (the lower are the page's), and a hairline along its
-/// bottom. Drawn by the bar, or by the window from its left corner while the
-/// bar is slid aside (`BrowserView.reaching`), as one piece either way.
-struct BarGround: View {
+/// bottom.
+private struct BarGround: View {
     let browser: Browser
     @Environment(\.colorScheme) private var scheme
 

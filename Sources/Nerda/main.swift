@@ -9,14 +9,21 @@ import os
 /// the whole window, and the sidebar comes out over it while the pointer is
 /// at the window's left edge.
 ///
-/// The card's left edge slides with the sidebar, and the page with it, but
-/// the page is resized only once, where the card's right edge hides it:
-/// WebKit redraws a resized page a frame or more late (on macOS 26, with no
-/// way to wait for it), and resized all the way it would judder, and show
-/// blank strips. Going, the sidebar leaves the page its whole width at once,
-/// and the part that doesn't fit yet waits past the card's right edge; coming,
-/// the page slides aside as it is, and takes its narrower width once the
-/// sidebar is in. (After driceroland/Search.)
+/// Putting the sidebar away and bringing it back moves one edge, the card's
+/// left one: the sidebar slides off whole, its top row with it, and the card,
+/// address bar and page, grows after it, under the window's buttons, which
+/// stay. Nothing is switched or faded on the way, so every frame of it is
+/// the window as it could stand: glass with the sidebar on it, then the card.
+///
+/// The page slides with the card's edge, but is resized only once, where the
+/// card's right edge hides it: WebKit redraws a resized page some frames
+/// late, and resized on every frame it shows strips it hasn't drawn, as wide
+/// as a tenth of the window, and its content trails the edge. Going, the
+/// sidebar leaves the page its whole width at once, and the part that doesn't
+/// fit yet waits past the card's right edge; coming, the page slides aside as
+/// it is, and takes its narrower width once the sidebar is in. So the page is
+/// always laid out at the wider of the two widths while it moves, and nothing
+/// of it is ever missing. (After driceroland/Search.)
 ///
 /// With the tabs across the top (Settings › Appearance › Tab style), the
 /// sidebar goes, and the card starts right under them, the tab on screen
@@ -27,8 +34,15 @@ struct BrowserView: View {
 
     /// The collapsed sidebar, out over the page.
     @State private var peeking = false
+    /// It came out over the page, and wears its own glass there (see
+    /// `Sidebar.floating`): from when it comes out until it has gone again,
+    /// or is pinned with the page moved aside from under it.
+    @State private var floating = false
     @State private var overPeek = false
     @State private var downloadsShown = false
+    /// Brought out for the downloads list, which opens once it is there:
+    /// it stays out until then, wherever the pointer is.
+    @State private var opensDownloads = false
     @State private var aiChatsShown = false
     @State private var menuShown = false
     /// The page is laid out beside the sidebar (see `laidOut`): from the
@@ -76,21 +90,23 @@ struct BrowserView: View {
     /// Where the page is laid out from: as `inset`, but changed in one step,
     /// as the sidebar starts to go and once it has fully come.
     private var laidOut: CGFloat { max(docked && docks ? sidebarWidth : 0, margin) }
-    /// How far off to the left the sidebar is slid: all the way, far enough
-    /// that its shadow goes too, when it isn't wanted. With Reduce Motion it
-    /// fades in and out where it is instead.
-    private var sidebarSlid: CGFloat { sidebarShown || Motion.reduced ? 0 : -(sidebarWidth + 32) }
+    /// How far off to the left the sidebar is slid when it isn't wanted: as
+    /// far as the card's edge goes, so the two move as one, its right edge on
+    /// the card's left all the way; from out over the page, far enough that
+    /// its shadow goes too. With Reduce Motion it fades in and out where it
+    /// is instead.
+    private var sidebarSlid: CGFloat {
+        if sidebarShown || Motion.reduced { return 0 }
+        return floating ? -(sidebarWidth + 32) : margin - sidebarWidth
+    }
     /// Where the card's top edge is: under the tabs, when they are across the
     /// top, or the margin.
     private var top: CGFloat { horizontal && !pageFullscreen ? TabStrip.height : margin }
-    /// The address bar's ground is drawn from the window's left corner, past
-    /// the card's edge, rather than by the bar: whenever the sidebar isn't
-    /// pinned with the page laid out beside it, so while it slides too. The
-    /// window's buttons then sit on the bar's ground all along, under the
-    /// sidebar's top row as that fades (`Sidebar.shown`), and the card's
-    /// corner never passes under them. Switched while the top row covers it
-    /// (as the sidebar starts to go, and once it has come), so never seen to.
-    private var reaching: Bool { docks && !(browser.sidebarOpen && docked) }
+    /// The sidebar wears glass of its own (`Sidebar.floating`): out over the
+    /// page. With Reduce Motion it never slides clear of the page, but fades
+    /// in and out where it is, so it wears it whenever the page isn't laid
+    /// out beside it.
+    private var sidebarFloats: Bool { floating || (Motion.reduced && !(browser.sidebarOpen && docked)) }
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -105,15 +121,8 @@ struct BrowserView: View {
                 .padding(.leading, inset)
 
             if !pageFullscreen {
-                if reaching {
-                    BarGround(browser: browser)
-                        .frame(height: AddressBar.height)
-                        .padding(.horizontal, margin)
-                        .padding(.top, top)
-                        .frame(maxHeight: .infinity, alignment: .top)
-                }
                 // Beside the sidebar, and under it while it is out over the page.
-                AddressBar(browser: browser, horizontal: horizontal, room: barRoom, grounded: !reaching)
+                AddressBar(browser: browser, horizontal: horizontal, room: barRoom)
                     .padding(.leading, inset)
                     .padding(.trailing, margin)
                     .padding(.top, top)
@@ -139,8 +148,8 @@ struct BrowserView: View {
                 // Always there, slid off to the left when not wanted, rather than
                 // added and taken away, so it comes back as it was left (scrolled
                 // where it was) without being built again.
-                Sidebar(browser: browser, pinned: browser.sidebarOpen, docked: docked, slid: sidebarSlid,
-                        shown: sidebarShown, downloadsShown: $downloadsShown, aiChatsShown: $aiChatsShown,
+                Sidebar(browser: browser, pinned: browser.sidebarOpen, floating: sidebarFloats,
+                        downloadsShown: $downloadsShown, aiChatsShown: $aiChatsShown,
                         menuShown: $menuShown, width: $sidebarWidth)
                     // Only out over the page does it matter: pinned, the pointer
                     // coming and going would have the whole window worked out again.
@@ -155,7 +164,7 @@ struct BrowserView: View {
                     Color.clear
                         .frame(width: 6)
                         .contentShape(Rectangle())
-                        .onHover { if $0 { withAnimation(.slide) { peeking = true } } }
+                        .onHover { if $0 { peek() } }
                 }
             }
         }
@@ -237,26 +246,39 @@ struct BrowserView: View {
         .onChange(of: browser.sidebarOpen) { _, open in
             // Pinning it puts the floating one away (it stays where it is, now pinned).
             peeking = false
-            // Going: the page takes the whole window at once, under the sidebar
-            // as it slides off.
-            if !open { docked = false }
+            // Going: the page takes its whole width at once, and slides after
+            // the sidebar with the card's edge.
+            if !open {
+                if docked, docks { browser.selected?.veilGrowth() }
+                docked = false
+            }
         }
-        // Coming: the page makes room once the sidebar has slid all the way in
-        // over it (at once, if it came without animation).
+        // Coming: the page makes room once the card's edge has slid all the way
+        // aside (at once, if it came without animation), and a sidebar that
+        // was out over it is then one with the window's glass.
         .transaction(value: browser.sidebarOpen) { transaction in
             guard browser.sidebarOpen else { return }
-            transaction.addAnimationCompletion { docked = browser.sidebarOpen }
+            transaction.addAnimationCompletion {
+                docked = browser.sidebarOpen
+                if docked { floating = false }
+            }
         }
-        .onChange(of: browser.commandBarOpen) { if browser.commandBarOpen { peeking = false } }
+        .onChange(of: browser.commandBarOpen) {
+            guard browser.commandBarOpen else { return }
+            peeking = false
+            if !browser.sidebarOpen { floating = false }
+        }
         .onChange(of: browser.downloadsRequests) {
             if downloadsShown || pageFullscreen { return downloadsShown = false }
             guard !horizontal, !sidebarShown else { return downloadsShown = true }
             // A collapsed sidebar comes out first, as it does under the pointer,
             // and the list opens from its button once it is there.
-            withAnimation(.slide) { peeking = true }
+            peek()
+            opensDownloads = true
             Task {
                 try? await Task.sleep(for: .milliseconds(250))
                 downloadsShown = true
+                opensDownloads = false
             }
         }
         .onChange(of: tabsShown) { if !tabsShown { menuShown = false } }
@@ -283,10 +305,26 @@ struct BrowserView: View {
         // Leaving it puts it away, as quickly as it came: the moment waited is
         // only for the pointer to be seen over it once it has slid out. The
         // downloads list, the AI chats or the menu open from it holds it out.
-        .task(id: peeking && !overPeek && !downloadsShown && !aiChatsShown && !menuShown) {
-            guard peeking, !overPeek, !downloadsShown, !aiChatsShown, !menuShown else { return }
+        .task(id: peeking && !overPeek && !downloadsShown && !opensDownloads && !aiChatsShown && !menuShown) {
+            guard peeking, !overPeek, !downloadsShown, !opensDownloads, !aiChatsShown, !menuShown else { return }
             try? await Task.sleep(for: .milliseconds(80))
-            if !Task.isCancelled { withAnimation(.slide) { peeking = false } }
+            if !Task.isCancelled { unpeek() }
+        }
+    }
+
+    /// The collapsed sidebar comes out over the page, on glass of its own.
+    private func peek() {
+        withAnimation(.slide) {
+            floating = true
+            peeking = true
+        }
+    }
+
+    /// And goes again. Its glass goes once it is out of sight; with Reduce
+    /// Motion it fades where it is, and keeps it meanwhile.
+    private func unpeek() {
+        withAnimation(.slide) { peeking = false } completion: {
+            if !peeking, !browser.sidebarOpen, !Motion.reduced { floating = false }
         }
     }
 
@@ -294,8 +332,7 @@ struct BrowserView: View {
     /// glass when the page is as light or dark as it. Across the top, it
     /// leaves a `gap` for the tab on screen to run into the card.
     private func cardEdge(gap: CGRect?) -> some View {
-        CardEdge(inset: inset, bar: reaching ? margin : nil, top: top, margin: margin, radius: Self.cornerRadius,
-                 row: AddressBar.height)
+        CardEdge(inset: inset, top: top, margin: margin, radius: Self.cornerRadius)
             .strokeBorder(Self.edge)
             .mask { EdgeGap(gap: gap ?? .zero).fill(style: FillStyle(eoFill: true)) }
             .allowsHitTesting(false)
@@ -317,17 +354,12 @@ struct BrowserView: View {
 }
 
 /// The card's outline, in the window: from `inset`, its left edge, which
-/// slides with the sidebar, but along the address bar from `bar` while the
-/// bar's ground reaches past it to the window's corner (`BrowserView.reaching`).
-/// Only `inset` is animated: `bar` is switched, as the ground is.
+/// slides with the sidebar.
 nonisolated struct CardEdge: InsettableShape {
     var inset: CGFloat
-    var bar: CGFloat?
     var top: CGFloat
     var margin: CGFloat
     var radius: CGFloat
-    /// The address bar's height, the row the bar's ground is.
-    var row: CGFloat
     var inward: CGFloat = 0
 
     var animatableData: CGFloat {
@@ -337,12 +369,7 @@ nonisolated struct CardEdge: InsettableShape {
 
     func path(in rect: CGRect) -> Path {
         let card = CGRect(x: inset, y: top, width: rect.maxX - margin - inset, height: rect.maxY - margin - top)
-        let whole = RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .inset(by: inward).path(in: card)
-        guard let bar, bar < inset else { return whole }
-        let ground = UnevenRoundedRectangle(topLeadingRadius: radius, topTrailingRadius: radius, style: .continuous)
-            .inset(by: inward).path(in: CGRect(x: bar, y: top, width: rect.maxX - margin - bar, height: row))
-        return whole.union(ground)
+        return RoundedRectangle(cornerRadius: radius, style: .continuous).inset(by: inward).path(in: card)
     }
 
     func inset(by amount: CGFloat) -> CardEdge {

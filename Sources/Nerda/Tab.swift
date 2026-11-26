@@ -1442,6 +1442,13 @@ final class PageSlot: NSView {
     required init?(coder: NSCoder) { fatalError() }
 }
 
+extension Tab {
+    /// Its page is about to be made wider in one step: see `PageStage.veilGrowth`.
+    func veilGrowth() {
+        (page?.superview as? PageStage)?.veilGrowth()
+    }
+}
+
 extension URLRequest {
     /// A page for a tab, waited for as long as WebKit waits for one a page
     /// opens itself, and as Chrome does: a plain URLRequest gives up after a
