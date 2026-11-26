@@ -32,16 +32,33 @@ nonisolated extension AgentVerb {
     static let eval = AgentVerb(
         name: "eval",
         summary: """
-            Run JavaScript in an Agent tab's page when no other tool fits, as the body of an async function: \
-            return a value to get it back as JSON. It runs in a world of its own: the page's document, not \
-            its scripts' variables. Password and card fields read as ••••, and putting script into the page \
-            itself is refused. Answers what it returned, then what changed, as click does.
+            Run JavaScript in an Agent tab's page, as the body of an async function: return a value to get it \
+            back as JSON. Each eval waits for the user to read the script and allow it, once, so use it only \
+            when no other tool can do the step. Answers needs_user until they have: tell the user, then call \
+            eval again with the same script on the same tab. It runs in a world of its own: the page's \
+            document, not its scripts' variables. Password and card fields read as ••••, and putting script \
+            into the page itself is refused. Answers what it returned, then what changed, as click does.
             """,
-        arguments: [.tab, .string("script", "The JavaScript, as the body of an async function, such as return document.title")]
+        arguments: [.tab, .string("script", "The JavaScript, as the body of an async function, such as return document.title; at most \(AgentEval.mostScript) characters")],
+        // Room for the owner's Allow (`AgentEvalApprovals.runRoom` is kept
+        // for the script after it).
+        deadline: .seconds(45), waitsForOwner: true
     ) { call in
         let tab = try call.tab()
         let script = try call.string("script")
+        guard script.count <= AgentEval.mostScript else {
+            throw AgentError(.invalid, """
+                That script is \(script.count) characters; eval takes \(AgentEval.mostScript) at most, as the user \
+                reads it whole before it runs. Keep it short, or do the step with the other tools.
+                """)
+        }
+        try await call.server.scripts.clear(script, on: tab, for: call)
+        let place = AgentEvalApprovals.place(of: tab)
         return try await AgentPage.act(tab, for: call) {
+            // Allowed where the page was: not on a page it went to since.
+            guard AgentEvalApprovals.place(of: tab) == place else {
+                throw AgentError(.failed, "\(tab.ref) went to another page before the script ran, so it didn't. Call eval again.")
+            }
             guard let value = try await AgentEval.run(script, in: tab, by: call.deadline - .seconds(1)) else {
                 return "eval ran in \(tab.ref); it returned nothing."
             }

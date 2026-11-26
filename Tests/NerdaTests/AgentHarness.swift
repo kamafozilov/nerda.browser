@@ -46,9 +46,12 @@ final class AgentHarness {
     /// saved in the harness's temporary folder, never the data folder.
     /// `approvePayment` is the owner looking at a payment's sheet; by
     /// default they never answer, and no sheet or Touch ID prompt shows.
+    /// `approveScript` is the owner looking at an eval's script; by default
+    /// they never answer, so eval runs nothing (`allowsScripts` allows all).
     init(callers: AgentCallers = .anyone, ask: @escaping AgentApprovals.Ask = { _ in nil },
          approveSkill: @escaping SiteSkills.Approve = { _ in nil },
-         approvePayment: @escaping AgentPayments.Approve = { _ in nil }, profiles: [Profile] = []) throws {
+         approvePayment: @escaping AgentPayments.Approve = { _ in nil },
+         approveScript: @escaping AgentEvalApprovals.Approve = { _ in nil }, profiles: [Profile] = []) throws {
         // Short: a socket's path has room for 103 bytes.
         folder = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "na-" + UUID().uuidString.prefix(8))
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -64,7 +67,7 @@ final class AgentHarness {
         server = AgentServer(socket: folder.appending(path: "agents.sock"), callers: callers, defaults: defaults,
                              profiles: { [.main] + profiles }, notifier: notifier, now: { clock.now }, ask: ask,
                              skills: SiteSkills(folder: folder.appending(path: "Skills"), approve: approveSkill),
-                             approvePayment: approvePayment) { profile in
+                             approvePayment: approvePayment, approveScript: approveScript) { profile in
             let agents = AgentBrowser(profile: profile, dataStore: .nonPersistent())
             agents.browser.vault = vault
             // Downloads under the test's folder, never the owner's Downloads.
@@ -73,6 +76,10 @@ final class AgentHarness {
         }
         server.start()
     }
+
+    /// The owner allowing every eval's script at once, for tests of what
+    /// eval does once allowed.
+    static let allowsScripts: AgentEvalApprovals.Approve = { _ in true }
 
     /// The Agent browser the server opened Agent tabs in, once it has.
     var agents: AgentBrowser? { server.browsers.first }

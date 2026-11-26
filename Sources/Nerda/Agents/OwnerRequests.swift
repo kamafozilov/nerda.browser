@@ -20,6 +20,10 @@ final class OwnerRequest: Identifiable {
         /// A payment its agent pressed, held for the owner's Touch ID on a
         /// sheet over their window (`AgentPayments`): nothing here answers it.
         case payment
+        /// A script its agent would run with eval, waiting for the owner's
+        /// Allow on a sheet over their window (`AgentEvalApprovals`):
+        /// nothing here answers it either.
+        case script
     }
 
     enum Answer: Equatable {
@@ -59,10 +63,13 @@ final class OwnerRequest: Identifiable {
 
     var isHandoff: Bool { if case .handoff = kind { true } else { false } }
 
+    /// Answered only on its sheet, never by Done or a choice here.
+    var isAnsweredOnSheet: Bool { kind == .payment || kind == .script }
+
     var choices: [String] {
         switch kind {
         case .question(let choices), .dialog(let choices): choices
-        case .handoff, .payment: []
+        case .handoff, .payment, .script: []
         }
     }
 
@@ -77,6 +84,7 @@ final class OwnerRequest: Identifiable {
         case .question: "asks you"
         case .dialog: "needs you to answer a page"
         case .payment: "wants to pay"
+        case .script: "wants to run a script"
         }
     }
 
@@ -157,6 +165,12 @@ final class OwnerRequests {
         begin(OwnerRequest(session: session, tab: tab, kind: .payment, text: text, canSkip: false, site: nil))
     }
 
+    /// A script the agent would run with eval, for the owner to allow on its
+    /// sheet: always a new request, as the ask it belongs to is.
+    func script(_ text: String, on tab: AgentTab, for session: AgentSession) -> OwnerRequest {
+        begin(OwnerRequest(session: session, tab: tab, kind: .script, text: text, canSkip: false, site: nil))
+    }
+
     /// The request is no longer needed: withdrawn if still open, and told to
     /// no later call.
     func drop(_ request: OwnerRequest) {
@@ -164,10 +178,10 @@ final class OwnerRequests {
         untold.removeAll { $0 === request }
     }
 
-    /// The owner's Done. A payment isn't done this way: only its sheet
-    /// and Touch ID approve it.
+    /// The owner's Done. A payment or a script isn't done this way: only
+    /// its sheet answers it.
     func done(_ request: OwnerRequest) {
-        guard request.kind != .payment else { return }
+        guard !request.isAnsweredOnSheet else { return }
         end(request, .done)
     }
 

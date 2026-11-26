@@ -25,6 +25,8 @@ final class AgentServer {
     let skills: SiteSkills
     /// Payments agents pressed, held for the owner's Touch ID.
     let payments: AgentPayments
+    /// Scripts agents would run with eval, each waiting for the owner's Allow.
+    let scripts: AgentEvalApprovals
     private let callers: AgentCallers
     private let defaults: UserDefaults
     private let makeBrowser: (Profile) -> AgentBrowser
@@ -53,6 +55,7 @@ final class AgentServer {
          ask: @escaping AgentApprovals.Ask = AgentApprovals.sheet,
          skills: SiteSkills = SiteSkills(folder: Edition.folder.appending(path: "Skills")),
          approvePayment: @escaping AgentPayments.Approve = AgentPayments.sheet,
+         approveScript: @escaping AgentEvalApprovals.Approve = AgentEvalApprovals.sheet,
          makeBrowser: @escaping (Profile) -> AgentBrowser = { AgentBrowser(profile: $0) }) {
         self.socket = socket
         owner = OwnerRequests(notifier: notifier)
@@ -61,6 +64,7 @@ final class AgentServer {
         self.callers = callers
         self.skills = skills
         payments = AgentPayments(owner: owner, approve: approvePayment)
+        scripts = AgentEvalApprovals(owner: owner, approve: approveScript)
         self.defaults = defaults
         approvals = AgentApprovals(defaults: defaults, ask: ask)
         listProfiles = profiles

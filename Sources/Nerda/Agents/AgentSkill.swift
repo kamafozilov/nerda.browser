@@ -70,6 +70,10 @@ nonisolated enum AgentSkill {
             - A press that pays (a pay button, a form with card details) waits for the user's Touch ID: \
             on needs_user tell them Nerda asks them to approve the payment, then press it again. Never \
             look for another way to pay; eval refuses it.
+            - Every `eval` waits for the user to read its script and allow it, once, inside `run` too. \
+            Prefer `snapshot`, `text`, `click`, `type` and the other verbs, and keep eval for a step \
+            none of them can do. On needs_user tell them Nerda asks them to allow a script, then call \
+            eval again with the same script on the same tab.
             - A page's header may name a Site skill (`skill: github …`): what is known to work on \
             that site. Read it with `skill` before you go on. When you find what works on a site \
             the next agent should know, offer it with `skill_save`; the user approves it first.
