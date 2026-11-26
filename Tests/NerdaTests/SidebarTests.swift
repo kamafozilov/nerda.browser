@@ -100,7 +100,14 @@ private func withAccessibility(_ body: () async throws -> Void) async rethrows {
         return responder === page || responder.isDescendant(of: page)
     }
     // On screen, with the keyboard, as a page that comes on screen takes it.
-    try await waitFor("B with the keyboard") { pageHasKeyboard(b) }
+    do { try await waitFor("B with the keyboard") { pageHasKeyboard(b) } } catch {
+        Issue.record("""
+            the keyboard on \(String(describing: window.firstResponder)); B selected \(browser.selectedID == b.id), \
+            in the window \(b.page?.window === window), hidden \(String(describing: b.page?.isHiddenOrHasHiddenAncestor)), \
+            command bar \(browser.commandBarOpen)
+            """)
+        throw error
+    }
 
     window.makeFirstResponder(nil)
     browser.select(keepingKeyboard: a.id)
