@@ -232,3 +232,27 @@ import WebKit
     for _ in 0..<100 where try await run("return typeof nerdaFill") as? String != "function" { try await Task.sleep(for: .milliseconds(20)) }
     #expect(try await run("return typeof nerdaFill") as? String == "function")
 }
+
+/// The owner's fill goes into the boxes the caret was in, else the page's
+/// first password box, as it always has: a name box asked for alone is
+/// filled only for an agent's sign_in, never by the owner's pick.
+@MainActor @Test func theOwnersFillLeavesANameAskedAloneToAgents() async throws {
+    let browser = Browser(dataStore: .nonPersistent())
+    let tab = Nerda.Tab()
+    browser.add(tab)
+    let page = tab.webView
+    page.loadHTMLString("<form><input name=username autocomplete=username><button>Next</button></form>",
+                        baseURL: URL(string: "https://shop.test/")!)
+    for _ in 0..<300 where page.isLoading || page.url == nil { try await Task.sleep(for: .milliseconds(20)) }
+    func run(_ script: String) async throws -> Any? {
+        try await page.callAsyncJavaScript(script, contentWorld: Passwords.world)
+    }
+    _ = try await run(Passwords.source)
+    let name = "return document.querySelector('input').value"
+
+    #expect(try await run("return nerdaFill('jane', 'secret', 'shop.test', true)") as? Bool == false)
+    #expect(try await page.callAsyncJavaScript(name, contentWorld: .page) as? String == "")
+
+    #expect(try await run("return nerdaFill('jane', 'secret', 'shop.test', true, true)") as? Bool == true)
+    #expect(try await page.callAsyncJavaScript(name, contentWorld: .page) as? String == "jane")
+}

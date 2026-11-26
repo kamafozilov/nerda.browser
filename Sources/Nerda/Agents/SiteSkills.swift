@@ -227,7 +227,7 @@ final class SiteSkills {
     /// The skill whole, on a sheet over the owner's window that doesn't
     /// bring Nerda forward; with no window open, once they open one.
     static func card(_ card: SiteSkillCard) async -> Bool? {
-        let window = await AgentApprovals.ownersWindow()
+        guard let window = await AgentApprovals.ownersWindow() else { return nil }
         let skill = card.skill
         let alert = NSAlert()
         alert.messageText = "\(card.asker) wants to save a Site skill"
@@ -265,8 +265,9 @@ final class SiteSkills {
     }
 }
 
-/// Reading Site skills, and saving one with the owner's approval. A group
-/// of its own (`more_tools`); the hint on a covered site names `skill`.
+/// Reading Site skills, and saving one with the owner's approval. `skill`,
+/// which the hint on a covered site names, is listed from the start;
+/// `skill_save` is the skills group (`more_tools`).
 nonisolated extension AgentVerb {
     static let skillVerbs: [AgentVerb] = [skill, skillSave]
 
@@ -277,7 +278,7 @@ nonisolated extension AgentVerb {
             before. The first answer on a site that has one names it. Without a name, lists them all.
             """,
         arguments: [.string("name", "The skill's name, such as github", required: false)],
-        readOnly: true, group: .skills
+        readOnly: true
     ) { call in
         let skills = call.server.skills
         guard let name = call.optionalString("name")?.trimmingCharacters(in: .whitespaces), !name.isEmpty else {
@@ -342,11 +343,8 @@ nonisolated extension AgentVerb {
         }
         let proposal = call.server.skills.propose(skill, by: call.session)
         guard let answer = try await call.server.skills.answer(to: proposal, within: waitOnOwner(call)) else {
-            throw AgentError(.needsUser, """
-                needs_user: Nerda shows the user the skill \(name) to save, and they haven't answered yet. \
-                Tell the user it is waiting for them in Nerda's window, then call skill_save again with the \
-                same skill to keep waiting.
-                """)
+            throw AgentError.needsUser("Nerda shows the user the skill \(name) to save, and they haven't answered yet.",
+                                       waitingIn: "in Nerda's window", again: "skill_save with the same skill")
         }
         switch answer {
         case .saved:

@@ -28,6 +28,14 @@ enum Windows {
 
     static var locked: Bool { incognito.first?.browser.locked ?? false }
 
+    /// Whether any of `windows` the owner can see is up, or minimized in
+    /// the Dock (it comes back as it was, not from the session file): the
+    /// Agent window, though shown (off screen), isn't theirs, so it never
+    /// counts.
+    static func ownerShowsOne(among windows: [NSWindow] = NSApp.windows) -> Bool {
+        windows.contains { ($0.isVisible || $0.isMiniaturized) && !($0 is AgentWindow) }
+    }
+
     /// ⇧⌘N: a new incognito window. With a link (Open Link in Incognito
     /// Window), a tab for it in the incognito window last opened, as in
     /// Chrome, or a window of its own. Locked, only once unlocked.

@@ -63,15 +63,27 @@ enum AgentShot {
 
     /// The page's viewport as a JPEG, `width` pixels wide or at the
     /// screen's resolution. The page is in its off-screen window and drawn,
-    /// so the picture is the page, not a blank.
+    /// so the picture is the page, not a blank. Secret fields (passwords,
+    /// cards, keys) are drawn as dots while it is taken, as the outline
+    /// masks them.
     static func take(_ agentTab: AgentTab, full: Bool) async throws -> (jpeg: Data, width: Int, height: Int) {
         guard let page = agentTab.tab.page, page.bounds.width > 0, page.window != nil else {
             throw AgentError(.failed, "Tab \(agentTab.ref) has no page to take a picture of yet. Try again once it has loaded.")
         }
+        // A page held by its dialog runs no script, so its secret fields
+        // couldn't be masked: it is read, and pictured, once answered.
+        if let held = PageNotices.held(agentTab.tab) {
+            throw AgentError(.failed, "Tab \(agentTab.ref)'s page waits on a dialog (\(held)): answer it with dialog first.")
+        }
         let configuration = WKSnapshotConfiguration()
         configuration.rect = page.bounds
         let image: NSImage
-        do { image = try await page.takeSnapshot(configuration: configuration) } catch {
+        await AgentPage.maskSecrets(on: page, true)
+        do {
+            image = try await page.takeSnapshot(configuration: configuration)
+            await AgentPage.maskSecrets(on: page, false)
+        } catch {
+            await AgentPage.maskSecrets(on: page, false)
             throw AgentError(.failed, "Tab \(agentTab.ref)'s page couldn't be pictured: \(error.localizedDescription)")
         }
         guard let pixels = image.cgImage(forProposedRect: nil, context: nil, hints: nil),

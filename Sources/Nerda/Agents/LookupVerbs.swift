@@ -32,7 +32,7 @@ nonisolated extension AgentVerb {
     static let moreTools = AgentVerb(
         name: "more_tools",
         summary: """
-            Add a group of tools to this list: \(AgentGroup.listed.map(\.name).joined(separator: ", ")). \
+            Add a group of tools to this list: \(ToolGroup.listed.map(\.name).joined(separator: ", ")). \
             Without a group, answers what each holds.
             """,
         arguments: [.string("group", "The group to add, such as history", required: false)],
@@ -40,7 +40,7 @@ nonisolated extension AgentVerb {
     ) { call in
         // The MCP shim does it itself (AgentMCP), as the list is its own;
         // anyone else is told what the groups hold.
-        AgentGroup.describe(try AgentGroup.named(call.optionalString("group")))
+        ToolGroup.describe(try ToolGroup.named(call.optionalString("group")))
     }
 
     static let history = AgentVerb(
@@ -191,22 +191,22 @@ extension AgentCall {
 /// A group of tools listed only once an agent asks for it with
 /// `more_tools` (`AgentVerb.group`): the page verbs are listed from the
 /// start, the rest when wanted, so the list an agent starts with is short.
-nonisolated struct AgentGroup: Hashable, Sendable {
+nonisolated struct ToolGroup: Hashable, Sendable {
     let name: String
     let summary: String
 
-    static let history = AgentGroup(name: "history", summary: "search the pages the user visited")
-    static let bookmarks = AgentGroup(name: "bookmarks", summary: "read the user's bookmarks")
-    static let profiles = AgentGroup(name: "profiles", summary: "find the profile signed in to a site, to open tabs there")
-    static let skills = AgentGroup(name: "skills", summary: "read a Site skill, what is known to work on a site, and save one")
+    static let history = ToolGroup(name: "history", summary: "search the pages the user visited")
+    static let bookmarks = ToolGroup(name: "bookmarks", summary: "read the user's bookmarks")
+    static let profiles = ToolGroup(name: "profiles", summary: "find the profile signed in to a site, to open tabs there")
+    static let skills = ToolGroup(name: "skills", summary: "save a Site skill, what you found works on a site, for the next agent")
 
     /// Every group, in the order `more_tools` names them. A ticket adding a
     /// group adds it here.
-    static let listed: [AgentGroup] = [history, bookmarks, profiles, skills]
+    static let listed: [ToolGroup] = [history, bookmarks, profiles, skills]
 
     /// The group of that name; nil for none asked. One there isn't fails,
     /// naming those there are.
-    static func named(_ name: String?) throws -> AgentGroup? {
+    static func named(_ name: String?) throws -> ToolGroup? {
         guard let name = name?.trimmingCharacters(in: .whitespaces).lowercased(), !name.isEmpty else { return nil }
         guard let group = listed.first(where: { $0.name == name }) else {
             throw AgentError(.invalid, "There is no group \(name). The groups: \(listed.map(\.name).joined(separator: ", ")).")
@@ -216,7 +216,7 @@ nonisolated struct AgentGroup: Hashable, Sendable {
 
     /// What `more_tools` answers: the group's tools, now listed; or, for
     /// none, every group and what it holds.
-    static func describe(_ group: AgentGroup?) -> String {
+    static func describe(_ group: ToolGroup?) -> String {
         guard let group else {
             return "Groups of more tools; add one with more_tools and its group:\n" + listed.map { group in
                 "\(group.name): \(group.summary) (\(group.verbs.map(\.name).joined(separator: ", ")))"

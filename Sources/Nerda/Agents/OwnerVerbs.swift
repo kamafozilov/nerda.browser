@@ -44,11 +44,9 @@ nonisolated extension AgentVerb {
         let request = owner.handoff(step, reason, optional: call.arguments["optional"]?.bool ?? false,
                                     site: call.optionalString("site"), on: tab, for: call.session)
         guard let answer = try await owner.answer(to: request, within: waitOnOwner(call)) else {
-            throw AgentError(.needsUser, """
-                needs_user: Nerda has asked the user to do this in \(tab.ref) ("\(request.text)"), \
-                and they haven't finished yet. Tell the user it is waiting for them in Nerda, \
-                then call handoff on \(tab.ref) again to keep waiting.
-                """)
+            throw AgentError.needsUser("""
+                Nerda has asked the user to do this in \(tab.ref) ("\(request.text)"), and they haven't finished yet.
+                """, again: "handoff on \(tab.ref)")
         }
         let page = AgentPage.header(tab).joined(separator: "\n")
         switch answer {
@@ -89,11 +87,8 @@ nonisolated extension AgentVerb {
         let owner = call.server.owner
         let request = owner.ask(question, choices: choices, on: tab, for: call.session)
         guard let answer = try await owner.answer(to: request, within: waitOnOwner(call)) else {
-            throw AgentError(.needsUser, """
-                needs_user: Nerda has asked the user "\(question)", and they haven't picked yet. \
-                Tell the user it is waiting for them in Nerda, then call ask again with the same \
-                question and choices to keep waiting.
-                """)
+            throw AgentError.needsUser("Nerda has asked the user \"\(question)\", and they haven't picked yet.",
+                                       again: "ask with the same question and choices")
         }
         switch answer {
         case .picked(let choice): return "The user picked: \(choices[choice])"
@@ -105,8 +100,8 @@ nonisolated extension AgentVerb {
     /// How long this request waits on the owner: as the caller asked,
     /// inside the deadline.
     @MainActor
-    static func waitOnOwner(_ call: AgentCall) -> Duration {
+    static func waitOnOwner(_ call: AgentCall, leaving margin: Duration = .seconds(1)) -> Duration {
         let asked = call.arguments["wait"]?.number.map { Duration.seconds(max(0, $0)) } ?? ownerWait
-        return min(asked, call.remaining - .seconds(1))
+        return min(asked, call.remaining - margin)
     }
 }

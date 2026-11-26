@@ -2,7 +2,7 @@ import Foundation
 import WebKit
 
 /// A confirm or prompt an Agent tab's page raised and waits on. Its agent
-/// is told (`AgentNotices`) and answers it with the `dialog` verb; one left
+/// is told (`PageNotices`) and answers it with the `dialog` verb; one left
 /// unanswered goes to the owner (`AgentServer.dialogsReachOwnerAfter`).
 /// Until then the page is held: it runs no script. An alert needs no
 /// answer and a leave-page question is answered "leave" (`Browser`), so
@@ -32,7 +32,7 @@ final class AgentDialog {
     /// Who asks, as the owner's sheets put it: "example.com says".
     let asker: String
     private(set) var answer: Answer?
-    private var hold: AgentNotices.Hold?
+    private var hold: PageNotices.DialogHold?
     private var continuation: CheckedContinuation<Answer, Never>?
 
     private init(kind: Kind, message: String, asker: String) {
@@ -45,13 +45,18 @@ final class AgentDialog {
     /// had something typed in it, and was left all the same.
     static let leftAnyway = "left a page that asked to stay (a leave-page question, answered leave)"
 
-    /// `the confirm dialog "Delete the draft?"`
-    var named: String { "the \(kind.name) \(Self.quoted(message))" }
+    /// `the confirm dialog <page-text>"Delete the draft?"</page-text>`,
+    /// for agents.
+    var named: String { "the \(kind.name) \(Self.marked(message))" }
 
-    /// The page's words as an answer quotes them: on one line, cut short.
+    /// The page's words as the owner is shown them: on one line, cut short.
     static func quoted(_ text: String) -> String {
         String(reflecting: String(text.replacing(/\s+/, with: " ").trimmingCharacters(in: .whitespaces).prefix(300)))
     }
+
+    /// The page's words as an agent is told them: quoted, and marked as
+    /// the page's (`AgentPage.untrustedInline`).
+    static func marked(_ text: String) -> String { AgentPage.untrustedInline(quoted(text)) }
 
     /// Answers it: the page runs again, given `answer`. Only the first
     /// answer counts.
@@ -75,7 +80,7 @@ final class AgentDialog {
                       in browser: Browser) async -> Answer {
         let dialog = AgentDialog(kind: kind, message: message, asker: asker)
         open.setObject(dialog, forKey: tab)
-        dialog.hold = AgentNotices.hold(tab, "raised a \(kind.name): \(quoted(message)) (answer it with dialog)")
+        dialog.hold = PageNotices.hold(tab, "raised a \(kind.name): \(marked(message)) (answer it with dialog)")
         let watch = Task { [weak tab, weak browser] in
             while dialog.answer == nil {
                 try? await Task.sleep(for: .milliseconds(250))
@@ -118,7 +123,7 @@ extension AgentServer {
         if case .prompt(let defaultText) = dialog.kind {
             text += defaultText.isEmpty ? " (OK answers with nothing typed)" : " (OK answers \(AgentDialog.quoted(defaultText)))"
         }
-        AgentNotices.post("\(dialog.named) went unanswered too long, so it went to the user", on: tab)
+        PageNotices.post("\(dialog.named) went unanswered too long, so it went to the user", on: tab)
         let request = owner.dialog(text, choices: ["OK", "Cancel"], on: agentTab, for: session)
         while dialog.answer == nil, request.answer == nil {
             try? await Task.sleep(for: .milliseconds(100))
@@ -126,10 +131,10 @@ extension AgentServer {
         if dialog.answer == nil, let answer = request.answer {
             if case .picked(0) = answer {
                 if case .prompt(let defaultText) = dialog.kind { dialog.answer(.ok(defaultText)) } else { dialog.answer(.ok(nil)) }
-                AgentNotices.post("the user answered \(dialog.named): OK", on: tab)
+                PageNotices.post("the user answered \(dialog.named): OK", on: tab)
             } else {
                 dialog.answer(.cancel)
-                if case .picked = answer { AgentNotices.post("the user answered \(dialog.named): Cancel", on: tab) }
+                if case .picked = answer { PageNotices.post("the user answered \(dialog.named): Cancel", on: tab) }
             }
         }
         owner.drop(request)

@@ -60,12 +60,14 @@ final class AgentAwake {
     }
 
     /// Past the cap, the awake Agent tabs longest unused, of sessions gone
-    /// quiet first, go to sleep. One holding something typed stays.
-    func keepToCap(_ tabs: [Tab]) {
+    /// quiet first, go to sleep. One holding something typed stays, and so
+    /// does one in `spared`: taken over or watched by the owner, theirs to
+    /// use.
+    func keepToCap(_ tabs: [Tab], sparing spared: Set<Tab.ID> = []) {
         let awake = tabs.filter { !$0.isAsleep }
         guard awake.count > cap else { return }
         let now = ContinuousClock.now
-        let order = awake.filter { !$0.hasUnsavedWork }.sorted { a, b in
+        let order = awake.filter { !$0.hasUnsavedWork && !spared.contains($0.id) }.sorted { a, b in
             if a.isKeptAwake != b.isKeptAwake { return !a.isKeptAwake }
             return used[ObjectIdentifier(a), default: now] < used[ObjectIdentifier(b), default: now]
         }

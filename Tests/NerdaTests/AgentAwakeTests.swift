@@ -119,6 +119,33 @@ struct AgentAwakeTests {
         #expect(awake() == ["Page 1", "Page 3"] as Set)
     }
 
+    /// A tab the owner took over, or watches, is theirs to use: the cap
+    /// never puts it to sleep under them, however long the agent left it.
+    @Test func theCapSparesATabTheOwnerTookOverOrWatches() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        harness.server.awake.cap = 2
+        let agent = try await harness.agent()
+        for n in 1...2 {
+            let url = try await harness.pages.serve("/\(n)", "<title>Page \(n)</title><p>Page \(n)</p>")
+            #expect(try await agent.call("open", ["url": AgentJSON(url)]).isError == false)
+        }
+        let session = try #require(harness.server.sessions.all.first)
+        let first = try #require(harness.server.openTabs(of: session).first { $0.ref == "t1" })
+        harness.server.takeOver(first)
+        let third = try await harness.pages.serve("/3", "<title>Page 3</title><p>Page 3</p>")
+
+        #expect(try await agent.call("open", ["url": AgentJSON(third)]).isError == false)
+
+        #expect(!first.tab.isAsleep)
+        harness.server.handBack(first)
+        first.agents.watched.insert(first.tab.id)
+        let fourth = try await harness.pages.serve("/4", "<title>Page 4</title><p>Page 4</p>")
+        #expect(try await agent.call("open", ["url": AgentJSON(fourth)]).isError == false)
+        #expect(!first.tab.isAsleep)
+        first.agents.watched.remove(first.tab.id)
+    }
+
     /// A page of two halves, red and blue, that counts the clicks on each.
     static let halves = """
         <title>Halves</title>
@@ -181,6 +208,44 @@ struct AgentAwakeTests {
         #expect(full.image.pixelsHigh * 1280 == full.image.pixelsWide * 800)
         #expect(color(full.image, full.image.pixelsWide / 4, full.image.pixelsHigh / 2) == "red")
         #expect(color(full.image, full.image.pixelsWide * 3 / 4, full.image.pixelsHigh / 2) == "blue")
+    }
+
+    /// A screenshot shows secret fields masked, as the outline does: a card
+    /// number typed in a plain text box, or a password a page shows as
+    /// text, is drawn as dots in the picture, whatever its digits; other
+    /// boxes as they are. The page's own style is back after.
+    @Test func aScreenshotMasksSecretFields() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        let url = try await harness.pages.serve("/pay", """
+            <title>Pay</title>
+            <style>input { font: 40px monospace; width: 900px; display: block; margin: 20px; }</style>
+            <input id=card name=cardnumber value="4111111111111111">
+            <input id=shown aria-label=Password value="hunter2hunter2">
+            <input id=name name=fullname value="Jane Example">
+            """)
+        let agent = try await harness.agent()
+        #expect(try await agent.call("open", ["url": AgentJSON(url)]).isError == false)
+        let page = try #require(harness.agents?.tabs.first?.page)
+        func set(_ id: String, _ value: String) async throws {
+            _ = try await page.callAsyncJavaScript("document.getElementById(id).value = value",
+                                                   arguments: ["id": id, "value": value], contentWorld: .page)
+        }
+
+        let first = try await shot(agent, ["tab": "t1"]).image
+        try await set("card", "5555555555554444")
+        try await set("shown", "swordfish12345")
+        let secretsChanged = try await shot(agent, ["tab": "t1"]).image
+        try await set("name", "John Other")
+        let nameChanged = try await shot(agent, ["tab": "t1"]).image
+
+        #expect(first.representation(using: .png, properties: [:]) == secretsChanged.representation(using: .png, properties: [:]),
+                "the secret fields' characters show in the picture")
+        #expect(secretsChanged.representation(using: .png, properties: [:]) != nameChanged.representation(using: .png, properties: [:]),
+                "a plain box's change shows")
+        let style = try await page.callAsyncJavaScript(
+            "return getComputedStyle(document.getElementById('card')).webkitTextSecurity", contentWorld: .page) as? String
+        #expect(style == "none")
     }
 
     /// A point in the screenshot is where the click lands: on the element

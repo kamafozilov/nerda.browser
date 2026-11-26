@@ -17,6 +17,10 @@ struct ShortcutsSettings: View {
             ("Last Tab", "Go to the last tab", "⌘9"),
             ("Collapse Tabs", "Show or hide the sidebar", "⌘S"),
         ]),
+        ("Agents", [
+            ("Take Over", "Take the Agent tab you are watching: the agent waits until you hand it back", "⌘."),
+            ("Hand Back", "Give the Agent tab you took back to the agent", "⌘↩"),
+        ]),
         ("Page", [
             ("Open Location", "Type an address or a search", "⌘L"),
             ("Open File", "Open HTML or PDF files from your Mac", "⌘O"),

@@ -105,12 +105,12 @@ enum AgentUploads {
     static func panel(on tab: Tab?, multiple: Bool) -> [URL]? {
         guard let tab else { return nil }
         guard let stage = staged.object(forKey: tab), !stage.taken, ContinuousClock.now < stage.until else {
-            AgentNotices.post("the page asked for files, and Nerda answered none: give them with upload", on: tab)
+            PageNotices.post("the page asked for files, and Nerda answered none: give them with upload", on: tab)
             return nil
         }
         stage.taken = true
         guard multiple || stage.files.count == 1 else {
-            AgentNotices.post("the file control takes one file, so it got only \(stage.files[0].lastPathComponent)", on: tab)
+            PageNotices.post("the file control takes one file, so it got only \(stage.files[0].lastPathComponent)", on: tab)
             return [stage.files[0]]
         }
         return stage.files
@@ -183,9 +183,9 @@ extension AgentPage {
         }
         AgentUploads.unstage(tab)
         if count < files.count {
-            AgentNotices.post("the file control takes one file, so it got only \(files[0].lastPathComponent)", on: tab)
+            PageNotices.post("the file control takes one file, so it got only \(files[0].lastPathComponent)", on: tab)
         }
-        AgentNotices.post("\(what) opened no file panel, so Nerda gave the files to its file control by script", on: tab)
+        PageNotices.post("\(what) opened no file panel, so Nerda gave the files to its file control by script", on: tab)
         return chose
     }
 

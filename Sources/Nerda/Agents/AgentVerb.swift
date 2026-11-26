@@ -21,7 +21,7 @@ nonisolated struct AgentVerb: Sendable {
     var deadline = AgentWire.deadline
     /// The group of tools it is listed in once an agent asks for it
     /// (`more_tools`); nil for the page verbs, always listed.
-    var group: AgentGroup?
+    var group: ToolGroup?
     /// Waits on the owner (a Handoff, a question): the shim asks again and
     /// again, with progress, while its client waits (`AgentMCP.Waits`), and
     /// passes each request how long to wait in `wait`.
@@ -118,14 +118,15 @@ struct AgentCall {
 
     func optionalString(_ name: String) -> String? { arguments[name]?.string }
 
-    /// An address argument: http, https, file or about, as typed in the
-    /// address bar ("example.com" goes to https).
+    /// An address argument: http, https or about, as typed in the address
+    /// bar ("example.com" goes to https). Never a file: files on this Mac,
+    /// Nerda's data among them, aren't the agent's to read.
     func url(_ name: String = "url") throws -> URL {
         let text = try string(name).trimmingCharacters(in: .whitespaces)
         let typed = text.contains("://") || text.hasPrefix("about:") ? text : "https://" + text
         guard let url = URL(string: typed), let scheme = url.scheme?.lowercased(),
-              ["http", "https", "file", "about"].contains(scheme) else {
-            throw AgentError(.invalid, "\(text) is not an address Nerda can open (http, https, file or about).")
+              ["http", "https", "about"].contains(scheme) else {
+            throw AgentError(.invalid, "\(text) is not an address Nerda can open for agents (http, https or about).")
         }
         return url
     }

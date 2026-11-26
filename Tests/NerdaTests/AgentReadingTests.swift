@@ -8,6 +8,40 @@ import WebKit
 /// text, and header lines saying what the page asks for.
 @MainActor
 struct AgentReadingTests {
+    /// `wait` waits for text to show on the page, up to its time limit,
+    /// and answers with what changed meanwhile, as an action does; text
+    /// that never comes fails as timed out once the limit passes, and a
+    /// wait for the page to load answers once it has.
+    @Test func waitWaitsForTextOrALoad() async throws {
+        let harness = try AgentHarness()
+        defer { harness.close() }
+        let url = try await harness.pages.serve("/order", """
+            <title>Order</title>
+            <p>Placing your order</p>
+            <script>setTimeout(() => document.body.insertAdjacentHTML('beforeend', '<p>Order   confirmed</p><button>Track it</button>'), 1500)</script>
+            """)
+        let agent = try await harness.agent()
+        _ = try await agent.call("open", ["url": AgentJSON(url)])
+        let started = ContinuousClock.now
+
+        let waited = try await agent.call("wait", ["tab": "t1", "text": "order confirmed", "timeout": 10])
+
+        #expect(!waited.isError, "\(waited.text)")
+        #expect(ContinuousClock.now - started >= .seconds(1))
+        #expect(waited.text.contains(#"button "Track it""#), "\(waited.text)")
+
+        let before = ContinuousClock.now
+        let never = try await agent.call("wait", ["tab": "t1", "text": "Shipped", "timeout": 1])
+        #expect(never.isError)
+        #expect(never.text.contains("Shipped"), "\(never.text)")
+        #expect(ContinuousClock.now - before < .seconds(5))
+
+        let loaded = try await agent.call("wait", ["tab": "t1", "load": true])
+        #expect(!loaded.isError, "\(loaded.text)")
+        #expect(try await agent.call("wait", ["tab": "t1"]).isError, "nothing to wait for")
+        #expect(try #require(AgentVerb.named["wait"]).deadline > AgentWire.deadline, "a wait may outlast other verbs")
+    }
+
     /// A ref names the same element snapshot after snapshot while it lives;
     /// once the page removes it, the ref answers that it is stale.
     @Test func refsLastWhileTheirElementsLive() async throws {

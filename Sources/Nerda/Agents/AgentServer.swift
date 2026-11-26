@@ -201,7 +201,7 @@ final class AgentServer {
         awake.working(session, tabs: sessions.tabs(of: session))
         defer {
             awake.working(session, tabs: sessions.tabs(of: session))
-            awake.keepToCap(browsers.flatMap(\.tabs))
+            awake.keepToCap(browsers.flatMap(\.tabs), sparing: Set(browsers.flatMap { $0.taken.union($0.watched) }))
         }
         let reply = await Self.done(verb, call)
         return session.isStopped ? stopped(session) : reply

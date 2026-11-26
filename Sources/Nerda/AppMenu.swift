@@ -791,13 +791,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// The window comes back with the tabs it closed with. After a hidden
-    /// start, Nerda opens as any launch does.
+    /// start, Nerda opens as any launch does. AppKit's `hasVisibleWindows`
+    /// counts the Agent window, up off screen while agents work, so the
+    /// owner's own are counted instead.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if let hidden = HiddenStart.shared, hidden.isHidden {
             hidden.showWindow()
             return true
         }
-        if !hasVisibleWindows {
+        if !Windows.ownerShowsOne() {
             browser.restore(from: browser.profile.sessionFile)
             window.makeKeyAndOrderFront(nil)
         }

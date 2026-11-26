@@ -124,6 +124,13 @@ nonisolated struct AgentError: Error, Sendable, Equatable {
         self.code = code
         self.message = message
     }
+
+    /// needs_user: `what` Nerda is waiting on the user for, a sentence,
+    /// then what the agent does: tell the user, and call `again` to keep
+    /// waiting (`AgentVerb.waitsForOwner`).
+    static func needsUser(_ what: String, waitingIn place: String = "in Nerda", again: String) -> AgentError {
+        AgentError(.needsUser, "needs_user: \(what) Tell the user it is waiting for them \(place), then call \(again) again to keep waiting.")
+    }
 }
 
 nonisolated extension AgentWire {
@@ -198,4 +205,10 @@ nonisolated extension AgentWire {
         Nerda didn't start, or agents are turned off in its Settings › Security & Privacy. \
         Ask the user to open Nerda.
         """)
+}
+
+/// A duration as a number, for scripts and timers that take one.
+nonisolated extension Duration {
+    var seconds: Double { Double(components.seconds) + Double(components.attoseconds) / 1e18 }
+    var milliseconds: Double { seconds * 1000 }
 }

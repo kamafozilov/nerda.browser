@@ -210,10 +210,19 @@ nonisolated enum AgentCommandLine {
             named[name] = try json(value ?? "", for: argument)
         }
         var open = verb.arguments.filter { named[$0.name] == nil }
-        for word in positional {
+        var rest = positional[...]
+        while let word = rest.first {
             guard !open.isEmpty else { throw Problem(message: "\(verb.name) takes no more arguments than these; \(word) is one too many.") }
             let argument = open.removeFirst()
-            named[argument.name] = try json(word, for: argument)
+            // A list of words, such as upload's paths, last in order takes
+            // every word left: `upload t1 e5 /a.txt /b.pdf`.
+            if open.isEmpty, takesWords(argument), rest.count > 1 {
+                named[argument.name] = .array(rest.map { .string($0) })
+                rest = []
+            } else {
+                named[argument.name] = try json(word, for: argument)
+                rest = rest.dropFirst()
+            }
         }
         if let missing = verb.arguments.first(where: { $0.required && named[$0.name] == nil }) {
             throw Problem(message: "\(verb.name) needs \(missing.name).")
@@ -245,6 +254,11 @@ nonisolated enum AgentCommandLine {
 
     private static func type(of argument: AgentArgument) -> String { argument.schema["type"]?.string ?? "string" }
 
+    /// A list of strings, given as plain words or as JSON.
+    private static func takesWords(_ argument: AgentArgument) -> Bool {
+        type(of: argument) == "array" && argument.schema["items"]?["type"]?.string == "string"
+    }
+
     /// A word as the kind of value the argument takes.
     private static func json(_ word: String, for argument: AgentArgument) throws(Problem) -> AgentJSON {
         switch type(of: argument) {
@@ -257,6 +271,9 @@ nonisolated enum AgentCommandLine {
         case "boolean":
             guard let flag = Bool(word) else { throw Problem(message: "\(argument.name) is true or false, not \(word).") }
             return .bool(flag)
+        case "array" where takesWords(argument) && !word.hasPrefix("["):
+            // One plain word: a list of it alone.
+            return [.string(word)]
         case "array", "object":
             guard let value = try? AgentJSON(line: word) else { throw Problem(message: "\(argument.name) is JSON, and \(word) isn't.") }
             return value
@@ -270,7 +287,7 @@ nonisolated enum AgentCommandLine {
     /// `open <url>`, `snapshot <tab> [--full]`: how a verb is typed.
     static func synopsis(of verb: AgentVerb) -> String {
         ([verb.name] + verb.arguments.map { argument in
-            if argument.required { return "<\(argument.name)>" }
+            if argument.required { return takesWords(argument) ? "<\(argument.name)>…" : "<\(argument.name)>" }
             return type(of: argument) == "boolean" ? "[--\(argument.name)]" : "[--\(argument.name) <value>]"
         } + (picturing.contains(verb.name) ? ["[--out <path>]"] : [])).joined(separator: " ")
     }

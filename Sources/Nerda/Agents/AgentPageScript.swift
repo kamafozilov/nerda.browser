@@ -23,6 +23,8 @@ import Foundation
 ///   (`frame`: the path of indexes from this frame down, as in `window.frames`).
 /// - `text` `{}`: `{parts, hidden}`, `parts` being strings and `{frame}`.
 /// - `prefix`: the frame's prefix, or null before it has one.
+/// - `mask`, `unmask`: secret fields drawn as dots, for a screenshot, and
+///   back; the number masked.
 /// - `{stale: ref}` instead of an answer when a ref is stale.
 ///
 /// Later verbs reach an element through `AgentPage.run(_:on:)`, which binds
@@ -562,6 +564,34 @@ nonisolated enum AgentPageScript {
                 return { lines, hidden: reading.hidden, needs: [...reading.needs], signs: reading.signs, count: agent.count };
             };
             agent.text = () => text();
+
+            /// While a screenshot is taken: every secret field holding
+            /// something (as the outline masks it) drawn as dots, its own
+            /// inline style kept to be put back by `unmask`.
+            const masked = new Map();
+            agent.mask = () => {
+                const visit = (root) => {
+                    for (const element of root.querySelectorAll('input, textarea, [contenteditable]')) {
+                        const filled = element.isContentEditable ? element.innerText : element.value;
+                        if (!filled || masked.has(element) || !secret(element, nameOf(element, 'textbox'))) continue;
+                        masked.set(element, [element.style.getPropertyValue('-webkit-text-security'),
+                            element.style.getPropertyPriority('-webkit-text-security')]);
+                        element.style.setProperty('-webkit-text-security', 'disc', 'important');
+                    }
+                    for (const host of root.querySelectorAll('*')) if (host.shadowRoot) visit(host.shadowRoot);
+                };
+                visit(document);
+                return masked.size;
+            };
+            agent.unmask = () => {
+                for (const [element, [value, priority]] of masked) {
+                    if (value) element.style.setProperty('-webkit-text-security', value, priority);
+                    else element.style.removeProperty('-webkit-text-security');
+                    if (element.getAttribute('style') === '') element.removeAttribute('style');
+                }
+                masked.clear();
+                return 0;
+            };
             return agent;
         })();
 
@@ -571,6 +601,8 @@ nonisolated enum AgentPageScript {
         case 'prefix': return JSON.stringify(agent.prefix);
         case 'outline': return JSON.stringify(agent.outline(args));
         case 'text': return JSON.stringify(agent.text());
+        case 'mask': return JSON.stringify(agent.mask());
+        case 'unmask': return JSON.stringify(agent.unmask());
         }
         """#
 }

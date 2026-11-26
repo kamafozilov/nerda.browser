@@ -52,7 +52,7 @@ extension AgentPage {
             _ = await unlessHeld(agentTab.tab, by: .now + .seconds(1)) {
                 try await run("element.click(); return true", on: element)
             }
-            AgentNotices.post("the page took no mouse click on \(ref), so Nerda clicked it by script", on: agentTab.tab)
+            PageNotices.post("the page took no mouse click on \(ref), so Nerda clicked it by script", on: agentTab.tab)
         }
         return "clicked \(what)"
     }
@@ -116,12 +116,13 @@ extension AgentPage {
 
     private static func covered(_ what: String, by cover: Any, action: String) -> AgentError {
         let cover = cover as? [String: Any] ?? [:]
-        let layer = describe(ref: nil, cover["layer"])
+        // The layer's words are the page's: marked as such.
+        let layer = untrustedInline(describe(ref: nil, cover["layer"]))
         let buttons = (cover["buttons"] as? [Any] ?? []).map { describe(ref: nil, $0) }
         var message = "\(what) is covered by \(layer), so a \(action) there would land on that instead."
         message += buttons.isEmpty
             ? " Close it or scroll it away, then \(action) \(what.split(separator: " ").first ?? "") again."
-            : " Its buttons: \(buttons.joined(separator: ", ")). Close it with one of them, then \(action) again."
+            : " Its buttons: \(untrustedInline(buttons.joined(separator: ", "))). Close it with one of them, then \(action) again."
         return AgentError(.covered, message)
     }
 
