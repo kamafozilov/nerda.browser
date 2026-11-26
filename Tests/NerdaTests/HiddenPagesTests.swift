@@ -102,6 +102,11 @@ private final class StreamServer: @unchecked Sendable {
 @MainActor
 @Suite(.serialized)
 struct HiddenPagesTests {
+    /// A page that answers nothing for this long was paused: a running one
+    /// answers ten events a second, and a busy Mac holds it up for far less
+    /// (measured with a second full test run beside this one, a second at most).
+    private static let paused: TimeInterval = 3
+
     /// What a page heard over the last `seconds`: how many events, and the
     /// longest it went without one, up to now. A running page hears each as
     /// it comes; a suspended one hears nothing until it is woken.
@@ -120,8 +125,7 @@ struct HiddenPagesTests {
 
     /// A tab out of sight on the server's page, with Low Power Mode off.
     private func listeningTab(_ server: StreamServer) async throws -> (Browser, Nerda.Tab) {
-        let browser = Browser(dataStore: .nonPersistent())
-        LowPowerMode.force(false, for: browser.dataStore)
+        let browser = browserRunningOutOfSight()
         return (browser, try await listeningTab(server, in: browser))
     }
 
@@ -136,10 +140,11 @@ struct HiddenPagesTests {
     }
 
     /// Out of sight for longer than WebKit takes to suspend a page, the page
-    /// still hears the events as they come: it answers twenty more, unasked.
-    /// A suspended page answers none until something wakes it, and nothing
-    /// here does. Its own timers stay slowed, as WebKit slows a hidden
-    /// page's: far fewer than ten ticks a second.
+    /// still hears the events as they come: over six seconds it answers
+    /// twenty or more, unasked, and is never paused. A suspended page
+    /// answers none until something wakes it, and nothing here does. Its
+    /// own timers stay slowed, as WebKit slows a hidden page's: far fewer
+    /// than ten ticks a second.
     @Test func aHiddenPageKeepsRunning() async throws {
         let server = try StreamServer()
         defer { server.stop() }
@@ -147,7 +152,11 @@ struct HiddenPagesTests {
         try await Task.sleep(for: .seconds(8))
 
         let since = Date()
-        try await waitFor("Twenty events answered out of sight") { server.answered(after: since) >= 20 }
+        try await waitFor("Six seconds, and twenty events answered out of sight", timeout: .seconds(15)) {
+            Date().timeIntervalSince(since) >= 6 && server.answered(after: since) >= 20
+        }
+        let quiet = server.longestQuiet(since: since)
+        #expect(quiet < Self.paused, "answered nothing for \(quiet) s")
         let over = Date().timeIntervalSince(since)
         let heard = try await heard(tab, over: over)
         #expect(Double(heard.ticks) < 10 * over / 2, "\(heard) over \(over) s")
@@ -158,7 +167,7 @@ struct HiddenPagesTests {
     /// turned off lets it run again, without the page being made anew.
     /// WebKit suspends it about a second after the mode comes on: the page
     /// then answers no event for seconds on end, where a running one answers
-    /// ten a second. Turned off, it answers again.
+    /// ten a second. Turned off, it answers again, and is not paused again.
     @Test func hiddenPagesFollowLowPowerMode() async throws {
         let server = try StreamServer()
         defer { server.stop() }
@@ -170,12 +179,17 @@ struct HiddenPagesTests {
         LowPowerMode.force(true, for: browser.dataStore)
         LowPowerMode.changed()
         let on = Date()
-        try await waitFor("Three seconds without an answer", timeout: .seconds(10)) { server.longestQuiet(since: on) >= 3 }
+        try await waitFor("Paused", timeout: .seconds(10)) { server.longestQuiet(since: on) >= Self.paused }
 
         LowPowerMode.force(false, for: browser.dataStore)
         LowPowerMode.changed()
         let off = Date()
-        try await waitFor("Twenty events answered again") { server.answered(after: off) >= 20 }
+        try await waitFor("Answering again") { server.answered(after: off) > 0 }
+        // From its first answer: waking takes a moment of its own.
+        let back = Date()
+        try await waitFor("Twenty events answered again") { server.answered(after: back) >= 20 }
+        let quiet = server.longestQuiet(since: back)
+        #expect(quiet < Self.paused, "answered nothing for \(quiet) s")
         #expect(tab.webView === page)
         withExtendedLifetime(browser) {}
     }
@@ -196,7 +210,7 @@ struct HiddenPagesTests {
         LowPowerMode.changed()
         let on = Date()
         try await waitFor("Both pages quiet", timeout: .seconds(10)) {
-            first.longestQuiet(since: on) >= 3 && second.longestQuiet(since: on) >= 3
+            first.longestQuiet(since: on) >= Self.paused && second.longestQuiet(since: on) >= Self.paused
         }
 
         LowPowerMode.force(false, for: browser.dataStore)
@@ -222,7 +236,7 @@ struct HiddenPagesTests {
         browser.open(URL(string: "about:blank")!)
         LowPowerMode.changed()
         let on = Date()
-        try await waitFor("Three seconds without an answer", timeout: .seconds(10)) { server.longestQuiet(since: on) >= 3 }
+        try await waitFor("Paused", timeout: .seconds(10)) { server.longestQuiet(since: on) >= Self.paused }
         LowPowerMode.force(false, for: browser.dataStore)
         LowPowerMode.changed()
         withExtendedLifetime(browser) {}
