@@ -158,10 +158,13 @@ struct RecorderTests {
         try await waitFor { tab.page?.isLoading == false && tab.page?.url != nil }
         tab.go(to: try await server.url("/two"))
         try await waitFor { tab.page?.isLoading == false && tab.page?.url?.path == "/two" }
-        tab.webView.goBack()
-        try await waitFor { kinds(recorder).filter { $0 == .backForward }.count == 1 }
-        tab.webView.goForward()
-        try await waitFor { kinds(recorder).filter { $0 == .backForward }.count == 2 }
+        for (step, path, count) in [("Back", "/one", 1), ("Forward", "/two", 2)] {
+            if step == "Back" { tab.webView.goBack() } else { tab.webView.goForward() }
+            try await waitFor("\(step) went to \(path): at \(tab.page?.url?.path ?? "nothing"), loading \(tab.page?.isLoading == true)") {
+                tab.page?.isLoading == false && tab.page?.url?.path == path
+            }
+            try await waitFor("\(step) timed: \(kinds(recorder))") { kinds(recorder).filter { $0 == .backForward }.count == count }
+        }
     }
 
     /// A feedback report carries what was recorded, by kind, and stays short

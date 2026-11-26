@@ -8,9 +8,10 @@ import Testing
 /// nothing a test waits on there could happen, isn't counted, up to the
 /// limit once more (`WaitBudget`): WebKit, starting a page's process while
 /// many start, has held it up for five seconds in the kernel. Each stall
-/// let off is printed, and a wait that fails says how much was.
+/// let off is printed, and a wait that fails says how much was. The
+/// comment is read as the wait fails, so it can say how things were then.
 @MainActor
-func waitFor(_ comment: Comment = "Timed out waiting", timeout: Duration = .seconds(6),
+func waitFor(_ comment: @autoclosure () -> Comment = "Timed out waiting", timeout: Duration = .seconds(6),
              sourceLocation: SourceLocation = #_sourceLocation, _ condition: () async throws -> Bool) async throws {
     let budget = WaitBudget(timeout: timeout)
     let start = ContinuousClock.now
@@ -29,7 +30,7 @@ func waitFor(_ comment: Comment = "Timed out waiting", timeout: Duration = .seco
     }
     let letOff = budget.letOff(stalled)
     if letOff > .zero { print("waitFor at \(sourceLocation): the main thread stalled, \(letOff) not counted") }
-    try #require(try await condition(), "\(comment.rawValue) (\(letOff) of main thread stalls not counted)", sourceLocation: sourceLocation)
+    try #require(try await condition(), "\(comment().rawValue) (\(letOff) of main thread stalls not counted)", sourceLocation: sourceLocation)
 }
 
 /// A wait's limit: the time it took, less the main thread's stalls
