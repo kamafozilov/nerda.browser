@@ -7,3 +7,17 @@
 - **Nerda Dev** (`./watch.sh`, `./build.sh debug`) is the app to build and run while working. After a change, `./watch.sh once` puts the new build in the owner's Nerda Dev for them to try: behind the window in use, and not while they are using it. Never open it here any other way. `build/Nerda.app` is the release app and shares the owner's real data.
 - **Trying things on screen** (clicks, keys, windows, screenshots) happens only when the owner asks for it, on this Mac, without moving their pointer, typing into the front app or bringing a window forward. Use **Nerda Test** (`./build.sh test`), with its own data, and open it behind the window in use with `open -g "build/Nerda Test.app"`. Changes to the default browser, notifications, keychain and system settings, and checks that need Touch ID or the camera, go to the owner.
 - **Decisions** and their reasons: [docs/decisions.md](docs/decisions.md).
+
+## Agent skills
+
+### Issue tracker
+
+Issues, specs and tickets are GitHub issues in this repo, through the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default triage labels, each under its own name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` at the root, decisions in `docs/decisions.md`. See `docs/agents/domain.md`.
