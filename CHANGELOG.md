@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.31] - 2026-11-27
+
 ### Fixed
 
 - Scrolling with two fingers no longer goes back or forward by itself. A swipe has to go sideways from the start and stay sideways, as in Safari and Chrome; once your fingers move up or down, it is a scroll until you lift them. Before, a scroll that set off a little sideways, or a quick flick down a feed, could leave the page.
@@ -517,7 +519,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.30...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.31...HEAD
+[0.0.31]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.30...v0.0.31
 [0.0.30]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.29...v0.0.30
 [0.0.29]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.28...v0.0.29
 [0.0.28]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.27...v0.0.28
