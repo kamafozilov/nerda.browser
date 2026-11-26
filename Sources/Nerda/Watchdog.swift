@@ -64,7 +64,8 @@ nonisolated final class Watchdog: Sendable {
     private let setAt = Atomic<UInt64>(0)
     /// How many times the timer fired.
     private let fired = Atomic<Int>(0)
-    /// The main thread, set before the watching thread starts.
+    /// The watched thread (the main one in Nerda), set before the watching
+    /// thread starts.
     private let main = Atomic<UInt32>(0)
 
     /// The times the timer fired: each a second into a stall.
@@ -75,8 +76,11 @@ nonisolated final class Watchdog: Sendable {
     private static let (timerEvent, stopEvent) = (UInt(1), UInt(2))
     /// The log, written in order off the main thread.
     private let queue = DispatchQueue(label: "nerda.watchdog", qos: .utility)
-    /// The main thread's alone.
+    /// The watched thread's alone, set as it starts: its loop, and what
+    /// hears each hitch.
     private nonisolated(unsafe) var observer: CFRunLoopObserver?
+    private nonisolated(unsafe) var loop: CFRunLoop?
+    private nonisolated(unsafe) var heard: (TimeInterval) -> Void = { _ in }
 
     /// Seconds in a mach tick.
     private static let ticks: Double = {
@@ -91,10 +95,22 @@ nonisolated final class Watchdog: Sendable {
     private static let slack: TimeInterval = 0.01
     private static let slackTicks = UInt64(slack / ticks)
 
-    /// Watches the main loop, from the main thread.
+    /// Watches the main loop, from the main thread, its hitches kept in
+    /// the record.
     @MainActor func start() {
+        start(watching: CFRunLoopGetMain()) { [recorder] seconds in
+            MainActor.assumeIsolated { recorder.hitch(seconds) }
+        }
+    }
+
+    /// Watches `loop`, the run loop of the thread this is called on: the
+    /// main one in Nerda; in tests, a thread of the test's own, so that
+    /// the stalls it makes hold up no other test. `hitch` hears each hitch,
+    /// on that thread.
+    func start(watching loop: CFRunLoop, hitch: @escaping (TimeInterval) -> Void) {
         guard events >= 0, observer == nil else { return }
         main.store(pthread_mach_thread_np(pthread_self()), ordering: .releasing)
+        heard = hitch
         let thread = Thread { [self] in watch() }
         thread.name = "nerda.watchdog"
         thread.qualityOfService = .utility
@@ -103,30 +119,31 @@ nonisolated final class Watchdog: Sendable {
         // entering and leaving a loop inside one adds nothing to measure.
         let steps: CFRunLoopActivity = [.afterWaiting, .beforeTimers, .beforeSources, .beforeWaiting]
         let made = CFRunLoopObserverCreateWithHandler(nil, steps.rawValue, true, Int.max) { [self] _, activity in
-            MainActor.assumeIsolated { step(going: activity == .beforeWaiting) }
+            step(going: activity == .beforeWaiting)
         }
-        CFRunLoopAddObserver(CFRunLoopGetMain(), made, .commonModes)
+        CFRunLoopAddObserver(loop, made, .commonModes)
         observer = made
+        self.loop = loop
     }
 
     /// Stops watching, for tests.
-    @MainActor func stop() {
-        guard let made = observer else { return }
+    func stop() {
+        guard let made = observer, let loop else { return }
         observer = nil
-        CFRunLoopRemoveObserver(CFRunLoopGetMain(), made, .commonModes)
+        CFRunLoopRemoveObserver(loop, made, .commonModes)
         change(Self.timerEvent, filter: EVFILT_TIMER, flags: EV_DELETE)
         change(Self.stopEvent, filter: EVFILT_USER, flags: EV_ADD | EV_ONESHOT, fflags: NOTE_TRIGGER)
     }
 
-    /// Each step of the main loop's pass, on the main thread.
-    @MainActor private func step(going: Bool) {
+    /// Each step of the watched loop's pass, on its thread.
+    private func step(going: Bool) {
         let now = mach_absolute_time()
         let was = last.load(ordering: .relaxed), wasAsleep = asleep.load(ordering: .relaxed)
         last.store(now, ordering: .releasing)
         asleep.store(going, ordering: .releasing)
         if !wasAsleep, was > 0, now > was, now - was >= Self.hitchLimit {
             let seconds = Double(now - was) * Self.ticks
-            recorder.hitch(seconds)
+            heard(seconds)
             if now - was >= Self.limit { queue.async { [self] in ended(seconds, began: was) } }
         }
         let set = setAt.load(ordering: .relaxed)
