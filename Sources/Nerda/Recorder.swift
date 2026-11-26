@@ -105,7 +105,8 @@ final class Recorder {
     // MARK: - writing
 
     /// The operation waiting for the main loop to go to sleep.
-    private var pending: (kind: Kind, start: TimeInterval, interval: OSSignpostIntervalState)?
+    /// Held, it waits for `release` first.
+    private var pending: (kind: Kind, start: TimeInterval, interval: OSSignpostIntervalState, held: Bool)?
 
     /// `kind` began just now: it is timed until the main loop next goes to
     /// sleep, once what it changed is on screen. One begun while another
@@ -113,7 +114,27 @@ final class Recorder {
     /// that shows both is the open's.
     func begin(_ kind: Kind) {
         guard pending == nil, Self.isOn else { return }
-        pending = (kind, clock(), Self.signposter.beginInterval(kind.signpost))
+        pending = (kind, clock(), Self.signposter.beginInterval(kind.signpost), false)
+        settleOnSleep()
+    }
+
+    /// What was just begun shows only later, once `release` is called: a
+    /// tab switch whose page left stays in sight while its video floats.
+    /// Whether there was one to hold, not held already.
+    func hold() -> Bool {
+        guard pending?.held == false else { return false }
+        pending?.held = true
+        return true
+    }
+
+    /// What `hold` held is on screen as the main loop next goes to sleep.
+    func release() {
+        guard pending?.held == true else { return }
+        pending?.held = false
+        settleOnSleep()
+    }
+
+    private func settleOnSleep() {
         // Once, after Core Animation's commit at the same moment (its order
         // is lower), and in every mode, a drag's or a menu's included.
         let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, Int.max) { [weak self] _, _ in
@@ -123,7 +144,7 @@ final class Recorder {
     }
 
     private func settle() {
-        guard let (kind, start, interval) = pending else { return }
+        guard let (kind, start, interval, held) = pending, !held else { return }
         pending = nil
         Self.signposter.endInterval(kind.signpost, interval)
         add(kind, seconds: clock() - start)

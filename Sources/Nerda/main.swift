@@ -412,14 +412,18 @@ private struct PageCard: View {
 
     var body: some View {
         let radius = rounded ? BrowserView.cornerRadius : 0
+        // The tab selected, or for a moment the one left while its video
+        // floats: everything here shows that tab, the page and what stands
+        // in for one (a new tab, the settings, a failure).
+        let shown = browser.inSight
         return ZStack {
             // A new tab, and round the settings' card, the window's glass tinted.
-            if browser.selected?.isBlank == true { browser.isPrivate ? Palette.ground : Palette.glass }
-            else if browser.selected?.settings != nil || browser.selected?.showsHistory == true { Palette.panel }
-            else if browser.selected?.responsive != nil { Palette.stage }
+            if shown?.isBlank == true { browser.isPrivate ? Palette.ground : Palette.glass }
+            else if shown?.settings != nil || shown?.showsHistory == true { Palette.panel }
+            else if shown?.responsive != nil { Palette.stage }
             else { Palette.ground }
             VStack(spacing: 0) {
-                if let tab = browser.selected, tab.hasPage, let responsive = tab.responsive, !browser.locked {
+                if let tab = shown, tab.hasPage, let responsive = tab.responsive, !browser.locked {
                     ResponsiveBar(tab: tab, responsive: responsive)
                 }
                 // Its own width, not the card's: see the top.
@@ -429,10 +433,10 @@ private struct PageCard: View {
                             tabs: browser.tabs,
                             // Locked, no page shows, nor can be read out from
                             // under the lock; nor under an Agent tab watched.
-                            selected: browser.locked || browser.watchedTab != nil ? nil : browser.selected,
+                            selected: browser.locked || browser.watchedTab != nil ? nil : shown,
                             takesFocus: !browser.commandBarOpen
                         )
-                        if let reader = browser.selected?.reader, !browser.locked {
+                        if let reader = shown?.reader, !browser.locked {
                             ReaderView(page: reader, takesFocus: !browser.commandBarOpen)
                                 .background(Palette.ground)
                                 .id(ObjectIdentifier(reader))
@@ -440,10 +444,10 @@ private struct PageCard: View {
                     }
                 }
             }
-            if let tab = browser.selected, tab.isBlank, browser.isPrivate {
+            if let tab = shown, tab.isBlank, browser.isPrivate {
                 IncognitoPage(browser: browser)
                     .id(tab.id)
-            } else if let tab = browser.selected, tab.isBlank {
+            } else if let tab = shown, tab.isBlank {
                 // A new tab: its picture across the page, where to go a third
                 // of the way down it, and under all, what picture to show.
                 // The field comes last, so its list of suggestions goes over the rest.
@@ -473,13 +477,13 @@ private struct PageCard: View {
                 .id(tab.id)
                 .onAppear { Backdrop.shared.load() }
             }
-            if let tab = browser.selected, tab.settings != nil {
+            if let tab = shown, tab.settings != nil {
                 SettingsView(browser: browser, tab: tab)
             }
-            if browser.selected?.showsHistory == true {
+            if shown?.showsHistory == true {
                 HistoryPage(browser: browser)
             }
-            if let failure = browser.selected?.failure {
+            if let failure = shown?.failure {
                 // Switched in with the tab, as the page is: faded, it would
                 // show the blank page under it, and linger over the next.
                 PageFailure(browser: browser, failure: failure)
@@ -492,7 +496,7 @@ private struct PageCard: View {
         }
         // Another tab comes as it is, at once: a new tab's field and picture,
         // opened with the sidebar's slide, would otherwise slide into place too.
-        .transaction(value: browser.selectedID) { $0.animation = nil }
+        .transaction(value: shown?.id) { $0.animation = nil }
         // The card's lower corners, and its right edge, past which the page
         // may reach while the sidebar slides.
         .mask {
