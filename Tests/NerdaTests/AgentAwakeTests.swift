@@ -8,33 +8,36 @@ import WebKit
 /// and screenshots of them (spec #119, ticket #135).
 @MainActor
 struct AgentAwakeTests {
-    /// A page that counts its animation frames and timer ticks, and says
-    /// whether it thinks it is seen.
+    /// A page that counts its animation frames, keeps the time of each tick
+    /// of its 50 ms timer, and says whether it thinks it is seen.
     static let running = """
         <title>Running</title>
         <script>
-        window.frameCount = 0; window.tickCount = 0;
+        window.frameCount = 0; window.ticks = [];
         function frame() { window.frameCount++; requestAnimationFrame(frame); }
         requestAnimationFrame(frame);
-        setInterval(() => window.tickCount++, 50);
+        setInterval(() => window.ticks.push(performance.now()), 50);
         </script>
         <p>Counting</p>
         """
 
-    /// What the page counted over `seconds`, and whether it was visible.
-    private func counted(_ tab: Nerda.Tab, over seconds: Double) async throws -> (frames: Int, ticks: Int, visible: Bool) {
+    /// The page's frames so far, the shortest time between two of its last
+    /// ten ticks in ms, and whether it counts as seen.
+    private func looked(_ tab: Nerda.Tab) async throws -> (frames: Int, closestTicks: Double, visible: Bool) {
         let page = try #require(tab.page)
-        let read = "return [window.frameCount, window.tickCount, document.visibilityState]"
-        let before = try #require(try await page.callAsyncJavaScript(read, contentWorld: .page) as? [Any])
-        try await Task.sleep(for: .seconds(seconds))
-        let after = try #require(try await page.callAsyncJavaScript(read, contentWorld: .page) as? [Any])
-        let frames = (after[0] as? Int ?? 0) - (before[0] as? Int ?? 0)
-        let ticks = (after[1] as? Int ?? 0) - (before[1] as? Int ?? 0)
-        return (frames, ticks, after[2] as? String == "visible")
+        let read = """
+            const last = ticks.slice(-10), gaps = last.slice(1).map((t, i) => t - last[i]);
+            return [frameCount, gaps.length ? Math.min(...gaps) : 1e9, document.visibilityState];
+            """
+        let values = try #require(try await page.callAsyncJavaScript(read, contentWorld: .page) as? [Any])
+        return (values[0] as? Int ?? 0, values[1] as? Double ?? 1e9, values[2] as? String == "visible")
     }
 
     /// While its agent works, an Agent tab runs as a page on screen would:
-    /// it counts as seen, its animation frames come and its timers tick.
+    /// it counts as seen, its animation frames come, and its timer ticks
+    /// faster than once a second. A page out of sight gets no frames, and
+    /// WebKit holds its timers to a second or more apart; however busy the
+    /// Mac, a page that runs gets there.
     @Test func aWorkingAgentsTabRunsAtFullSpeed() async throws {
         let harness = try AgentHarness()
         defer { harness.close() }
@@ -43,11 +46,13 @@ struct AgentAwakeTests {
         #expect(try await agent.call("open", ["url": AgentJSON(url)]).isError == false)
         let tab = try #require(harness.agents?.tabs.first)
 
-        let counted = try await counted(tab, over: 1)
-
-        #expect(counted.visible)
-        #expect(counted.frames > 20, "\(counted.frames) frames in a second")
-        #expect(counted.ticks > 10, "\(counted.ticks) ticks in a second")
+        let first = try await looked(tab)
+        #expect(first.visible)
+        try await waitFor("Frames, and ticks less than a second apart") {
+            let now = try await looked(tab)
+            return now.frames >= first.frames + 10 && now.closestTicks < 500
+        }
+        #expect(try await looked(tab).visible)
     }
 
     /// While its agent works, no rule puts an Agent tab to sleep: not the
