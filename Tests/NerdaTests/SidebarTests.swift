@@ -95,23 +95,24 @@ private func withAccessibility(_ body: () async throws -> Void) async rethrows {
     let window = window(of: browser)
     defer { window.close() }
     let a = browser.open(URL(string: "data:text/html,a")!), b = browser.open(URL(string: "data:text/html,b")!)
-    try await Task.sleep(for: .milliseconds(500))
     func pageHasKeyboard(_ tab: Nerda.Tab) -> Bool {
         guard let responder = window.firstResponder as? NSView, let page = tab.page else { return false }
         return responder === page || responder.isDescendant(of: page)
     }
+    // On screen, with the keyboard, as a page that comes on screen takes it.
+    try await waitFor("B with the keyboard") { pageHasKeyboard(b) }
 
     window.makeFirstResponder(nil)
     browser.select(keepingKeyboard: a.id)
-    for _ in 0..<100 where browser.keepsKeyboard != nil { try await Task.sleep(for: .milliseconds(20)) }
+    // Put on screen: what kept the keyboard is used up then (`PageView`).
+    try await waitFor("A on screen") { browser.keepsKeyboard == nil && a.page?.isHiddenOrHasHiddenAncestor == false }
+    // A page given the keyboard is given it a moment after it comes on screen.
     try await Task.sleep(for: .milliseconds(100))
     #expect(browser.selectedID == a.id)
     #expect(!pageHasKeyboard(a))
-    #expect(browser.keepsKeyboard == nil)
 
     browser.select(b.id)
-    for _ in 0..<50 where !pageHasKeyboard(b) { try await Task.sleep(for: .milliseconds(20)) }
-    #expect(pageHasKeyboard(b))
+    try await waitFor("B with the keyboard again") { pageHasKeyboard(b) }
 }
 
 /// Links dropped on the tabs open in new tabs where they are let go, in
