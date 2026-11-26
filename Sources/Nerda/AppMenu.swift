@@ -866,8 +866,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // The window in front, an incognito one's included.
         // A muted tab's video has no sound to keep hearing.
         floating = ((NSApp.mainWindow as? BrowserWindow)?.browser ?? browser).selected.flatMap { $0.isMuted ? nil : $0.page }
-        floating?.evaluateJavaScript(PictureInPicture.enter)
-        if let floating, let browser = floating.uiDelegate as? Browser, let tab = browser.tab(for: floating) { browser.askedToFloat(tab) }
+        if let floating, let browser = floating.uiDelegate as? Browser, let tab = browser.tab(for: floating) { browser.float(tab) }
     }
 
     /// Made active after a hidden start (opened by hand, its Dock tile
@@ -878,8 +877,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Back in Nerda, the video goes back into its page.
     func applicationDidBecomeActive(_ notification: Notification) {
-        floating?.evaluateJavaScript(PictureInPicture.exit)
-        if let floating, let browser = floating.uiDelegate as? Browser, let tab = browser.tab(for: floating) { browser.askedToLand(tab) }
+        if let floating, let browser = floating.uiDelegate as? Browser, let tab = browser.tab(for: floating) { browser.land(tab) }
         floating = nil
     }
 

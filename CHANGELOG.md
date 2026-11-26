@@ -10,6 +10,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Added
 
 - Help › Report a Problem… also carries how long a video took to float as you left its tab, and to go back into its page as you came back, with Auto Picture-in-Picture on, so a slow or missing float you report can be looked into.
+- A video in a player embedded on another site, such as a YouTube video in an article, floats when you leave its tab with Auto Picture-in-Picture on, and goes back into its page when you come back, as a video on the page itself does. Before, it stayed in the page.
 
 ### Fixed
 
