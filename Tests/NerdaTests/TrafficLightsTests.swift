@@ -51,21 +51,25 @@ import Testing
 func theAddressBarRunsUnderTheWindowButtons(incognito: Bool) throws {
     let browser = incognito ? Browser(dataStore: .nonPersistent()) : Browser()
     browser.sidebarOpen = false
-    // Off screen, drawn into a picture only.
+    // Off screen, drawn into a picture only, and only the row looked at: the
+    // whole window, as big as the screen, holds the main thread up for a
+    // second, and every other test with it.
     let window = BrowserWindow(browser: browser)
     defer { window.close() }
     let content = try #require(window.contentView)
     content.layoutSubtreeIfNeeded()
-    let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
-    content.cacheDisplay(in: content.bounds, to: bitmap)
-    let scale = CGFloat(bitmap.pixelsWide) / content.bounds.width
-    // In points from the top left, as the window is laid out.
-    let colour = { (x: CGFloat, y: CGFloat) in bitmap.colorAt(x: Int(x * scale), y: Int(y * scale)) }
     // Just under the bar's top edge, clear of its controls: between the
-    // window's buttons, and halfway across the bar.
+    // window's buttons, and halfway across the bar. In points from the top
+    // left, as the window is laid out.
     let y = BrowserView.margin + 2
-    let underButtons = try #require(colour(BrowserView.trafficLightsWidth / 2, y))
-    let bar = try #require(colour(content.bounds.width / 2, y))
+    let row = CGRect(x: 0, y: y, width: content.bounds.width, height: 1)
+    let drawn = content.isFlipped ? row : CGRect(x: 0, y: content.bounds.height - row.maxY, width: row.width, height: 1)
+    let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: drawn))
+    content.cacheDisplay(in: drawn, to: bitmap)
+    let scale = CGFloat(bitmap.pixelsWide) / row.width
+    let colour = { (x: CGFloat) in bitmap.colorAt(x: Int(x * scale), y: 0) }
+    let underButtons = try #require(colour(BrowserView.trafficLightsWidth / 2))
+    let bar = try #require(colour(content.bounds.width / 2))
     #expect(underButtons == bar, "\(underButtons) under the buttons, \(bar) on the bar")
 }
 
