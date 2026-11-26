@@ -943,21 +943,21 @@ func iconsAreKeptPerOrigin(url: String, origin: String?) {
 private func found(in browser: Browser, by look: () -> Void) async throws -> Find.Matches? {
     let before = browser.findMatches
     look()
-    for _ in 0..<100 where browser.findMatches == before { try await Task.sleep(for: .milliseconds(20)) }
+    try await waitFor("The look back") { browser.findMatches != before }
     return browser.findMatches
 }
 
 /// Find counts the matches shown, across the page's tags but not from one
 /// paragraph into the next, goes round past either end, and keeps to case
-/// and whole words when asked.
+/// and whole words when asked. The options are kept in settings of the
+/// test's own: another test run beside this one shares the app's.
 @MainActor
 @Test func findCountsWhatIsShown() async throws {
-    let defaults = UserDefaults.standard
-    defer {
-        defaults.removeObject(forKey: Browser.findMatchCaseKey)
-        defaults.removeObject(forKey: Browser.findWholeWordsKey)
-    }
+    let suite = "dev.nerda.tests.find.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
     let browser = Browser()
+    browser.findOptions = defaults
     let tab = Tab()
     browser.add(tab)
     let page = tab.webView
@@ -1007,7 +1007,11 @@ private func found(in browser: Browser, by look: () -> Void) async throws -> Fin
 /// after; a frame of the page's own site is looked in too.
 @MainActor
 @Test func putAwayFindTakesItsLightsOff() async throws {
+    let suite = "dev.nerda.tests.find.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
     let browser = Browser()
+    browser.findOptions = defaults
     let tab = Tab()
     browser.add(tab)
     let page = tab.webView
@@ -1022,8 +1026,7 @@ private func found(in browser: Browser, by look: () -> Void) async throws -> Fin
     #expect(try await found(in: browser) { browser.find() }?.count == 4)
     #expect(try await lit() == [3, 1])
     browser.hideFindBar()
-    for _ in 0..<100 where try await lit() != [0, 0] { try await Task.sleep(for: .milliseconds(20)) }
-    #expect(try await lit() == [0, 0])
+    try await waitFor("The lights off") { try await lit() == [0, 0] }
 }
 
 /// Pages see nothing of Nerda that Safari doesn't show them: no

@@ -115,6 +115,8 @@ final class Browser: NSObject {
     /// Find's options (the magnifying glass's menu), kept for every window.
     static let findMatchCaseKey = "findMatchCase"
     static let findWholeWordsKey = "findWholeWords"
+    /// Where they are kept: the app's settings, or a test's own.
+    @ObservationIgnored var findOptions = UserDefaults.standard
     /// Counts ⌘Fs, so one with the bar already open still puts the keyboard in it.
     var findRequests = 0
     /// A tab's name made editable in place, as a double-click does (its
@@ -619,8 +621,8 @@ final class Browser: NSObject {
         if foundOn !== page { clearFound() }
         foundOn = page
         let query = findQuery
-        let matchCase = UserDefaults.standard.bool(forKey: Self.findMatchCaseKey)
-        let wholeWords = UserDefaults.standard.bool(forKey: Self.findWholeWordsKey)
+        let matchCase = findOptions.bool(forKey: Self.findMatchCaseKey)
+        let wholeWords = findOptions.bool(forKey: Self.findWholeWordsKey)
         Task {
             var matches = await Find.look(for: query, matchCase: matchCase, wholeWords: wholeWords, step: step, on: page)
             if matches == nil {
