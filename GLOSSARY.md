@@ -31,3 +31,31 @@ _Avoid_: handoff (that is the agent asking)
 **Site skill**:
 Written know-how about one site that an **Agent** is pointed to when it reaches that site.
 _Avoid_: recipe, playbook
+
+## Speed
+
+**Latency**:
+The time from the owner's action to the first thing they see or hear in answer to it.
+_Avoid_: delay, lag
+
+**Budget**:
+The most **Latency** an action may have before it counts as a fault.
+_Avoid_: target, limit
+
+**Hitch**:
+A moment of 100 ms or more in which Nerda itself answers nothing.
+_Avoid_: stop, freeze, jank
+
+**Stall**:
+A **Hitch** that lasts a second or more.
+_Avoid_: hang (that is a page that stopped answering)
+
+## Media
+
+**Dropout**:
+A gap in the sound or picture of media that should be playing.
+_Avoid_: interruption, cut, glitch
+
+**Floating player**:
+A page's video shown out of its page, over every window, while the owner is somewhere else.
+_Avoid_: PiP, mini player, pop-out (Picture in Picture names the setting and the system's mechanism)
