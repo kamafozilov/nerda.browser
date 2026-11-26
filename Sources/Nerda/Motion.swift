@@ -8,6 +8,8 @@ import SwiftUI
 ///
 /// Read here rather than from SwiftUI's environment because much of what
 /// moves is started outside any view, by `Browser` opening and closing tabs.
+/// A window's view takes it from its environment where one is set for it
+/// (`motionReduced`), as a test sets it, and from the Mac otherwise.
 enum Motion {
     /// Kept up to date as the setting changes, rather than asked of
     /// `NSWorkspace` on every tab opened.
@@ -41,4 +43,10 @@ enum Motion {
     static func moving(_ transition: AnyTransition, reduced: Bool = reduced) -> AnyTransition {
         reduced ? .opacity : transition
     }
+}
+
+extension EnvironmentValues {
+    /// Reduce Motion for the views below, in place of the Mac's
+    /// (`Motion.reduced`); nil, as everywhere in Nerda, follows the Mac.
+    @Entry var motionReduced: Bool? = nil
 }
