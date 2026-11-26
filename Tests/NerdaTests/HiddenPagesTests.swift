@@ -67,8 +67,9 @@ private final class StreamServer: @unchecked Sendable {
 }
 
 /// Pages out of sight keep running, but in Low Power Mode (spec #118). A
-/// browser with no window has every page out of sight. Low Power Mode is one
-/// switch for the whole app, so these take turns.
+/// browser with no window has every page out of sight. Low Power Mode is set
+/// for each test's own store, so other tests' pages run on as they were;
+/// these take turns all the same, each timing how its page runs.
 @MainActor
 @Suite(.serialized)
 struct HiddenPagesTests {
@@ -90,9 +91,8 @@ struct HiddenPagesTests {
 
     /// A tab out of sight on the server's page, with Low Power Mode off.
     private func listeningTab(_ server: StreamServer) async throws -> (Browser, Nerda.Tab) {
-        LowPowerMode.forced = false
-        LowPowerMode.changed()
         let browser = Browser(dataStore: .nonPersistent())
+        LowPowerMode.force(false, for: browser.dataStore)
         browser.open(try await server.url())
         let tab = try #require(browser.tabs.last)
         try await waitFor("Hearing") {
@@ -107,7 +107,7 @@ struct HiddenPagesTests {
     /// WebKit slows a hidden page's: far fewer than ten ticks a second.
     @Test func aHiddenPageKeepsRunning() async throws {
         let server = try StreamServer()
-        defer { server.stop(); LowPowerMode.forced = nil; LowPowerMode.changed() }
+        defer { server.stop() }
         let (browser, tab) = try await listeningTab(server)
         try await Task.sleep(for: .seconds(8))
 
@@ -126,16 +126,16 @@ struct HiddenPagesTests {
     /// go while it is.
     @Test func hiddenPagesFollowLowPowerMode() async throws {
         let server = try StreamServer()
-        defer { server.stop(); LowPowerMode.forced = nil; LowPowerMode.changed() }
+        defer { server.stop() }
         let (browser, tab) = try await listeningTab(server)
         let page = tab.webView
         // A page just loaded runs a while longer whatever the mode.
         try await Task.sleep(for: .seconds(3))
 
-        LowPowerMode.forced = true
+        LowPowerMode.force(true, for: browser.dataStore)
         LowPowerMode.changed()
         try await Task.sleep(for: .seconds(4))
-        LowPowerMode.forced = false
+        LowPowerMode.force(false, for: browser.dataStore)
         LowPowerMode.changed()
         let suspended = try await heard(tab, over: 5)
         #expect(suspended.longestWait >= 2, "\(suspended)")
@@ -147,13 +147,39 @@ struct HiddenPagesTests {
         withExtendedLifetime(browser) {}
     }
 
+    /// Low Power Mode set for one data store, as a test sets it for its own,
+    /// reaches that store's pages and no other's: one test turning it on
+    /// leaves the pages of the tests beside it running as they were.
+    @Test func lowPowerModeForOneStoreLeavesTheOthers() throws {
+        let mine = Browser(dataStore: .nonPersistent()), other = Browser(dataStore: .nonPersistent())
+        LowPowerMode.force(false, for: mine.dataStore)
+        LowPowerMode.force(false, for: other.dataStore)
+        defer {
+            LowPowerMode.force(nil, for: mine.dataStore)
+            LowPowerMode.force(nil, for: other.dataStore)
+        }
+        mine.open(URL(string: "about:blank")!)
+        other.open(URL(string: "about:blank")!)
+        let page = { (browser: Browser) in try #require(browser.tabs.last).webView }
+        let (minePage, otherPage) = (try page(mine), try page(other))
+        #expect(minePage.configuration.preferences.inactiveSchedulingPolicy == .none)
+
+        LowPowerMode.force(true, for: mine.dataStore)
+        LowPowerMode.changed()
+        #expect(minePage.configuration.preferences.inactiveSchedulingPolicy == .suspend)
+        #expect(otherPage.configuration.preferences.inactiveSchedulingPolicy == .none)
+        LowPowerMode.force(false, for: mine.dataStore)
+        LowPowerMode.changed()
+        #expect(minePage.configuration.preferences.inactiveSchedulingPolicy == .none)
+    }
+
     /// NERDA_HIDDEN_RUN=0 leaves a page made in that run as WebKit has it,
     /// suspended out of sight. The switch is read as each page is made, so
     /// it is set only around that, and the next page runs again.
     @Test func theSwitchLeavesWebKitsOwn() throws {
-        defer { Speedups.overrides[.hiddenRun] = nil; LowPowerMode.forced = nil }
-        LowPowerMode.forced = false
+        defer { Speedups.overrides[.hiddenRun] = nil }
         let browser = Browser(dataStore: .nonPersistent())
+        LowPowerMode.force(false, for: browser.dataStore)
         Speedups.overrides[.hiddenRun] = false
         browser.open(URL(string: "about:blank")!)
         let off = try #require(browser.tabs.last).webView.configuration.preferences.inactiveSchedulingPolicy

@@ -1,32 +1,46 @@
 import Foundation
+import WebKit
 
 /// The Mac's Low Power Mode (System Settings › Battery), as one input for
-/// what follows it: what sleeps, and how hidden pages run. Tests set
-/// `forced` and call `changed()` in place of the system.
+/// what follows it: what sleeps, and how hidden pages run. Tests set it for
+/// a data store of their own (`force`) and call `changed()` in place of the
+/// system, so one test's mode is no other test's.
 enum LowPowerMode {
-    /// On or off for tests, whatever the Mac's; nil follows the Mac.
-    static var forced: Bool?
+    /// The Mac's mode.
+    static var isOn: Bool { ProcessInfo.processInfo.isLowPowerModeEnabled }
 
-    static var isOn: Bool { forced ?? ProcessInfo.processInfo.isLowPowerModeEnabled }
+    /// The mode for `store`'s pages and spare: a test's, else the Mac's.
+    static func isOn(for store: WKWebsiteDataStore) -> Bool {
+        forced.object(forKey: store)?.boolValue ?? isOn
+    }
 
-    /// Calls `changed` with the mode each time it is turned on or off, for
-    /// as long as `owner` lives.
-    static func watch(_ owner: AnyObject, _ changed: @escaping (Bool) -> Void) {
+    /// On or off for `store`, whatever the Mac's, for tests; nil follows
+    /// the Mac again. The pages already open hear of it at `changed()`.
+    static func force(_ on: Bool?, for store: WKWebsiteDataStore) {
+        if let on { forced.setObject(NSNumber(value: on), forKey: store) } else { forced.removeObject(forKey: store) }
+    }
+
+    private static let forced = NSMapTable<WKWebsiteDataStore, NSNumber>.weakToStrongObjects()
+
+    /// Calls `changed` each time the mode is turned on or off, the Mac's or
+    /// a store's, for as long as `owner` lives. Each watcher asks the mode
+    /// of the stores it has (`isOn(for:)`).
+    static func watch(_ owner: AnyObject, _ changed: @escaping () -> Void) {
         _ = observer
         watchers.removeAll { $0.owner == nil }
         watchers.append(Watcher(owner: owner, changed: changed))
     }
 
-    /// Tells every watcher the mode now: the system's notice, or a test's.
+    /// Tells every watcher the mode may have changed: the system's notice,
+    /// or a test's.
     static func changed() {
         watchers.removeAll { $0.owner == nil }
-        let on = isOn
-        for watcher in watchers { watcher.changed(on) }
+        for watcher in watchers { watcher.changed() }
     }
 
     private struct Watcher {
         weak var owner: AnyObject?
-        let changed: (Bool) -> Void
+        let changed: () -> Void
     }
 
     private static var watchers: [Watcher] = []

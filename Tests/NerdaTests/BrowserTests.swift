@@ -2022,16 +2022,14 @@ func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) async throws {
 
 /// Pages are let past WebKit's 60 frames a second (Tab.matchScreenRate), but
 /// for Low Power Mode. Fails once WebKit takes the switch away or renames it.
-/// The mode is set here, whatever the Mac's, and set back before any other
-/// test runs: the test doesn't wait on anything.
+/// The mode is set here, whatever the Mac's, for a store of the test's own.
 @MainActor
 @Test func pagesAreDrawnAtTheScreensRate() throws {
     let flag = try #require(Nerda.Tab.near60)
-    let before = LowPowerMode.forced
-    defer { LowPowerMode.forced = before }
     let near60 = { (lowPower: Bool) -> Bool in
-        LowPowerMode.forced = lowPower
-        let preferences = Nerda.Tab(url: somewhere).webView.configuration.preferences
+        let store = WKWebsiteDataStore.nonPersistent()
+        LowPowerMode.force(lowPower, for: store)
+        let preferences = Nerda.Tab.sparePage(for: store).configuration.preferences
         let get = NSSelectorFromString("_isEnabledForFeature:")
         typealias Getter = @convention(c) (AnyObject, Selector, AnyObject) -> Bool
         return unsafeBitCast(preferences.method(for: get), to: Getter.self)(preferences, get, flag)

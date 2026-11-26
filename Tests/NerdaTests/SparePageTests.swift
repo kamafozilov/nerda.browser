@@ -11,6 +11,8 @@ private func withSpare(_ body: (WKWebsiteDataStore, Browser) async throws -> Voi
     let id = UUID()
     var browser: Browser? = Browser(dataStore: WKWebsiteDataStore(forIdentifier: id))
     let store = browser!.dataStore
+    // Off, whatever the Mac's: in Low Power Mode no spare is kept.
+    LowPowerMode.force(false, for: store)
     SparePages.keep(for: store, in: 0)
     do {
         // Running already: its process started before it has anything to load.
@@ -28,7 +30,8 @@ private func withSpare(_ body: (WKWebsiteDataStore, Browser) async throws -> Voi
     try? await WKWebsiteDataStore.remove(forIdentifier: id)
 }
 
-/// One at a time: Low Power Mode, and the spares it lets go, are every store's.
+/// One at a time, each with a store of its own and Low Power Mode set for
+/// that store only (`LowPowerMode.force`), so no other test's spare goes.
 @Suite(.serialized) @MainActor
 struct SparePageTests {
     /// A link opened in a new tab is loaded in the spare page, already running,
@@ -79,14 +82,13 @@ struct SparePageTests {
     /// the mode comes on, none is made while it is, and one comes back after.
     @Test func lowPowerModeKeepsNoSpare() async throws {
         try await withSpare { store, browser in
-            defer { LowPowerMode.forced = nil; LowPowerMode.changed() }
-            LowPowerMode.forced = true
+            LowPowerMode.force(true, for: store)
             LowPowerMode.changed()
             #expect(SparePages.page(for: store) == nil)
             SparePages.keep(for: store, in: 0)
             try await Task.sleep(for: .milliseconds(300))
             #expect(SparePages.page(for: store) == nil)
-            LowPowerMode.forced = false
+            LowPowerMode.force(false, for: store)
             LowPowerMode.changed()
             try await waitFor("A spare again", timeout: .seconds(10)) { SparePages.page(for: store) != nil }
         }
