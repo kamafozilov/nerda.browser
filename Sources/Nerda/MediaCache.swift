@@ -267,7 +267,11 @@ final class MediaCache: NSObject, WKURLSchemeHandler, URLSessionDataDelegate {
     private static let limit: Int64 = 2 << 30
 
     private let folder: URL = {
-        let folder = FileManager.default.temporaryDirectory.appending(path: "Nerda Media", directoryHint: .isDirectory)
+        // The tests' goes in their own folder: the temporary folder is the
+        // apps' too, and a test emptying it would take away what a Nerda
+        // running beside it is playing.
+        let folder = (Edition.testing ? Edition.folder : FileManager.default.temporaryDirectory)
+            .appending(path: "Nerda Media", directoryHint: .isDirectory)
         // What a run before kept goes: the addresses it was for have expired anyway.
         try? FileManager.default.removeItem(at: folder)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

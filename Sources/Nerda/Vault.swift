@@ -22,8 +22,9 @@ nonisolated struct Account: Hashable, Sendable {
 /// one question after such a build, and only once a password is really wanted,
 /// picked or saved.
 actor Vault {
-    static let shared = Vault(service: "\(Edition.name) Passwords",
-                              names: Edition.folder.appending(path: "accounts.json"))
+    /// Personal's. The tests' never reaches the keychain (`Edition.testing`).
+    static let shared = Edition.testing ? Vault(inMemory: Edition.folder.appending(path: "accounts.json"))
+        : Vault(service: "\(Edition.name) Passwords", names: Edition.folder.appending(path: "accounts.json"))
 
     /// As kept in the keychain.
     nonisolated struct Login: Codable, Sendable {

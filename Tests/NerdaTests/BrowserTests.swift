@@ -1793,7 +1793,7 @@ func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) async throws {
     defer { try? FileManager.default.removeItem(at: file) }
     try Data(#"[{"host":"example.com","user":"old","saved":0},{"host":"login.example.com","user":"new","saved":100}]"#.utf8)
         .write(to: file)
-    let vault = Vault(service: "Nerda Tests \(UUID().uuidString)", names: file)
+    let vault = Vault(inMemory: file)
     #expect(await vault.accounts(for: "example.com", clear: false).map(\.user) == ["new", "old"])
     await vault.touch([Account(host: "example.com", user: "old")])
     #expect(await vault.accounts(for: "example.com", clear: false).map(\.user) == ["old", "new"])
