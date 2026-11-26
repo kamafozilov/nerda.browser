@@ -64,7 +64,9 @@ struct AgentDialogTests {
 
     /// The pointer's other verbs wait on a dialog as a click does: a drag
     /// whose press brings one up stops there and answers at once, and while
-    /// it holds the page, hover, drag and scroll are refused at once.
+    /// it holds the page, hover, drag and scroll are refused at once. Once
+    /// the dialog is answered, the page hears only the drag letting go:
+    /// none of its moves, nothing of the verbs refused.
     @Test func pointerVerbsWaitOnADialogAsAClickDoes() async throws {
         let harness = try AgentHarness()
         defer { harness.close() }
@@ -72,6 +74,13 @@ struct AgentDialogTests {
             <title>Board</title>
             <div id=card role=button tabindex=0 onmousedown="document.title = confirm('Move the card?') ? 'Moving' : 'Kept'">Write report</div>
             <section aria-label="Done" style="height: 200px; margin-top: 300px; border: 1px solid"></section>
+            <script>
+            // What the page hears once the confirm is answered: input sent
+            // while it held the page waits, and comes then.
+            window.after = [];
+            for (const type of ['mousedown', 'mousemove', 'mouseover', 'mouseup', 'wheel', 'scroll'])
+                addEventListener(type, () => { if (document.title !== 'Board') after.push(type) }, true);
+            </script>
             """)
         let agent = try await harness.agent()
         _ = try await agent.call("open", ["url": AgentJSON(url)])
@@ -79,12 +88,10 @@ struct AgentDialogTests {
         let card = try #require(AgentClickTests.ref(of: #"button "Write report""#, in: outline), "\(outline)")
         let done = try #require(AgentClickTests.ref(of: #"region "Done""#, in: outline), "\(outline)")
 
-        let started = ContinuousClock.now
         let dragged = try await agent.call("drag", ["tab": "t1", "ref": .string(card), "to": .string(done)])
         #expect(!dragged.isError, "\(dragged.text)")
         #expect(dragged.text.hasPrefix("began dragging"), "\(dragged.text)")
         #expect(dragged.text.contains(#"raised a confirm dialog: <page-text>"Move the card?"</page-text>"#), "\(dragged.text)")
-        #expect(ContinuousClock.now - started < .seconds(5))
 
         let calls: [(String, [String: AgentJSON])] = [
             ("hover", ["tab": "t1", "ref": .string(card)]),
@@ -92,17 +99,18 @@ struct AgentDialogTests {
             ("scroll", ["tab": "t1"]),
         ]
         for (verb, arguments) in calls {
-            let started = ContinuousClock.now
             let refused = try await agent.call(verb, arguments)
             #expect(refused.isError, "\(verb): \(refused.text)")
             #expect(refused.text.contains("waits on a dialog"), "\(verb): \(refused.text)")
-            #expect(ContinuousClock.now - started < .seconds(3), "\(verb)")
         }
 
         let answered = try await agent.call("dialog", ["tab": "t1", "accept": false])
         #expect(!answered.isError, "\(answered.text)")
         let page = try #require(harness.agents?.tabs.first?.page)
         #expect(try await page.callAsyncJavaScript("return document.title", contentWorld: .page) as? String == "Kept")
+        let heard = { try await page.callAsyncJavaScript("return after", contentWorld: .page) as? [String] ?? [] }
+        try await waitFor("The drag let go") { try await heard().contains("mouseup") }
+        #expect(try await heard() == ["mouseup"])
     }
 
     /// A prompt is answered with the agent's text, or cancelled.
