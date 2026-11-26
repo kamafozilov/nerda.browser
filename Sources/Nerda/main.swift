@@ -59,15 +59,20 @@ struct BrowserView: View {
     /// Where the card's left edge is: past the open sidebar, or the margin.
     /// It slides as the sidebar does.
     private var inset: CGFloat { max(browser.sidebarOpen && docks ? sidebarWidth : 0, margin) }
-    /// Where the address bar starts: as the card, but with the sidebar put
-    /// away, past the window's buttons, which come up there with the pointer
-    /// at the top (`TrafficLights`) and would otherwise sit over its own.
-    private var barInset: CGFloat { horizontal ? inset : max(inset, Self.trafficLightsWidth) }
+    /// The room the address bar leaves at its start, on its own ground: with
+    /// the sidebar put away, the window's buttons sit there, on the bar, so
+    /// its buttons start past them, and the bar runs on under them to the
+    /// card's edge, one with it, rather than leave a block of glass.
+    private var barRoom: CGFloat { horizontal ? 0 : max(Self.trafficLightsWidth - inset, 0) }
     /// The window's three buttons, from its left edge, and a gap after them.
     static let trafficLightsWidth: CGFloat = 84
     /// Where the page is laid out from: as `inset`, but changed in one step,
     /// as the sidebar starts to go and once it has fully come.
     private var laidOut: CGFloat { max(docked && docks ? sidebarWidth : 0, margin) }
+    /// How far off to the left the sidebar is slid: all the way, far enough
+    /// that its shadow goes too, when it isn't wanted. With Reduce Motion it
+    /// fades in and out where it is instead.
+    private var sidebarSlid: CGFloat { sidebarShown || Motion.reduced ? 0 : -(sidebarWidth + 32) }
     /// Where the card's top edge is: under the tabs, when they are across the
     /// top, or the margin.
     private var top: CGFloat { horizontal && !pageFullscreen ? TabStrip.height : margin }
@@ -86,8 +91,8 @@ struct BrowserView: View {
 
             if !pageFullscreen {
                 // Beside the sidebar, and under it while it is out over the page.
-                AddressBar(browser: browser, horizontal: horizontal)
-                    .padding(.leading, barInset)
+                AddressBar(browser: browser, horizontal: horizontal, room: barRoom)
+                    .padding(.leading, inset)
                     .padding(.trailing, margin)
                     .padding(.top, top)
                     .frame(maxHeight: .infinity, alignment: .top)
@@ -112,14 +117,13 @@ struct BrowserView: View {
                 // Always there, slid off to the left when not wanted, rather than
                 // added and taken away, so it comes back as it was left (scrolled
                 // where it was) without being built again.
-                Sidebar(browser: browser, pinned: browser.sidebarOpen, docked: docked, downloadsShown: $downloadsShown,
-                        aiChatsShown: $aiChatsShown, menuShown: $menuShown, width: $sidebarWidth)
+                Sidebar(browser: browser, pinned: browser.sidebarOpen, docked: docked, slid: sidebarSlid,
+                        downloadsShown: $downloadsShown, aiChatsShown: $aiChatsShown, menuShown: $menuShown,
+                        width: $sidebarWidth)
                     // Only out over the page does it matter: pinned, the pointer
                     // coming and going would have the whole window worked out again.
                     .onHover { over in if peeking || overPeek { overPeek = over } }
-                    // Far enough that its shadow goes too. With Reduce Motion
-                    // it fades in and out where it is instead.
-                    .offset(x: sidebarShown || Motion.reduced ? 0 : -(sidebarWidth + 32))
+                    .offset(x: sidebarSlid)
                     .animation(Motion.fade) { $0.opacity(sidebarShown || !Motion.reduced ? 1 : 0) }
                     .allowsHitTesting(sidebarShown)
                     .accessibilityHidden(!sidebarShown)
@@ -201,8 +205,11 @@ struct BrowserView: View {
         .overlay {
             if browser.locked { IncognitoLock() }
         }
-        // Behind it all, where they take no clicks.
-        .background { TrafficLights(window: window, withTabs: tabsShown || browser.locked, atTop: !pageFullscreen) }
+        // The window's buttons are always there, but over a page in full
+        // screen; locked, they stay, to close the window without unlocking it.
+        .onChange(of: pageFullscreen && !browser.locked, initial: true) { _, hidden in
+            window.showTrafficLights(!hidden)
+        }
         .background { TranslationTask(browser: browser) }
         .ignoresSafeArea()
         .onChange(of: browser.sidebarOpen) { _, open in
@@ -289,37 +296,6 @@ struct BrowserView: View {
     }
 }
 
-/// The traffic lights belong to the sidebar: they go as soon as it starts to,
-/// and come once it has all but arrived, so that nothing sits on the page on
-/// its own and the sidebar's toggle never slides across them. Across the top,
-/// they are the tabs'. Locked, they stay, to close the window without
-/// unlocking it. With the sidebar put away, they come too while the pointer
-/// is up in the title bar, where they would be, as they do in a window in
-/// full screen, and go once it leaves, without the sidebar coming out.
-///
-/// A view of its own, so the pointer coming and going there works out only
-/// this again, not the whole window's view.
-private struct TrafficLights: View {
-    let window: NSWindow
-    /// The sidebar, or the tabs across the top, are on screen, or the window is locked.
-    let withTabs: Bool
-    /// The pointer in the title bar brings them (not while a page is in full screen).
-    let atTop: Bool
-    @State private var pointerAtTop = false
-
-    var body: some View {
-        TitleBarHover { pointerAtTop = $0 }
-            .task(id: [withTabs, atTop && pointerAtTop]) {
-                let hovered = atTop && pointerAtTop
-                if withTabs, !hovered {
-                    try? await Task.sleep(for: .milliseconds(180))
-                    if Task.isCancelled { return }
-                }
-                window.showTrafficLights(withTabs || hovered)
-            }
-    }
-}
-
 /// Where the Mac asks to download a language, the first time a page is
 /// translated into it; asked again for each pair the tab on screen is
 /// translated between. A view of its own, as it reads the tab on screen and
@@ -333,53 +309,6 @@ private struct TranslationTask: View {
             .translationTask(browser.translationConfiguration) { session in
                 await browser.translator.run(session, in: browser)
             }
-    }
-}
-
-/// Tells when the pointer comes into the window's title bar, all along its
-/// top, and when it leaves: a tracking area only, which takes no clicks, so
-/// the address bar under it and the lights over it work as ever.
-struct TitleBarHover: NSViewRepresentable {
-    let hover: (Bool) -> Void
-
-    func makeNSView(context: Context) -> Tracker { Tracker(hover: hover) }
-    func updateNSView(_ view: Tracker, context: Context) { view.hover = hover }
-
-    final class Tracker: NSView {
-        var hover: (Bool) -> Void
-        private var area: NSTrackingArea?
-
-        init(hover: @escaping (Bool) -> Void) {
-            self.hover = hover
-            super.init(frame: .zero)
-        }
-        required init?(coder: NSCoder) { nil }
-
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-        /// The top of the window, as tall as its title bar (the toolbar's
-        /// included), where the lights sit.
-        var titleBar: NSRect {
-            guard let window else { return .zero }
-            let height = min(max(window.frame.height - window.contentLayoutRect.height, 0), bounds.height)
-            return NSRect(x: 0, y: isFlipped ? 0 : bounds.height - height, width: bounds.width, height: height)
-        }
-
-        override func updateTrackingAreas() {
-            super.updateTrackingAreas()
-            if let area { removeTrackingArea(area) }
-            let added = NSTrackingArea(rect: titleBar, options: [.mouseEnteredAndExited, .activeAlways], owner: self)
-            addTrackingArea(added)
-            area = added
-        }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            updateTrackingAreas()
-        }
-
-        override func mouseEntered(with event: NSEvent) { hover(true) }
-        override func mouseExited(with event: NSEvent) { hover(false) }
     }
 }
 

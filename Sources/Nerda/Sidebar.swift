@@ -16,6 +16,8 @@ struct Sidebar: View {
     let pinned: Bool
     /// The page laid out beside it, done sliding into place (`BrowserView.docked`).
     var docked = false
+    /// How far it is slid off to the window's left (`BrowserView.sidebarSlid`).
+    var slid: CGFloat = 0
     @Binding var downloadsShown: Bool
     @Binding var aiChatsShown: Bool
     /// The menu in the bottom corner (see `SidebarMenu`), drawn over the whole window.
@@ -109,23 +111,34 @@ struct Sidebar: View {
             // The traffic lights sit on this row, and it moves the window, as
             // the title bar under it would. The sidebar's button is on the
             // address bar; out over the page, the sidebar has its own, to keep it.
-            ZStack(alignment: .trailing) {
+            ZStack {
                 Color.clear
                     .contentShape(Rectangle())
                     .titleBar()
-                #if DEBUG
-                DevBadge()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 88)
-                #endif
-                HStack(spacing: 0) {
-                    // The gap goes with the badge, so the button stays put without it.
-                    ZoomBadge(browser: browser, gap: pinned ? 0 : 6)
-                    if !pinned {
-                        SidebarToggle(open: false, toggle: browser.toggleSidebar)
+                ZStack(alignment: .trailing) {
+                    #if DEBUG
+                    DevBadge()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 88)
+                    #endif
+                    HStack(spacing: 0) {
+                        // The gap goes with the badge, so the button stays put without it.
+                        ZoomBadge(browser: browser, gap: pinned ? 0 : 6)
+                        if !pinned {
+                            SidebarToggle(open: false, toggle: browser.toggleSidebar)
+                        }
                     }
+                    .padding(.trailing, 10)
                 }
-                .padding(.trailing, 10)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                // The window's buttons stay where they are while the sidebar
+                // slides in and out under them: what is on this row comes out
+                // from beside them, rather than slide across them.
+                .mask {
+                    Rectangle()
+                        .padding(.leading, BrowserView.trafficLightsWidth)
+                        .offset(x: -slid)
+                }
             }
             .frame(height: Self.topRow)
 

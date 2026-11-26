@@ -10,6 +10,9 @@ struct AddressBar: View {
     let browser: Browser
     /// The tabs are across the top: no sidebar to toggle.
     var horizontal = false
+    /// Left free at its start, on its own ground, for the window's buttons
+    /// over it while the sidebar is put away.
+    var room: CGFloat = 0
 
     @Environment(\.colorScheme) private var scheme
 
@@ -101,6 +104,7 @@ struct AddressBar: View {
             }
         }
         .padding(.horizontal, Self.edge)
+        .padding(.leading, room)
         .frame(height: Self.height)
         // Moves the window, as the title bar under it would.
         .background {
