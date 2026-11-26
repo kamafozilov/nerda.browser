@@ -18,16 +18,16 @@ enum Speedups {
     static var overrides: [Name: Bool] = [:]
 
     static func isOn(_ name: Name) -> Bool {
-        overrides[name] ?? set[name] ?? true
+        overrides[name] ?? environment[name] ?? true
     }
 
-    /// The run's variables, read once: the environment is copied whole each
+    /// The switches the run's environment sets, read once: the environment is copied whole each
     /// time it is asked for, some 25 µs, and the recorder asks at every
     /// timing.
-    private static let set: [Name: Bool] = {
-        let environment = ProcessInfo.processInfo.environment
+    private static let environment: [Name: Bool] = {
+        let variables = ProcessInfo.processInfo.environment
         return Dictionary(uniqueKeysWithValues: Name.allCases.compactMap { name in
-            environment["NERDA_" + name.rawValue].map { (name, $0 != "0") }
+            variables["NERDA_" + name.rawValue].map { (name, $0 != "0") }
         })
     }()
 }

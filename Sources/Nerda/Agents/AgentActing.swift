@@ -109,7 +109,7 @@ extension AgentPage {
         }
         let soon = ContinuousClock.now + .seconds(2)
         let before = await unlessHeld(tab, by: soon) { try await read(agentTab) }
-        let document = await unlessHeld(tab, by: soon) { try await documentMark(of: tab) }
+        let document = await documentMark(of: tab, by: soon)
         let address = tab.url
         let tabsBefore = Set(agentTab.agents.tabs.map(ObjectIdentifier.init))
 
@@ -134,8 +134,8 @@ extension AgentPage {
         let after = await unlessHeld(tab, by: .now + .seconds(3)) { try await read(agentTab) } ?? AgentReading()
         let navigated = answeringDialog
             ? !sameDocument(address, tab.url)
-            : wentElsewhere(from: address, to: tab.url, mark: document ?? nil,
-                            then: await unlessHeld(tab, by: .now + .seconds(1)) { try await documentMark(of: tab) } ?? nil)
+            : wentElsewhere(from: address, to: tab.url, mark: document,
+                            then: await documentMark(of: tab, by: .now + .seconds(1)))
         if navigated {
             return await shown(agentTab, after, did: did, notices: notices, text: true)
         }
@@ -286,12 +286,16 @@ extension AgentPage {
     }
 
     /// A mark of the main frame's document, the same until another
-    /// document replaces it (a navigation, a reload).
-    private static func documentMark(of tab: Tab) async throws -> String? {
-        try await tab.page?.callAsyncJavaScript(
-            "return globalThis.nerdaDocument ??= Date.now().toString(36) + Math.random().toString(36).slice(2)",
-            contentWorld: world
-        ) as? String
+    /// document replaces it (a navigation, a reload); nil when it couldn't
+    /// be read by `deadline`, or while a dialog holds the page.
+    private static func documentMark(of tab: Tab, by deadline: ContinuousClock.Instant) async -> String? {
+        let read = await unlessHeld(tab, by: deadline) {
+            try await tab.page?.callAsyncJavaScript(
+                "return globalThis.nerdaDocument ??= Date.now().toString(36) + Math.random().toString(36).slice(2)",
+                contentWorld: world
+            ) as? String
+        }
+        return read ?? nil
     }
 
     /// Whether an action took the page to another document: its address
