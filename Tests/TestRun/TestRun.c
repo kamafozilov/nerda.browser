@@ -21,11 +21,22 @@ static void limitTestsAtOnce(void) {
 // (`UserInstalledFonts`). With them, a page started in a process already
 // running (the one kept ready, a spare) has WebKit issue two sandbox
 // extensions for its fonts on the main thread, each "with user intent",
-// which the kernel has sandboxd approve, asking TCC. Some 600 asks a run,
+// which the kernel has sandboxd approve, asking TCC. Some 420 asks a run,
 // and now and then one goes unanswered for 5 s, the main thread held all
 // the while and every test's wait with it. Set once for the whole run,
 // before any page is made, so no test flips it under another.
 __attribute__((constructor))
 static void leaveUserInstalledFontsOut(void) {
     setenv("NERDA_USER_INSTALLED_FONTS", "0", 0);
+}
+
+// Not the Mac's memory pressure (`MemoryPressure.hearsSystem`): every
+// browser joins the shared sleep coordinator, and every last frame and the
+// new tab's picture listen too, so the Mac short of memory, two runs side
+// by side on 16 GB included, would put tests' hidden tabs to sleep and drop
+// their frames under them. The tests that need pressure hand their own to
+// what they test.
+__attribute__((constructor))
+static void leaveTheMacsMemoryPressureOut(void) {
+    setenv("NERDA_SYSTEM_MEMORY_PRESSURE", "0", 0);
 }
