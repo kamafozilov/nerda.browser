@@ -1358,6 +1358,10 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
 
 // MARK: - Reliability
 
+/// A page of the tests' own, for those that wait for it to load, again and
+/// again: example.com loads as slowly as the network answers.
+private let ownPage = URL(string: "data:text/html,<title>Own</title><p>A page of the test's own</p>")!
+
 /// A page whose process dies is loaded again, and again; the third time
 /// within a minute it stops, and says so, instead of reloading for ever.
 @MainActor
@@ -1365,7 +1369,7 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     let browser = Browser()
     var now: TimeInterval = 1000
     browser.pageEnds = PageEnds(clock: { now })
-    browser.open(somewhere)
+    browser.open(ownPage)
     let tab = browser.tabs[0]
     // Ended once loaded: a page whose process is gone commits nothing more.
     func end() async throws {
@@ -1380,7 +1384,7 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
     #expect(tab.failure == nil)
     now += 20
     try await end()
-    #expect(tab.failure?.url.host == "example.com")
+    #expect(tab.failure?.url == ownPage)
     #expect(tab.failure?.message == "The page crashed each time it was opened.")
 
     // A minute after the last, a crash is a one-off again.
@@ -1424,15 +1428,15 @@ private func arrive(_ tab: Nerda.Tab, at url: URL) async throws {
 @Test(arguments: [true, false])
 func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) async throws {
     let browser = Browser()
-    browser.open(somewhere)
-    browser.open(somewhere)
+    browser.open(ownPage)
+    browser.open(ownPage)
     let tab = browser.tabs[onScreen ? 0 : 1]
     try await waitFor { tab.page?.isLoading == false }
     tab.hasUnsavedWork = true
     browser.webViewWebContentProcessDidTerminate(tab.webView)
-    #expect(tab.failure?.url.host == "example.com")
+    #expect(tab.failure?.url == ownPage)
     try await waitFor { !browser.pageEnds.gathering }
-    #expect(tab.failure?.url.host == "example.com")
+    #expect(tab.failure?.url == ownPage)
     #expect(!tab.isAsleep)
     #expect(!tab.hasUnsavedWork)
 }
