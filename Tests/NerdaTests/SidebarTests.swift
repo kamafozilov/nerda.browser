@@ -113,8 +113,10 @@ private func withAccessibility(_ body: () async throws -> Void) async rethrows {
     browser.select(keepingKeyboard: a.id)
     // Put on screen: what kept the keyboard is used up then (`PageView`).
     try await waitFor("A on screen") { browser.keepsKeyboard == nil && a.page?.isHiddenOrHasHiddenAncestor == false }
-    // A page given the keyboard is given it a moment after it comes on screen.
-    try await Task.sleep(for: .milliseconds(100))
+    // A page given the keyboard is given it on the main queue's next turn
+    // after it comes on screen (`PageView`): once a turn queued after that
+    // has come, it would have it.
+    await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
     #expect(browser.selectedID == a.id)
     #expect(!pageHasKeyboard(a))
 
