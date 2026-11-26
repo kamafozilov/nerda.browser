@@ -425,7 +425,7 @@ private let somewhere = URL(string: "https://example.com")!
     let page = folder.appending(path: "page.html")
     try #"<video src="tone.wav" loop autoplay></video>"#.write(to: page, atomically: true, encoding: .utf8)
 
-    let browser = Browser()
+    let browser = browserRunningOutOfSight()
     browser.open(page)
     let held = browser.tabs[0].webView
     for _ in 0..<100 where await held.requestMediaPlaybackState() != .playing {
@@ -677,7 +677,7 @@ func framesFromAnotherSiteDownloadOnlyWhenClicked(scheme: String, host: String, 
 @MainActor
 @Test(arguments: [("", true), ("event.stopPropagation()", true), ("event.preventDefault()", false)])
 func aMiddleClickOpensTheLinkBehind(page handler: String, opens: Bool) async throws {
-    let browser = Browser()
+    let browser = browserRunningOutOfSight()
     let tab = Tab()
     browser.add(tab)
     let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 400, height: 300), styleMask: .borderless,
@@ -1097,7 +1097,7 @@ private func found(in browser: Browser, by look: () -> Void) async throws -> Fin
         + #"onclick="box.requestFullscreen()">Full screen</button>"#, host: "localhost")
     let url = try await pages.serve("/", #"<iframe allowfullscreen src="\#(frame)" "#
         + #"style="position: fixed; left: 0; top: 0; width: 300px; height: 200px; border: 0"></iframe>"#)
-    let browser = Browser()
+    let browser = browserRunningOutOfSight()
     let tab = Tab()
     browser.add(tab)
     let page = tab.webView
@@ -2613,7 +2613,7 @@ private final class BlockerNavigation: NSObject, WKNavigationDelegate {
 @MainActor
 @Test(arguments: [("http://localhost:5173/", 2), ("https://example.com/", 0)])
 func errorsAreCountedOnThisMacOnly(address: String, counted: Int) async throws {
-    let browser = Browser()
+    let browser = browserRunningOutOfSight()
     let tab = Tab()
     browser.add(tab)
     tab.webView.loadHTMLString("<script>setTimeout(() => { throw new Error('boom') }); Promise.reject(new Error('nope'))</script>",

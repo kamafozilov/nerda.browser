@@ -185,7 +185,7 @@ private func saved(_ host: String, pinned: Bool = false) -> Session.Tab {
 /// screen, and is answered then, not before.
 @MainActor
 @Test func aHiddenTabsQuestionWaitsForItsTab() async throws {
-    let browser = Browser()
+    let browser = browserRunningOutOfSight()
     browser.open(URL(string: "about:blank")!)
     let asking = browser.open(URL(string: "data:text/html,<title>waiting</title>")!, inBackground: true)
     try await waitFor { asking.title == "waiting" }

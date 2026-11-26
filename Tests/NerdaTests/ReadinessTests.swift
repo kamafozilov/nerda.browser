@@ -456,7 +456,7 @@ struct ReadinessTests {
     @Test func draftsClearOnceThePageNoLongerHoldsThem() async throws {
         let server = try ReadinessServer()
         defer { server.listener.cancel() }
-        let browser = Browser(dataStore: .nonPersistent())
+        let browser = browserRunningOutOfSight()
         defer { browser.closeAll() }
         let tab = browser.open(try await server.url("/chat"))
         try await waitFor { !tab.webView.isLoading && tab.url != nil }

@@ -41,7 +41,8 @@ private final class HangServer {
 @MainActor
 private final class HungTab {
     let server: HangServer
-    let browser = Browser(dataStore: .nonPersistent())
+    /// Its page loads out of sight, before the window has it.
+    let browser = browserRunningOutOfSight()
     let tab = Nerda.Tab()
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
                           styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -50,8 +51,6 @@ private final class HungTab {
 
     init(server: HangServer, after paths: [String] = [], askAfter: TimeInterval? = nil) async throws {
         self.server = server
-        // Its page loads out of sight, before the window has it.
-        LowPowerMode.force(false, for: browser.dataStore)
         if let askAfter { browser.hangWaits.askAfter = askAfter }
         // Quick to give up on a page, this browser only: other tests' pages,
         // slow to answer on a busy Mac, keep Nerda's patience.
@@ -241,10 +240,9 @@ struct HungPagesTests {
 
     /// A tab on screen and one out of sight at `path`, its page loaded.
     private func hiddenTab(_ path: String, on server: HangServer) async throws -> (Browser, Nerda.Tab) {
-        let browser = Browser(dataStore: .nonPersistent())
         // A hidden page spins, or works, as it would with the Mac's Low
         // Power Mode off: on, it would be suspended.
-        LowPowerMode.force(false, for: browser.dataStore)
+        let browser = browserRunningOutOfSight()
         browser.hangWaits.patience = 0.5
         let shown = Nerda.Tab()
         browser.add(shown)
