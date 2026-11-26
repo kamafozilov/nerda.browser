@@ -104,10 +104,11 @@ struct AgentDialogTests {
             ("scroll", ["tab": "t1"]),
         ]
         for (verb, arguments) in calls {
+            let waitedOut = PageNotices.waitsOutlastingADialog(on: tab)
             let refused = try await agent.call(verb, arguments)
             #expect(refused.isError, "\(verb): \(refused.text)")
             #expect(refused.text.contains("waits on a dialog"), "\(verb): \(refused.text)")
-            #expect(PageNotices.waitsOutlastingADialog(on: tab) == 0, "\(verb) waited on the held page")
+            #expect(PageNotices.waitsOutlastingADialog(on: tab) == waitedOut, "\(verb) waited on the held page")
         }
 
         let answered = try await agent.call("dialog", ["tab": "t1", "accept": false])
