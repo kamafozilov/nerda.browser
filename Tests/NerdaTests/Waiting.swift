@@ -4,46 +4,21 @@ import Testing
 
 /// Waits for `condition`, looking again every 20 ms for up to `timeout`:
 /// a state that never comes fails the test where it was waited for, rather
-/// than leaving the run hanging. A stall of the main thread meanwhile, when
-/// nothing a test waits on there could happen, isn't counted, up to the
-/// limit once more (`WaitBudget`): WebKit, starting a page's process while
-/// many start, has held it up for five seconds in the kernel. Each stall
-/// let off is printed, and a wait that fails says how much was. The
-/// comment is read as the wait fails, so it can say how things were then.
+/// than leaving the run hanging. The comment is read as the wait fails, so
+/// it can say how things were then. A stall of the main thread meanwhile
+/// counts like any other time; it is only told: printed as the wait ends,
+/// and in the comment of a wait that fails.
 @MainActor
 func waitFor(_ comment: @autoclosure () -> Comment = "Timed out waiting", timeout: Duration = .seconds(6),
              sourceLocation: SourceLocation = #_sourceLocation, _ condition: () async throws -> Bool) async throws {
-    let budget = WaitBudget(timeout: timeout)
     let start = ContinuousClock.now
-    var stalled = Duration.zero
-    func isOver() -> Bool {
-        stalled = MainStalls.during(start, ContinuousClock.now)
-        return budget.isOver(after: ContinuousClock.now - start, stalled: stalled)
-    }
-    while try await !condition() {
-        // A stall that just ended is noted at its loop's next step: one more look after that.
-        if isOver() {
-            try await Task.sleep(for: .milliseconds(20))
-            if isOver() { break }
-        }
-        try await Task.sleep(for: .milliseconds(20))
-    }
-    let letOff = budget.letOff(stalled)
-    if letOff > .zero { print("waitFor at \(sourceLocation): the main thread stalled, \(letOff) not counted") }
-    try #require(try await condition(), "\(comment().rawValue) (\(letOff) of main thread stalls not counted)", sourceLocation: sourceLocation)
-}
-
-/// A wait's limit: the time it took, less the main thread's stalls
-/// meanwhile, up to as much as the limit itself, so a wait that never comes
-/// true still ends.
-struct WaitBudget {
-    let timeout: Duration
-
-    func letOff(_ stalled: Duration) -> Duration { min(stalled, timeout) }
-
-    func isOver(after elapsed: Duration, stalled: Duration) -> Bool {
-        elapsed - letOff(stalled) >= timeout
-    }
+    let deadline = start + timeout
+    while ContinuousClock.now < deadline, try await !condition() { try await Task.sleep(for: .milliseconds(20)) }
+    let met = try await condition()
+    let stalled = MainStalls.during(start, ContinuousClock.now)
+    let told = stalled > .zero ? "the main thread stalled \(stalled) meanwhile" : nil
+    if let told { print("waitFor at \(sourceLocation): \(told)") }
+    try #require(met, "\(comment().rawValue)\(told.map { " (\($0))" } ?? "")", sourceLocation: sourceLocation)
 }
 
 /// The main thread's stalls in this test run, each a second or more
