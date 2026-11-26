@@ -40,14 +40,14 @@ struct PrivacySettings: View {
         }
         SettingsGroup(title: "Security") {
             SettingsRow(title: "Upgrade connections to HTTPS",
-                        detail: "Open http:// sites over HTTPS when they support it, and over HTTP when they don't",
+                        detail: "Open http:// sites over HTTPS when they support it",
                         icon: "lock") {
                 SettingsToggle(title: "Upgrade connections to HTTPS", isOn: $upgradesToHTTPS)
             }
         }
         SettingsGroup(title: "Incognito") {
             SettingsRow(title: "Lock incognito windows",
-                        detail: "After Nerda is in the background this long, and whenever your Mac locks or sleeps",
+                        detail: "After this long away, and whenever your Mac locks",
                         icon: "lock.rectangle.stack") {
                 DropdownButton(label: lock.name,
                                options: IncognitoAutoLock.allCases.map {

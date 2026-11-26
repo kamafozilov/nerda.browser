@@ -13,7 +13,7 @@ struct AgentsSettings: View {
     var body: some View {
         SettingsGroup {
             SettingsRow(title: "Agents can use Nerda",
-                        detail: "AI agents such as Claude Code and Codex open pages in tabs of their own, signed in as you are, out of your way",
+                        detail: "Agents browse in tabs of their own, signed in as you",
                         icon: "sparkles") {
                 SettingsToggle(title: "Agents can use Nerda", isOn: $agentsCanUseNerda)
             }
@@ -37,7 +37,7 @@ struct AgentsSettings: View {
             SettingsGroup(title: "Other programs") {
                 ForEach(approvals.remembered) { choice in
                     SettingsRow(title: choice.program.name,
-                                detail: (choice.allowed ? "Always allowed to use Nerda" : "Not allowed to use Nerda") + ". " + choice.program.path,
+                                detail: (choice.allowed ? "Always allowed" : "Not allowed") + " · " + choice.program.path,
                                 icon: choice.allowed ? "terminal" : "nosign") {
                         Button("Remove") { approvals.forget(choice.program) }
                             .buttonStyle(SettingsButtonStyle())
@@ -101,7 +101,7 @@ private struct ConnectionRow: View {
         return switch (part, link) {
         case (.claude, .missing): "Not on this Mac. Install Claude Code, then connect it here"
         case (.codex, .missing): "Not on this Mac. Install Codex, then connect it here"
-        case (.command, .on): "Installed as \(command), for scripts and agents in Terminal"
+        case (.command, .on): "Installed as \(command)"
         case (.command, .off): "Lets scripts and agents run \(name) in Terminal"
         case (.command, .other): "\(command) runs another copy of Nerda. Install to run this one"
         case (.command, _): "\(command) is another program's. Nerda leaves it alone"

@@ -16,7 +16,7 @@ struct AppearanceSettings: View {
                                options: Theme.allCases.map { DropdownOption(id: $0.rawValue, title: $0.name, symbol: $0.symbol) },
                                selected: theme.rawValue) { theme = Theme(rawValue: $0) ?? .system }
             }
-            SettingsRow(title: "Zoom level", detail: "The size pages open at. ⌘+ and ⌘− change it for one site", icon: "plus.magnifyingglass") {
+            SettingsRow(title: "Zoom level", detail: "The size pages open at. ⌘+ and ⌘− change one site", icon: "plus.magnifyingglass") {
                 DropdownButton(label: PageZoom.name(zoom),
                                options: PageZoom.levels.map { DropdownOption(id: "\($0)", title: PageZoom.name($0)) },
                                selected: "\(CGFloat(zoom))") { zoom = Double($0) ?? 1 }
@@ -34,7 +34,7 @@ struct AppearanceSettings: View {
         }
         SettingsGroup(title: "New tab") {
             VStack(alignment: .leading, spacing: 0) {
-                SettingsRow(title: "Picture", detail: "Shown behind the search field. Daily brings a new one of Nerda's each day, and + adds your own",
+                SettingsRow(title: "Picture", detail: "Behind the search field. Daily picks a new one each day",
                             icon: "photo") { EmptyView() }
                 WallpaperStrip(backdrop: .shared, glass: false)
                     .padding(.horizontal, 3)
@@ -42,7 +42,7 @@ struct AppearanceSettings: View {
             }
         }
         SettingsGroup(title: "Sidebar") {
-            SettingsRow(title: "AI chats", detail: "The button at the bottom of the sidebar that opens ChatGPT, Claude and the others",
+            SettingsRow(title: "AI chats", detail: "The sidebar button that opens ChatGPT, Claude and others",
                         icon: "sparkles") {
                 SettingsToggle(title: "AI chats", isOn: $showsAIChats)
             }

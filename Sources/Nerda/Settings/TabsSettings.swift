@@ -11,8 +11,7 @@ struct TabsSettings: View {
     var body: some View {
         SettingsGroup(title: "Memory") {
             SettingsRow(title: "Sleep inactive tabs",
-                        detail: "A tab left this long frees its memory and loads again when opened. "
-                            + "One over \(Browser.heavy >> 20) MB sleeps after \(Int(Browser.heavyAfter / 60)) minutes",
+                        detail: "Unused tabs free memory, ones over \(Browser.heavy >> 20) MB after \(Int(Browser.heavyAfter / 60)) min",
                         icon: "moon.zzz") {
                 DropdownButton(label: sleep.name,
                                options: TabSleep.allCases.map {
@@ -21,19 +20,19 @@ struct TabsSettings: View {
                                selected: "\(sleep.rawValue)") { sleep = Int($0).flatMap(TabSleep.init) ?? .halfHour }
             }
             SettingsRow(title: "Load background tabs when shown",
-                        detail: "A link opened behind the page loads only once you go to its tab",
+                        detail: "Links opened in the background load when you go to them",
                         icon: "hourglass") {
                 SettingsToggle(title: "Load background tabs when shown", isOn: $waits)
             }
         }
         SettingsGroup(title: "Startup") {
-            SettingsRow(title: "Load pinned tabs at launch", detail: "Off, Nerda opens on a new tab and loads a pinned tab when you open it",
+            SettingsRow(title: "Load pinned tabs at launch", detail: "Off, pinned tabs load when you open them",
                         icon: "pin") {
                 SettingsToggle(title: "Load pinned tabs at launch", isOn: $loadsPins)
             }
         }
         SettingsGroup(title: "Previews") {
-            SettingsRow(title: "Tab previews", detail: "When the pointer rests on a tab, show its page, its title and the memory it uses",
+            SettingsRow(title: "Tab previews", detail: "Show a tab's page, title and memory when you point at it",
                         icon: "rectangle.on.rectangle") {
                 SettingsToggle(title: "Tab previews", isOn: $previews)
             }

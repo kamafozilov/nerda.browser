@@ -14,6 +14,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 ### Changed
 
 - Agents can use Nerda, and the other programs you allowed or refused, moved from Settings › Security & Privacy to Settings › Agents.
+- Every line under a setting in Settings is shorter and fits on one line. One that wraps in a narrow window keeps room above and below it instead of touching the row's edges.
 
 ## [0.0.28] - 2026-11-26
 
