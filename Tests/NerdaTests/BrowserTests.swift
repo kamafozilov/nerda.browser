@@ -2022,14 +2022,22 @@ func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) async throws {
 
 /// Pages are let past WebKit's 60 frames a second (Tab.matchScreenRate), but
 /// for Low Power Mode. Fails once WebKit takes the switch away or renames it.
+/// The mode is set here, whatever the Mac's, and set back before any other
+/// test runs: the test doesn't wait on anything.
 @MainActor
 @Test func pagesAreDrawnAtTheScreensRate() throws {
     let flag = try #require(Nerda.Tab.near60)
-    let preferences = Nerda.Tab(url: somewhere).webView.configuration.preferences
-    let get = NSSelectorFromString("_isEnabledForFeature:")
-    typealias Getter = @convention(c) (AnyObject, Selector, AnyObject) -> Bool
-    let near60 = unsafeBitCast(preferences.method(for: get), to: Getter.self)(preferences, get, flag)
-    #expect(near60 == ProcessInfo.processInfo.isLowPowerModeEnabled)
+    let before = LowPowerMode.forced
+    defer { LowPowerMode.forced = before }
+    let near60 = { (lowPower: Bool) -> Bool in
+        LowPowerMode.forced = lowPower
+        let preferences = Nerda.Tab(url: somewhere).webView.configuration.preferences
+        let get = NSSelectorFromString("_isEnabledForFeature:")
+        typealias Getter = @convention(c) (AnyObject, Selector, AnyObject) -> Bool
+        return unsafeBitCast(preferences.method(for: get), to: Getter.self)(preferences, get, flag)
+    }
+    #expect(!near60(false))
+    #expect(near60(true))
 }
 
 /// An incognito window's tabs, a page's popups among them, keep their cookies

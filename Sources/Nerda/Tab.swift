@@ -1205,7 +1205,7 @@ final class Tab: Identifiable {
         guard let near60, preferences.responds(to: setter) else { return }
         typealias Setter = @convention(c) (AnyObject, Selector, Bool, AnyObject) -> Void
         unsafeBitCast(preferences.method(for: setter), to: Setter.self)(
-            preferences, setter, ProcessInfo.processInfo.isLowPowerModeEnabled, near60)
+            preferences, setter, LowPowerMode.isOn, near60)
     }
 
     /// Every page made, while it lives.
