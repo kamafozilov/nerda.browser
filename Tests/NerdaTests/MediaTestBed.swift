@@ -204,14 +204,14 @@ final class MediaPage {
     }
 
     /// A page with nothing in it but `url` in a frame, at a player's usual
-    /// embedded size, allowed to float.
+    /// embedded size, granted nothing (`allow`) a real embed may lack.
     static func embedding(_ url: URL) -> String {
         """
             <!doctype html>
             <meta charset="utf-8">
             <title>A bed page in a frame</title>
             <style>html, body { margin: 0; background: #222 } iframe { border: 0; display: block }</style>
-            <iframe src=\(String(reflecting: url.absoluteString)) width="560" height="315" allow="autoplay; picture-in-picture"></iframe>
+            <iframe src=\(String(reflecting: url.absoluteString)) width="560" height="315"></iframe>
             """
     }
 

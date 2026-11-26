@@ -90,7 +90,8 @@ extension Browser {
 
     /// `tab`'s page started playing sound: what floating its video needs is
     /// made ready now, ahead of the owner leaving it. A page that plays no
-    /// sound is never made ready, nor an Agent tab, which never floats.
+    /// sound is never made ready; nor is an Agent browser's tab here, as
+    /// nothing of its floats by itself.
     func soundStarted(_ tab: Tab) {
         guard !isForAgents, let page = tab.page, floatingToggle.available(page) else { return }
         floatingToggle.makeReady(page)

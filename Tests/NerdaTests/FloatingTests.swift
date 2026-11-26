@@ -103,6 +103,9 @@ struct FloatingTests {
     static func floatAndLand(_ watched: MediaPage, leavingFor other: MediaPage, in bed: MediaTestBed, rounds: Int) async throws {
         // Round after round outlasts the movie.
         try await watched.run("media.loop = true", mark: "loop")
+        // Heard by Nerda before it is left, as the owner's video has been
+        // by then: WebKit says so a moment after it plays.
+        try await waitFor("The page never played sound as far as Nerda knows") { watched.tab.playsAudio }
         // On only now: opening a tab selects it, which leaves the one before.
         let suite = "dev.nerda.tests.floating.\(UUID().uuidString)"
         let settings = try #require(UserDefaults(suiteName: suite))
