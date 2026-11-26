@@ -44,7 +44,8 @@ Only what was really done, with its result:
 - `swift test`: 83 tests pass
 - On screen: the steps tried, and what happened
 Anything not run is written as "Not run: …". Never claim a check that
-didn't happen.
+didn't happen. No known failures: a test that fails now and then is a bug
+with an issue of its own (docs/pull-requests.md).
 -->
 
 ## Changelog

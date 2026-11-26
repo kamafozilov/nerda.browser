@@ -28,7 +28,7 @@ No AI attribution anywhere in Git or on GitHub: no `Co-Authored-By` trailer for 
 1. **What changed**: one or two sentences for the person using Nerda. A fix says what went wrong and what happens now.
 2. **Screenshots**: below.
 3. **How it works**: short bullets a reviewer needs to read the diff: the approach, the main types or files, why this way. Not a file-by-file list.
-4. **Testing**: only what was really run, with its result. What wasn't is written "Not run: …".
+4. **Testing**: only what was really run, with its result. What wasn't is written "Not run: …". It never lists known failures: see [A test that fails now and then](#a-test-that-fails-now-and-then).
 5. **Changelog**: the line added to `CHANGELOG.md` with its heading, or "None" and why. How to write it: [releasing.md](releasing.md#every-change-the-changelog).
 
 ## Screenshots
@@ -62,6 +62,12 @@ Once in `build/screenshots/`, they reach the pull request on their own:
 - **The Screenshots check** (`.github/workflows/screenshots.yml`) runs on every pull request as it opens, is edited or gets new commits. It puts every uploaded picture into the Screenshots section, each under its caption, a before and an after side by side, whatever was written there, and passes one without any all the same. A picture dragged into the body on GitHub counts too.
 
 `./screenshots.sh` keeps them on `refs/screenshots/<your branch>`, a ref that isn't a branch: GitHub lists no branch and offers no pull request for it, and `main` never carries pictures. They are shown by the address of their commit, so a picture sent again has a new address, and the check swaps it in; sending them unchanged does nothing. Run it by hand for pictures taken after the last push, then push again or edit the body, and the check puts them in. From a fork, it uses your fork.
+
+## A test that fails now and then
+
+`swift test` passes on every run, two runs side by side included. A test that fails now and then is a bug, whatever the change being tested: it gets an issue of its own (see [docs/agents/issue-tracker.md](agents/issue-tracker.md)), with the test's name, its failure and how often it came, and it is fixed by removing the cause, never by skipping, removing or loosening the test or giving it longer.
+
+A pull request never lists known failures. Its Testing section says `swift test` passed; if a test failed on the way, the pull request waits for that issue's fix, or makes it itself.
 
 ## Opening it
 
