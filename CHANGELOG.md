@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.29] - 2026-11-26
+
 ### Added
 
 - Settings › Agents connects Claude Code and Codex to Nerda with one click, with no command to type in Terminal. It shows which ones are connected and explains in three steps how an agent uses Nerda. A connected agent disconnects from there too, and the `nerda-browser` command installs and goes the same way.
@@ -493,7 +495,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.28...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.29...HEAD
+[0.0.29]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.28...v0.0.29
 [0.0.28]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.27...v0.0.28
 [0.0.27]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.26...v0.0.27
 [0.0.26]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.25...v0.0.26
