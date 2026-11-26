@@ -10,6 +10,12 @@ struct AddressBar: View {
     let browser: Browser
     /// The tabs are across the top: no sidebar to toggle.
     var horizontal = false
+    /// Left free at its start, on its own ground, for the window's buttons
+    /// over it while the sidebar is put away.
+    var room: CGFloat = 0
+    /// Wears its own ground. Not while the window draws it from its left
+    /// corner instead (`BrowserView.reaching`), where the bar is slid aside.
+    var grounded = true
 
     @Environment(\.colorScheme) private var scheme
 
@@ -101,6 +107,7 @@ struct AddressBar: View {
             }
         }
         .padding(.horizontal, Self.edge)
+        .padding(.leading, room)
         .frame(height: Self.height)
         // Moves the window, as the title bar under it would.
         .background {
@@ -108,19 +115,15 @@ struct AddressBar: View {
                 .contentShape(Rectangle())
                 .titleBar()
         }
-        // The card's upper corners; the lower are the page's.
-        .background(Self.ground(of: tab), in: UnevenRoundedRectangle(
-            topLeadingRadius: BrowserView.cornerRadius, topTrailingRadius: BrowserView.cornerRadius, style: .continuous
-        ))
         // Light or dark to suit the page's colour, whatever the window's.
         .environment(\.colorScheme, color.map(Self.colorScheme) ?? scheme)
-        .overlay(alignment: .bottom) {
-            ZStack(alignment: .bottom) {
-                // Just there: the page's own colour carries on under it.
-                if tab?.settings == nil, tab?.showsHistory != true { Color.primary.opacity(0.06).frame(height: 1) }
-                LoadLine(browser: browser)
-            }
+        // Switched, never faded: the window's own takes over in the same frame.
+        .background {
+            BarGround(browser: browser)
+                .opacity(grounded ? 1 : 0)
+                .animation(nil, value: grounded)
         }
+        .overlay(alignment: .bottom) { LoadLine(browser: browser) }
     }
 
     /// What the bar wears, and the tab on screen across the top with it: the
@@ -137,6 +140,30 @@ struct AddressBar: View {
         guard let rgb = color.usingColorSpace(.sRGB) else { return .dark }
         let luminance = 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
         return luminance < 0.5 ? .dark : .light
+    }
+}
+
+/// The address bar's ground: the page's colour, or its own, with the card's
+/// upper corners (the lower are the page's), and a hairline along its
+/// bottom. Drawn by the bar, or by the window from its left corner while the
+/// bar is slid aside (`BrowserView.reaching`), as one piece either way.
+struct BarGround: View {
+    let browser: Browser
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let tab = browser.selected
+        let color = tab?.reader == nil ? tab?.color : nil
+        UnevenRoundedRectangle(
+            topLeadingRadius: BrowserView.cornerRadius, topTrailingRadius: BrowserView.cornerRadius, style: .continuous
+        )
+        .fill(AddressBar.ground(of: tab))
+        .environment(\.colorScheme, color.map(AddressBar.colorScheme) ?? scheme)
+        .overlay(alignment: .bottom) {
+            // Just there: the page's own colour carries on under it.
+            if tab?.settings == nil, tab?.showsHistory != true { Color.primary.opacity(0.06).frame(height: 1) }
+        }
+        .allowsHitTesting(false)
     }
 }
 
