@@ -151,14 +151,15 @@ enum DockBadge {
 }
 
 nonisolated enum Downloads {
-    /// Where downloads go (Settings › General): ~/Downloads, or a folder
+    /// Where downloads go (Settings › General): ~/Downloads
+    /// (`Edition.downloads`, the tests' own folder in the tests), or a folder
     /// chosen instead while it is there; or, asked, wherever each is saved.
     static let folderKey = "downloadFolder"
     static let asksKey = "asksWhereToSave"
 
     static var folder: URL {
         guard let path = UserDefaults.standard.string(forKey: folderKey),
-              FileManager.default.fileExists(atPath: path) else { return .downloadsDirectory }
+              FileManager.default.fileExists(atPath: path) else { return Edition.downloads }
         return URL(fileURLWithPath: path, isDirectory: true)
     }
 

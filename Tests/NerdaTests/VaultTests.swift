@@ -64,7 +64,7 @@ import WebKit
     let file = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).json")
     defer { try? FileManager.default.removeItem(at: file) }
     try Data(#"[{"host":"example.com","user":"me@gmail.com","saved":0,"provider":"google"}]"#.utf8).write(to: file)
-    let vault = Vault(service: "Nerda Tests \(UUID().uuidString)", names: file)
+    let vault = Vault(inMemory: file)
     let sent = SentSignIn(host: "example.com", user: "me@gmail.com", password: "secret", clear: false, at: .now)
     // Told without the keychain: no password is kept for the name.
     #expect(await vault.check(sent)?.known == false)
@@ -83,7 +83,7 @@ import WebKit
     defer { try? FileManager.default.removeItem(at: file) }
     try Data("[]".utf8).write(to: file)
     let browser = Browser(dataStore: .nonPersistent())
-    browser.vault = Vault(service: "Nerda Tests \(UUID().uuidString)", names: file)
+    browser.vault = Vault(inMemory: file)
     let tab = Nerda.Tab()
     browser.add(tab)
     let page = tab.webView
