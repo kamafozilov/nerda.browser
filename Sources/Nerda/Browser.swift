@@ -645,17 +645,19 @@ final class Browser: NSObject {
     }
 
     /// A page going full screen, or coming back. Only the page on screen, and
-    /// only straight after a click or key press: the page checks that too, but
-    /// it could be got round there. The pointer only passing by is not one.
-    func page(_ page: WKWebView, wantsFullscreen: Bool) {
+    /// only when `asked` by a click or key press on the page, as WebKit counts
+    /// them (`Fullscreen.bridge`), however long the page took to answer it.
+    /// The page checks that too, but it could be got round there. The pointer
+    /// only passing by is not one.
+    // Not the Mac's own count of time since the last click: on a trackpad,
+    // at the click and for a while after, it can still be at the click before.
+    func page(_ page: WKWebView, wantsFullscreen: Bool, asked: Bool) {
         guard let tab = tab(for: page) else { return }
         guard wantsFullscreen else {
             if fullscreenTab == tab.id { fullscreenTab = nil }
             return
         }
-        let sinceInput = [CGEventType.leftMouseDown, .leftMouseUp, .rightMouseDown, .otherMouseDown, .keyDown]
-            .map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? .infinity
-        guard tab.id == selectedID, !commandBarOpen, sinceInput < 1 else {
+        guard tab.id == selectedID, !commandBarOpen, asked else {
             page.evaluateJavaScript(Fullscreen.exit)
             return
         }
