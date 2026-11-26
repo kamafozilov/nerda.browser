@@ -226,6 +226,8 @@ final class MediaPage {
             };
             for (const name of ['play', 'playing', 'pause', 'seeking', 'seeked', 'ratechange', 'waiting', 'stalled', 'timeupdate', 'ended'])
                 media.addEventListener(name, () => bed.sample(name));
+            // No requestVideoFrameCallback: watching frames has WebKit report
+            // media time frame by frame, which a page playing a video doesn't.
             setInterval(() => bed.sample('tick'), 20);
             \(attach)
             </script>

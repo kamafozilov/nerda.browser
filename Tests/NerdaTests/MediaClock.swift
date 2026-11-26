@@ -55,9 +55,12 @@ struct MediaClock: Sendable {
     /// not at all between two paused ones. Known: a paused sample, or one
     /// whose media moved since the one before. Not one held while playing,
     /// since WebKit reports media time late as it starts playing: held where
-    /// it paused, then on in one step, while the frames shown run on without
-    /// one missing (measured 2026-11-27: held 100–250 ms, then up to 90 ms
-    /// in one 20 ms step). Late is not ahead.
+    /// it paused, then on in one step (measured 2026-11-27: in about a third
+    /// of rounds, held 100–250 ms, then 40–96 ms in one 20 ms step). With
+    /// its frames watched, WebKit reports them one by one, without a step,
+    /// and none missing. Late is not ahead. So as media starts again, a
+    /// skip forward no longer than the start was late, 100–250 ms, is not
+    /// seen here: the frames shown or the sound itself tell those.
     ///
     /// Back: media going back from one sample to the next.
     ///

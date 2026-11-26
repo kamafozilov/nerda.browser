@@ -80,12 +80,19 @@ enum GeneratedMovie {
             guard let buffer = try? soundBuffer(samples, at: first) else { return false }
             return audio.append(buffer)
         }
+        // Should an append fail, the writer stops asking the other input for
+        // more: bounded, so a failing writer fails the test, not hangs it.
         let fed = DispatchGroup()
         for feed in [picture, tone] { feed.start(in: fed) }
-        fed.wait()
+        guard fed.wait(timeout: .now() + 60) == .success, writer.status == .writing else {
+            writer.cancelWriting()
+            throw writer.error ?? CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "The movie was never written"])
+        }
         let finished = DispatchSemaphore(value: 0)
         writer.finishWriting { finished.signal() }
-        finished.wait()
+        guard finished.wait(timeout: .now() + 60) == .success else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "The movie never finished"])
+        }
         guard writer.status == .completed else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
         return try Data(contentsOf: file)
     }
