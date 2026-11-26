@@ -5,16 +5,18 @@ import Testing
 /// Where the main thread stopped (Watchdog): a stall of a second or more is
 /// written down with the main thread's stack, and a main loop that keeps
 /// moving never wakes the watchdog. Each test has a watchdog of its own,
-/// writing to a file of its own, never the data folder's, and watching a
-/// thread of its own with its run loop, in the main thread's place: a test
-/// that held the main thread up for seconds would hold up every other test.
+/// writing to a file of its own, never the data folder's. The stalls are
+/// made on a thread of the test's own with its run loop, watched in the
+/// main thread's place: a test that held the main thread up for seconds
+/// would hold up every other test. Only the main loop's hitches, a tenth
+/// of a second, are made on the main thread.
 @MainActor
 @Suite(.serialized)
 struct WatchdogTests {
     private func watching(_ thread: LoopThread) async -> (Watchdog, URL) {
         let file = FileManager.default.temporaryDirectory.appending(path: "stalls-\(UUID().uuidString).log")
         let watchdog = Watchdog(file: file, recorder: Recorder())
-        await thread.run { watchdog.start(watching: CFRunLoopGetCurrent()) { _ in } }
+        await thread.run { watchdog.start { _ in } }
         return (watchdog, file)
     }
 
@@ -35,6 +37,21 @@ struct WatchdogTests {
         let frames = text.split(separator: "\n").filter { $0.hasPrefix("    ") && $0.contains(" +0x") }
         #expect(frames.contains { $0.contains("Nerda") }, "with where the watched thread was: \(text)")
         #expect(!text.contains("ended before"))
+    }
+
+    /// Nerda's own watches the main loop, and keeps each hitch, a stop of
+    /// a tenth of a second or more, in its record. The main thread is held
+    /// up only that long: every other test waits on it meanwhile.
+    @Test func theMainLoopsHitchesAreKeptInTheRecord() async throws {
+        let file = FileManager.default.temporaryDirectory.appending(path: "stalls-\(UUID().uuidString).log")
+        let recorder = Recorder()
+        let watchdog = Watchdog(file: file, recorder: recorder)
+        watchdog.start()
+        defer { watchdog.stop(); try? FileManager.default.removeItem(at: file) }
+        // A pass of its own, begun after the watchdog was watching.
+        try await Task.sleep(for: .milliseconds(50))
+        usleep(150_000)
+        try await waitFor("The hitch kept") { recorder.hitches().contains { $0.seconds >= 0.15 } }
     }
 
     @Test func aLoopThatKeepsMovingNeverWakesIt() async throws {
