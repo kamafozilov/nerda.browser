@@ -203,7 +203,7 @@ struct AgentServerTests {
         #expect(!opened.isError, "\(opened.text)")
     }
 
-    /// Settings › Security & Privacy › Agents can use Nerda, turned off,
+    /// Settings › Agents › Agents can use Nerda, turned off,
     /// leaves nothing for agents to reach; turned on, they reach it again.
     @Test func theSettingsSwitchTurnsTheServerOff() async throws {
         let harness = try AgentHarness()

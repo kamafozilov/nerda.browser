@@ -28,7 +28,7 @@ struct ProfilesSettings: View {
                 }
             }
             SettingsRow(title: "New profile",
-                        detail: profiles.many ? nil : "Each has its own history, bookmarks, tabs, cookies and passwords",
+                        detail: profiles.many ? nil : "Each with its own history, tabs, cookies and passwords",
                         icon: "plus") {
                 Button("Add…") { edit(ProfileDraft(taken: profiles.all)) }
                     .buttonStyle(SettingsButtonStyle())

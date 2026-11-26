@@ -12,7 +12,7 @@ struct ExtensionsSettings: View {
 
     var body: some View {
         SettingsGroup(title: "Extensions") {
-            SettingsRow(title: "Enable extensions", detail: "Off by default for speed and reliability. Restart Nerda to apply", icon: "puzzlepiece.extension") {
+            SettingsRow(title: "Enable extensions", detail: "Off by default for speed. Restart Nerda to apply", icon: "puzzlepiece.extension") {
                 SettingsToggle(title: "Enable extensions", isOn: $enabled)
             }
         }
@@ -45,7 +45,7 @@ struct ExtensionsSettings: View {
             }
         }
         SettingsGroup(title: "Developer") {
-            SettingsRow(title: "Load unpacked", detail: "A folder with a manifest.json. Reload picks up what you change in it", icon: "folder") {
+            SettingsRow(title: "Load unpacked", detail: "A folder with a manifest.json. Reload picks up changes", icon: "folder") {
                 Button("Choose…", action: extensions.installFolder)
                     .buttonStyle(SettingsButtonStyle())
             }

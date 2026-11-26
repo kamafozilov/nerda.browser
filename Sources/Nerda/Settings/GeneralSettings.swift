@@ -47,7 +47,7 @@ struct GeneralSettings: View {
                 }
             }
             SettingsRow(title: "Search suggestions",
-                        detail: current.suggests ? "\(current.name) suggests searches as you type. Off, nothing leaves your Mac until Return"
+                        detail: current.suggests ? "\(current.name) suggests as you type. Off, nothing is sent until Return"
                             : "\(current.name) doesn't suggest searches as you type",
                         icon: "text.magnifyingglass") {
                 SettingsToggle(title: "Search suggestions", isOn: $suggestions)
@@ -223,7 +223,7 @@ private struct AboutSettings: View {
 
     var body: some View {
         SettingsGroup(title: "About Nerda") {
-            SettingsRow(title: "Browser", detail: "Current version is v\(Updater.current). \(Edition.updates ? updater.state.detail : "Development build. Updates are disabled.")") {
+            SettingsRow(title: "Browser", detail: "Version \(Updater.current) · \(Edition.updates ? updater.state.detail : "Development build, no updates")") {
                 if case .ready = updater.state {
                     Button("Restart to update", action: updater.restart)
                         .buttonStyle(SettingsButtonStyle(prominent: true))

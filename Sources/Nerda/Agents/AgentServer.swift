@@ -2,7 +2,7 @@ import Foundation
 import os
 
 /// Nerda's side of agents using it: listens on the edition's socket while
-/// Settings › Security & Privacy › Agents can use Nerda is on, checks each
+/// Settings › Agents › Agents can use Nerda is on, checks each
 /// caller (`AgentCallers`), and does each request's verb (`AgentVerb`) for
 /// its Agent session, in Agent tabs (`AgentBrowser`) of the profile.
 @MainActor
@@ -250,7 +250,7 @@ final class AgentServer {
                 return AgentError(.notAllowed, """
                     The user didn't allow \(program.name) to use Nerda, so Nerda only tells it its status. \
                     Use the nerda-browser command or MCP server that Nerda's setup installed, or ask the user \
-                    to remove \(program.name) in Nerda's Settings › Security & Privacy › Agents to be asked again.
+                    to remove \(program.name) in Nerda's Settings › Agents to be asked again.
                     """)
             case nil:
                 if asking { approvals.askAbout(program) }

@@ -12,7 +12,7 @@ struct PasswordsSettings: View {
 
     var body: some View {
         SettingsGroup {
-            SettingsLink(title: "Vault", detail: "Your passwords and sign-ins with services. Opens with Touch ID or your Mac's password",
+            SettingsLink(title: "Vault", detail: "Your passwords and sign-ins, opened with Touch ID",
                          icon: "lock.shield") { VaultWindow.show(browser.profile) }
             SettingsRow(title: "Import passwords", detail: "From the file Passwords, Safari or Chrome exports", icon: "tray.and.arrow.down") {
                 Button("Import…", action: browser.importPasswords)
@@ -24,14 +24,14 @@ struct PasswordsSettings: View {
             SettingsRow(title: "Offer to save passwords", detail: offerDetail, icon: "square.and.arrow.down.on.square") {
                 SettingsToggle(title: "Offer to save passwords", isOn: $offers)
             }
-            SettingsRow(title: "Fill in saved passwords", detail: "List your accounts under a sign-in box, to fill one in with a click",
+            SettingsRow(title: "Fill in saved passwords", detail: "Offer your accounts under a sign-in box",
                         icon: "rectangle.and.pencil.and.ellipsis") {
                 SettingsToggle(title: "Fill in saved passwords", isOn: $fills)
             }
         }
         SettingsGroup(title: "Never saved") {
             if never.isEmpty {
-                SettingsRow(title: "No sites", detail: "Sites you answer Never for, when Nerda offers to save a password, are listed here",
+                SettingsRow(title: "No sites", detail: "Sites you told never to save a password",
                             icon: "nosign") { EmptyView() }
             }
             ForEach(never, id: \.self) { site in
@@ -50,6 +50,6 @@ struct PasswordsSettings: View {
 
     private var offerDetail: String {
         if let manager = Extensions.shared.passwordSavingTakenBy { return "\(manager) saves your passwords instead" }
-        return "Ask to keep a new password, or a sign-in with Google, once it worked"
+        return "Ask to keep a password or Google sign-in once it works"
     }
 }

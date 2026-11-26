@@ -14,11 +14,11 @@ struct AutoFillSettings: View {
 
     var body: some View {
         SettingsGroup {
-            SettingsRow(title: "Contact info", detail: "Fill in names, addresses, email and phone numbers, and offer to save new ones",
+            SettingsRow(title: "Contact info", detail: "Fill in names, addresses, emails and phone numbers",
                         icon: "person.text.rectangle") {
                 SettingsToggle(title: "Contact info", isOn: $fillsAddresses)
             }
-            SettingsRow(title: "Credit cards", detail: "Fill in after Touch ID or your Mac's password, and offer to save new ones",
+            SettingsRow(title: "Credit cards", detail: "Fill in after Touch ID, and offer to save new cards",
                         icon: "creditcard") {
                 SettingsToggle(title: "Credit cards", isOn: $fillsCards)
             }
@@ -30,7 +30,7 @@ struct AutoFillSettings: View {
                 }
             }
             SettingsRow(title: "Add an address",
-                        detail: autofill.addresses.isEmpty ? "Nerda offers to save the address you send in a form, or add one here" : nil,
+                        detail: autofill.addresses.isEmpty ? "Nerda offers to save an address you send, or add one here" : nil,
                         icon: "plus") {
                 Button("Add…") { edit(Contact()) }
                     .buttonStyle(SettingsButtonStyle())
@@ -45,7 +45,7 @@ struct AutoFillSettings: View {
                 }
             }
             SettingsRow(title: "Add a card",
-                        detail: autofill.cards.isEmpty ? "Nerda offers to save the card you pay with on a secure page, or add one here" : nil,
+                        detail: autofill.cards.isEmpty ? "Nerda offers to save a card you pay with, or add one here" : nil,
                         icon: "plus") {
                 Button("Add…") { editCard(Card()) }
                     .buttonStyle(SettingsButtonStyle())

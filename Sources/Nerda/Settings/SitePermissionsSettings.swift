@@ -30,7 +30,7 @@ struct SitePermissionsSettings: View {
             let sites = settings.sites.compactMap { key, options in Self.address(key).map { (url: $0, options: options) } }
                 .sorted { name($0.url).localizedStandardCompare(name($1.url)) == .orderedAscending }
             if sites.isEmpty {
-                SettingsRow(title: "No sites yet", detail: "Sites you allow or block, when they ask or in Site Settings beside the address, are listed here",
+                SettingsRow(title: "No sites yet", detail: "Sites you allow or block show here",
                             icon: "globe") { EmptyView() }
             }
             ForEach(sites, id: \.url) { site in

@@ -11,14 +11,14 @@ struct ShortcutsSettings: View {
             ("Close Tab", "Close the tab on screen. A pinned site keeps its tile", "⌘W"),
             ("Reopen Closed Tab", "Restore the last closed tab", "⇧⌘T"),
             ("Search Tabs", "Find an open tab, or a site from your history", "⇧⌘A"),
-            ("Next Tab", "Go to the next tab, round from the last to the first. ⇧⌘] and ⌥⌘→ do it too", "⌃Tab"),
+            ("Next Tab", "Go to the next tab. ⇧⌘] and ⌥⌘→ do it too", "⌃Tab"),
             ("Previous Tab", "Go to the tab before. ⇧⌘[ and ⌥⌘← do it too", "⌃⇧Tab"),
             ("Go to a Tab", "The first eight tabs, in order", "⌘1 – ⌘8"),
             ("Last Tab", "Go to the last tab", "⌘9"),
             ("Collapse Tabs", "Show or hide the sidebar", "⌘S"),
         ]),
         ("Agents", [
-            ("Take Over", "Take the Agent tab you are watching: the agent waits until you hand it back", "⌘."),
+            ("Take Over", "Take the Agent tab you watch. The agent waits for you", "⌘."),
             ("Hand Back", "Give the Agent tab you took back to the agent", "⌘↩"),
         ]),
         ("Page", [

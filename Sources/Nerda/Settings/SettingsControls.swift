@@ -25,10 +25,11 @@ struct SiteRow<Control: View>: View {
                         .lineLimit(1)
                 }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 16)
             control
         }
         .padding(.horizontal, 13)
+        .padding(.vertical, 9)
         .frame(minHeight: 52)
     }
 }
@@ -391,16 +392,20 @@ struct SettingsRow<Control: View>: View {
                     .font(.system(size: 13.5))
                     .foregroundStyle(Palette.ink)
                 if let detail {
+                    // A line, kept short; one that runs on wraps under
+                    // itself with room around it, never squeezed to the edges.
                     Text(detail)
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
+                        .lineSpacing(1.5)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 16)
             control
         }
         .padding(.horizontal, 13)
-        .padding(.vertical, alignment == .top ? 12 : 0)
+        .padding(.vertical, alignment == .top ? 12 : 9)
         .frame(minHeight: 52)
     }
 }

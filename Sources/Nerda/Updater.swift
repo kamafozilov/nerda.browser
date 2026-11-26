@@ -87,12 +87,12 @@ final class Updater {
 
         var detail: String {
             switch self {
-            case .idle: "Check for the latest version."
+            case .idle: "Check for the latest version"
             case .checking: "Checking for updates…"
-            case .upToDate: "Nerda is up to date."
-            case .available(let version): "Version \(version) is available."
+            case .upToDate: "Nerda is up to date"
+            case .available(let version): "Version \(version) is available"
             case .downloading: "Downloading update…"
-            case .ready(let version): "Version \(version) is ready. Restart Nerda to finish updating."
+            case .ready(let version): "Version \(version) is ready. Restart to finish"
             case .failed(let message): message
             }
         }
