@@ -102,10 +102,17 @@ private final class StreamServer: @unchecked Sendable {
 @MainActor
 @Suite(.serialized)
 struct HiddenPagesTests {
-    /// A page that answers nothing for this long was paused: a running one
-    /// answers ten events a second, and a busy Mac holds it up for far less
-    /// (measured with a second full test run beside this one, a second at most).
+    /// A suspended page answers nothing for this long, and more, where a
+    /// running one answers ten events a second.
     private static let paused: TimeInterval = 3
+
+    /// Whether WebKit has the page's process suspended, by its own account
+    /// (`_webProcessState`, 3 for suspended): what a busy Mac doesn't
+    /// change, where how long a running page goes without an answer it does.
+    private func isSuspended(_ page: WKWebView) throws -> Bool {
+        let state = try #require(page.value(forKey: "_webProcessState") as? Int, "WebKit no longer says how a page's process runs")
+        return state == 3
+    }
 
     /// What a page heard over the last `seconds`: how many events, and the
     /// longest it went without one, up to now. A running page hears each as
@@ -141,10 +148,10 @@ struct HiddenPagesTests {
 
     /// Out of sight for longer than WebKit takes to suspend a page, the page
     /// still hears the events as they come: over six seconds it answers
-    /// twenty or more, unasked, and is never paused. A suspended page
-    /// answers none until something wakes it, and nothing here does. Its
-    /// own timers stay slowed, as WebKit slows a hidden page's: far fewer
-    /// than ten ticks a second.
+    /// twenty or more, unasked, and WebKit never once has it suspended. A
+    /// suspended page answers none until something wakes it, and nothing
+    /// here does. Its own timers stay slowed, as WebKit slows a hidden
+    /// page's: far fewer than ten ticks a second.
     @Test func aHiddenPageKeepsRunning() async throws {
         let server = try StreamServer()
         defer { server.stop() }
@@ -152,11 +159,12 @@ struct HiddenPagesTests {
         try await Task.sleep(for: .seconds(8))
 
         let since = Date()
+        var suspended = false
         try await waitFor("Six seconds, and twenty events answered out of sight", timeout: .seconds(15)) {
-            Date().timeIntervalSince(since) >= 6 && server.answered(after: since) >= 20
+            suspended = try suspended || isSuspended(tab.webView)
+            return Date().timeIntervalSince(since) >= 6 && server.answered(after: since) >= 20
         }
-        let quiet = server.longestQuiet(since: since)
-        #expect(quiet < Self.paused, "answered nothing for \(quiet) s")
+        #expect(!suspended, "WebKit suspended the page out of sight")
         let over = Date().timeIntervalSince(since)
         let heard = try await heard(tab, over: over)
         #expect(Double(heard.ticks) < 10 * over / 2, "\(heard) over \(over) s")
@@ -167,7 +175,8 @@ struct HiddenPagesTests {
     /// turned off lets it run again, without the page being made anew.
     /// WebKit suspends it about a second after the mode comes on: the page
     /// then answers no event for seconds on end, where a running one answers
-    /// ten a second. Turned off, it answers again, and is not paused again.
+    /// ten a second, and WebKit says it is suspended. Turned off, it answers
+    /// again, and isn't suspended again meanwhile.
     @Test func hiddenPagesFollowLowPowerMode() async throws {
         let server = try StreamServer()
         defer { server.stop() }
@@ -180,6 +189,7 @@ struct HiddenPagesTests {
         LowPowerMode.changed()
         let on = Date()
         try await waitFor("Paused", timeout: .seconds(10)) { server.longestQuiet(since: on) >= Self.paused }
+        #expect(try isSuspended(page))
 
         LowPowerMode.force(false, for: browser.dataStore)
         LowPowerMode.changed()
@@ -187,9 +197,12 @@ struct HiddenPagesTests {
         try await waitFor("Answering again") { server.answered(after: off) > 0 }
         // From its first answer: waking takes a moment of its own.
         let back = Date()
-        try await waitFor("Twenty events answered again") { server.answered(after: back) >= 20 }
-        let quiet = server.longestQuiet(since: back)
-        #expect(quiet < Self.paused, "answered nothing for \(quiet) s")
+        var suspended = false
+        try await waitFor("Twenty events answered again") {
+            suspended = try suspended || isSuspended(page)
+            return server.answered(after: back) >= 20
+        }
+        #expect(!suspended, "WebKit suspended the page again")
         #expect(tab.webView === page)
         withExtendedLifetime(browser) {}
     }
