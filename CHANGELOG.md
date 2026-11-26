@@ -7,6 +7,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.0.28] - 2026-11-26
+
 ### Added
 
 - AI agents such as Claude Code and Codex can use Nerda. Run `/Applications/Nerda.app/Contents/MacOS/Nerda setup` once in Terminal: it adds Nerda to them, gives them a skill that teaches them to use it, kept up to date as Nerda updates, and installs a `nerda-browser` command for scripts.
@@ -482,7 +484,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 - Site icons on tabs, in the sidebar and across the top, show on their own, without a white square behind them; dark ones (GitHub's) take the text's colour.
 - A site opened in a new tab, or a tab waking from sleep, no longer flashes white while the site answers; the tab stays dark in dark mode until the page arrives.
 
-[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.27...HEAD
+[Unreleased]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.28...HEAD
+[0.0.28]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.27...v0.0.28
 [0.0.27]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.26...v0.0.27
 [0.0.26]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.25...v0.0.26
 [0.0.25]: https://github.com/kamafozilov/nerda.browser/compare/v0.0.24...v0.0.25
