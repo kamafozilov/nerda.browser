@@ -81,4 +81,16 @@ struct MediaClockTests {
         #expect(jumps.count == 1)
         #expect(abs((jumps.first?.by ?? 0) - 0.5) <= 0.02)
     }
+
+    /// Reported late as it first started, then paused and moved on two
+    /// seconds: the jump is two seconds, measured from where it paused, not
+    /// less by how late it started.
+    @Test func aJumpIsMeasuredFromTheLastTimeKnownNotFromALateStart() {
+        let held = stride(from: 10, through: 10.2, by: 0.02).map { MediaClock.Sample(wall: $0, media: 0, paused: false, rate: 1) }
+        let clock = MediaClock(samples: held + playing(from: 10.22, to: 11, media: 0.02) + paused(from: 11.01, to: 11.5, at: 0.8)
+                               + paused(from: 11.51, to: 12, at: 2.8) + playing(from: 12.01, to: 12.5, media: 2.8))
+        let jumps = clock.jumps(over: 0.05)
+        #expect(jumps.count == 1)
+        #expect(abs((jumps.first?.by ?? 0) - 2) <= 0.02)
+    }
 }

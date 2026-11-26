@@ -41,33 +41,41 @@ struct MediaClock: Sendable {
     var samples: [Sample]
     var marks: [Mark] = []
 
-    /// How far media time may stray from the wall clock between two samples
-    /// before it counts as a jump.
+    /// How far media time may stray before it counts as a jump. Measured on
+    /// this Mac (2026-11-27), a clean pause and play of a video file strayed
+    /// 27 ms at most in 120 rounds, alone and in two full runs side by side:
+    /// the step after WebKit's late report of a start, less what the wall
+    /// clock let it go since the last time known.
     static let tolerance = 0.05
 
-    /// Every jump of more than `tolerance` seconds either way. Forward:
-    /// media further on than the wall clock let it go since any sample
-    /// before, at the faster rate of each two samples, and not at all
-    /// between two paused ones. Measured from any sample before, not only
-    /// the last, since WebKit reports media time late as it starts playing
-    /// (held where it paused, then on in one step, the frames shown running
-    /// on all the while): late is not ahead. Back: media going back from one
-    /// sample to the next. After a jump, it is measured from where it went.
+    /// Every jump of more than `tolerance` seconds either way.
+    ///
+    /// Forward: media further on than the wall clock let it go since the
+    /// last time known, at the faster rate of each two samples between, and
+    /// not at all between two paused ones. Known: a paused sample, or one
+    /// whose media moved since the one before. Not one held while playing,
+    /// since WebKit reports media time late as it starts playing: held where
+    /// it paused, then on in one step, while the frames shown run on without
+    /// one missing (measured 2026-11-27: held 100–250 ms, then up to 90 ms
+    /// in one 20 ms step). Late is not ahead.
+    ///
+    /// Back: media going back from one sample to the next.
+    ///
+    /// After a jump, media is measured from where it went.
     func jumps(over tolerance: Double) -> [Jump] {
         guard let first = samples.first else { return [] }
         // `allowed`: the media time the wall clock let pass since the first
-        // sample; `lead`: the furthest on a sample so far was, less that.
-        var allowed = 0.0, lead = first.media, jumps: [Jump] = []
+        // sample; `known`: the last time known, and `allowed` as it was then.
+        var allowed = 0.0, known = (media: first.media, allowed: 0.0), jumps: [Jump] = []
         for (before, after) in zip(samples, samples.dropFirst()) {
             allowed += before.paused && after.paused ? 0 : (after.wall - before.wall) * max(before.rate, after.rate)
-            let ahead = after.media - allowed - lead, back = after.media - before.media
-            let by = ahead > tolerance ? ahead : back < -tolerance ? back : nil
-            guard let by else {
-                lead = max(lead, after.media - allowed)
-                continue
+            let ahead = after.media - known.media - (allowed - known.allowed), back = after.media - before.media
+            if let by = ahead > tolerance ? ahead : back < -tolerance ? back : nil {
+                jumps.append(Jump(wall: after.wall, media: before.media, by: by, after: marks.last { $0.wall <= after.wall }?.name))
+                known = (after.media, allowed)
+            } else if after.paused || after.media != before.media {
+                known = (after.media, allowed)
             }
-            lead = after.media - allowed
-            jumps.append(Jump(wall: after.wall, media: before.media, by: by, after: marks.last { $0.wall <= after.wall }?.name))
         }
         return jumps
     }
