@@ -31,12 +31,19 @@ struct BrowserView: View {
     @State private var downloadsShown = false
     @State private var aiChatsShown = false
     @State private var menuShown = false
-    /// The page is laid out beside the sidebar (see `laidOut`).
-    @State private var docked = true
+    /// The page is laid out beside the sidebar (see `laidOut`): from the
+    /// start, if the sidebar is open then.
+    @State private var docked: Bool
     @AppStorage("sidebarWidth") private var sidebarWidth = Sidebar.defaultWidth
     /// The window went full screen for a page, and comes back with it.
     @State private var fullScreenForPage = false
     @AppStorage(TabStyle.key) private var tabStyle = TabStyle.vertical
+
+    init(browser: Browser, window: NSWindow) {
+        self.browser = browser
+        self.window = window
+        _docked = State(initialValue: browser.sidebarOpen)
+    }
 
     /// A page shows one of its elements (a video) over the whole window: the
     /// sidebar keeps out of the way until it is done.
@@ -76,6 +83,14 @@ struct BrowserView: View {
     /// Where the card's top edge is: under the tabs, when they are across the
     /// top, or the margin.
     private var top: CGFloat { horizontal && !pageFullscreen ? TabStrip.height : margin }
+    /// The address bar's ground is drawn from the window's left corner, past
+    /// the card's edge, rather than by the bar: whenever the sidebar isn't
+    /// pinned with the page laid out beside it, so while it slides too. The
+    /// window's buttons then sit on the bar's ground all along, under the
+    /// sidebar's top row as that fades (`Sidebar.shown`), and the card's
+    /// corner never passes under them. Switched while the top row covers it
+    /// (as the sidebar starts to go, and once it has come), so never seen to.
+    private var reaching: Bool { docks && !(browser.sidebarOpen && docked) }
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -90,8 +105,15 @@ struct BrowserView: View {
                 .padding(.leading, inset)
 
             if !pageFullscreen {
+                if reaching {
+                    BarGround(browser: browser)
+                        .frame(height: AddressBar.height)
+                        .padding(.horizontal, margin)
+                        .padding(.top, top)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                }
                 // Beside the sidebar, and under it while it is out over the page.
-                AddressBar(browser: browser, horizontal: horizontal, room: barRoom)
+                AddressBar(browser: browser, horizontal: horizontal, room: barRoom, grounded: !reaching)
                     .padding(.leading, inset)
                     .padding(.trailing, margin)
                     .padding(.top, top)
@@ -118,8 +140,8 @@ struct BrowserView: View {
                 // added and taken away, so it comes back as it was left (scrolled
                 // where it was) without being built again.
                 Sidebar(browser: browser, pinned: browser.sidebarOpen, docked: docked, slid: sidebarSlid,
-                        downloadsShown: $downloadsShown, aiChatsShown: $aiChatsShown, menuShown: $menuShown,
-                        width: $sidebarWidth)
+                        shown: sidebarShown, downloadsShown: $downloadsShown, aiChatsShown: $aiChatsShown,
+                        menuShown: $menuShown, width: $sidebarWidth)
                     // Only out over the page does it matter: pinned, the pointer
                     // coming and going would have the whole window worked out again.
                     .onHover { over in if peeking || overPeek { overPeek = over } }
@@ -272,11 +294,9 @@ struct BrowserView: View {
     /// glass when the page is as light or dark as it. Across the top, it
     /// leaves a `gap` for the tab on screen to run into the card.
     private func cardEdge(gap: CGRect?) -> some View {
-        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+        CardEdge(inset: inset, bar: reaching ? margin : nil, top: top, margin: margin, radius: Self.cornerRadius,
+                 row: AddressBar.height)
             .strokeBorder(Self.edge)
-            .padding(.leading, inset)
-            .padding([.bottom, .trailing], margin)
-            .padding(.top, top)
             .mask { EdgeGap(gap: gap ?? .zero).fill(style: FillStyle(eoFill: true)) }
             .allowsHitTesting(false)
     }
@@ -293,6 +313,42 @@ struct BrowserView: View {
         } else if !pageFullscreen, fullScreenForPage, windowFullScreen {
             window.toggleFullScreen(nil)
         }
+    }
+}
+
+/// The card's outline, in the window: from `inset`, its left edge, which
+/// slides with the sidebar, but along the address bar from `bar` while the
+/// bar's ground reaches past it to the window's corner (`BrowserView.reaching`).
+/// Only `inset` is animated: `bar` is switched, as the ground is.
+nonisolated struct CardEdge: InsettableShape {
+    var inset: CGFloat
+    var bar: CGFloat?
+    var top: CGFloat
+    var margin: CGFloat
+    var radius: CGFloat
+    /// The address bar's height, the row the bar's ground is.
+    var row: CGFloat
+    var inward: CGFloat = 0
+
+    var animatableData: CGFloat {
+        get { inset }
+        set { inset = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let card = CGRect(x: inset, y: top, width: rect.maxX - margin - inset, height: rect.maxY - margin - top)
+        let whole = RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .inset(by: inward).path(in: card)
+        guard let bar, bar < inset else { return whole }
+        let ground = UnevenRoundedRectangle(topLeadingRadius: radius, topTrailingRadius: radius, style: .continuous)
+            .inset(by: inward).path(in: CGRect(x: bar, y: top, width: rect.maxX - margin - bar, height: row))
+        return whole.union(ground)
+    }
+
+    func inset(by amount: CGFloat) -> CardEdge {
+        var edge = self
+        edge.inward += amount
+        return edge
     }
 }
 

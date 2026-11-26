@@ -95,3 +95,69 @@ func theAddressBarRunsUnderTheWindowButtons(incognito: Bool) throws {
     window.selectNextKeyView(nil)
     #expect(window.firstResponder !== rest)
 }
+
+/// Holds an animation at one point of its way for a few seconds, the slide
+/// drawn as it is at that moment, then ends it: one held for good would
+/// keep the window drawing long after it closed, and slow the other tests.
+private struct Held: CustomAnimation {
+    let fraction: Double
+    func animate<V: VectorArithmetic>(value: V, time: TimeInterval, context: inout AnimationContext<V>) -> V? {
+        time < 3 ? value.scaled(by: fraction) : nil
+    }
+}
+
+/// At every moment of the sidebar sliding away and coming back, what is
+/// round the window's buttons is one surface: no edge, corner or step of
+/// the sidebar's or the card's passes under them or beside them. The slide
+/// is held at points along its way and drawn off screen, in an incognito
+/// and a regular window, one at a time. The window's view is drawn in a
+/// small plain window of its own, which other tests, looking for browser
+/// windows, don't count.
+@MainActor
+@Test(.serialized, arguments: [(false, true), (true, true), (false, false), (true, false)], [0.1, 0.3, 0.5, 0.7, 0.9])
+func theWindowButtonsSitOnOneSurfaceAsTheSidebarSlides(way: (coming: Bool, incognito: Bool), fraction: Double) async throws {
+    let coming = way.coming
+    let browser = way.incognito ? Browser(dataStore: .nonPersistent()) : Browser()
+    browser.sidebarOpen = !coming
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 300),
+                          styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                          backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.titlebarAppearsTransparent = true
+    let content = NSHostingView(rootView: BrowserView(browser: browser, window: window)
+        .environment(\.incognito, browser.isPrivate))
+    window.contentView = content
+    defer { window.close() }
+    content.layoutSubtreeIfNeeded()
+    try await Task.sleep(for: .milliseconds(200))
+
+    withAnimation(Animation(Held(fraction: fraction))) { browser.sidebarOpen = coming }
+    try await Task.sleep(for: .milliseconds(200))
+    content.layoutSubtreeIfNeeded()
+
+    // Where the buttons sit, from the content's top left, and round them: on
+    // the bar's row, from just inside its rounded corner to where its own
+    // buttons start.
+    let margin = BrowserView.margin
+    let around = CGRect(x: margin + 8, y: margin + 6, width: BrowserView.trafficLightsWidth - margin - 10,
+                        height: AddressBar.height - 10)
+    let drawn = content.isFlipped ? around
+        : CGRect(x: around.minX, y: content.bounds.height - around.maxY, width: around.width, height: around.height)
+    let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: drawn))
+    content.cacheDisplay(in: drawn, to: bitmap)
+    let scale = CGFloat(bitmap.pixelsWide) / around.width
+    var colours: [NSColor] = []
+    for x in stride(from: 0, to: around.width, by: 2) {
+        for y in stride(from: 0, to: around.height, by: 2) {
+            if let colour = bitmap.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB) {
+                colours.append(colour)
+            }
+        }
+    }
+    let first = try #require(colours.first)
+    let off = colours.filter { colour in
+        abs(colour.redComponent - first.redComponent) > 0.01 || abs(colour.greenComponent - first.greenComponent) > 0.01
+            || abs(colour.blueComponent - first.blueComponent) > 0.01
+    }
+    #expect(off.isEmpty, "\(off.count) of \(colours.count) points differ from \(first) round the buttons, e.g. \(off.prefix(3))")
+}
