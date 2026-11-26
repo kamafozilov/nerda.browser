@@ -21,6 +21,9 @@ struct AgentReadingTests {
         let agent = try await harness.agent()
         _ = try await agent.call("open", ["url": AgentJSON(url)])
         let page = try #require(harness.agents?.tabs.first?.page)
+        // Whatever mark open left (one it couldn't take off in time, on a
+        // busy Mac), so the one waited for below is the wait's.
+        _ = try await page.callAsyncJavaScript("globalThis.nerdaAgentActs = 0", contentWorld: .defaultClient)
         let started = ContinuousClock.now
 
         let wait = Task { try await agent.call("wait", ["tab": "t1", "text": "order confirmed", "timeout": 10]) }
