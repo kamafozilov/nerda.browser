@@ -47,13 +47,14 @@ private func withAccessibility(_ body: () async throws -> Void) async rethrows {
     let shown = browser.open(URL(string: "data:text/html,<title>Shown</title>")!)
     let window = window(of: browser)
     defer { window.close() }
+    // Named by its address until its page has loaded.
+    try await waitFor("Shown loaded") { shown.title == "Shown" }
     try await withAccessibility {
         _ = window.contentView!.accessibilityChildren()
         var all: [AnyObject] = []
-        for _ in 0..<50 {
-            try await Task.sleep(for: .milliseconds(50))
+        try await waitFor("The tabs heard by their titles") {
             all = elements(under: window.contentView!)
-            if all.contains(where: { $0.accessibilityLabel?() == "One" }) { break }
+            return ["One", "Shown"].allSatisfy { title in all.contains { $0.accessibilityLabel?() == title } }
         }
         func element(_ label: String) -> AnyObject? { all.first { $0.accessibilityLabel?() == label } }
         func actions(_ label: String) -> [String] { (element(label)?.accessibilityCustomActions?() ?? []).map(\.name) }
