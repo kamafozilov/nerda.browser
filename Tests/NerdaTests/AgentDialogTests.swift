@@ -64,7 +64,8 @@ struct AgentDialogTests {
 
     /// The pointer's other verbs wait on a dialog as a click does: a drag
     /// whose press brings one up stops there and answers at once, and while
-    /// it holds the page, hover, drag and scroll are refused at once. Once
+    /// it holds the page, hover, drag and scroll are refused at once: none
+    /// of them waits on the held page until a deadline of its own. Once
     /// the dialog is answered, the page hears the drag letting go, and
     /// nothing at the drop's place, no press and no wheel: none of the
     /// drag's moves, nothing of the verbs refused. (WebKit may move the
@@ -94,6 +95,8 @@ struct AgentDialogTests {
         #expect(!dragged.isError, "\(dragged.text)")
         #expect(dragged.text.hasPrefix("began dragging"), "\(dragged.text)")
         #expect(dragged.text.contains(#"raised a confirm dialog: <page-text>"Move the card?"</page-text>"#), "\(dragged.text)")
+        let tab = try #require(harness.agents?.tabs.first)
+        #expect(PageNotices.waitsOutlastingADialog(on: tab) == 0, "the drag waited on the held page")
 
         let calls: [(String, [String: AgentJSON])] = [
             ("hover", ["tab": "t1", "ref": .string(card)]),
@@ -104,11 +107,12 @@ struct AgentDialogTests {
             let refused = try await agent.call(verb, arguments)
             #expect(refused.isError, "\(verb): \(refused.text)")
             #expect(refused.text.contains("waits on a dialog"), "\(verb): \(refused.text)")
+            #expect(PageNotices.waitsOutlastingADialog(on: tab) == 0, "\(verb) waited on the held page")
         }
 
         let answered = try await agent.call("dialog", ["tab": "t1", "accept": false])
         #expect(!answered.isError, "\(answered.text)")
-        let page = try #require(harness.agents?.tabs.first?.page)
+        let page = try #require(tab.page)
         #expect(try await page.callAsyncJavaScript("return document.title", contentWorld: .page) as? String == "Kept")
         let heard = { try await page.callAsyncJavaScript("return after", contentWorld: .page) as? [String] ?? [] }
         try await waitFor("The drag let go") { try await heard().contains { $0.hasPrefix("mouseup@") } }

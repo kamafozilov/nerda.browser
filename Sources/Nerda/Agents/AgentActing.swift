@@ -14,6 +14,8 @@ enum PageNotices {
         var lines: [String] = []
         /// Dialogs the page waits on now, by hold.
         var holds: [ObjectIdentifier: String] = [:]
+        /// Waits on the page that ran to their deadline while a dialog held it.
+        var waitedOut = 0
     }
 
     private static let boxes = NSMapTable<Tab, Box>.weakToStrongObjects()
@@ -52,6 +54,18 @@ enum PageNotices {
     /// What the tab's page waits on, if a dialog holds it.
     static func held(_ tab: Tab) -> String? {
         boxes.object(forKey: tab)?.holds.values.first
+    }
+
+    /// How many waits on the tab's page ran to their deadline while a
+    /// dialog held it: none should, as a held page runs no script, and an
+    /// action on it answers at once (`AgentPage.unlessHeld`). Tests read it.
+    static func waitsOutlastingADialog(on tab: Tab) -> Int {
+        boxes.object(forKey: tab)?.waitedOut ?? 0
+    }
+
+    /// A wait on the tab's page ran to its deadline: counted when a dialog held it.
+    fileprivate static func ranOut(on tab: Tab) {
+        if held(tab) != nil { box(tab).waitedOut += 1 }
     }
 
     final class DialogHold {
@@ -208,7 +222,12 @@ extension AgentPage {
             }
             Task {
                 while !race.isOver {
-                    if PageNotices.held(tab) != nil || ContinuousClock.now >= deadline { race.finish(nil) }
+                    if PageNotices.held(tab) != nil {
+                        race.finish(nil)
+                    } else if ContinuousClock.now >= deadline {
+                        PageNotices.ranOut(on: tab)
+                        race.finish(nil)
+                    }
                     try? await Task.sleep(for: .milliseconds(25))
                 }
             }
@@ -230,6 +249,7 @@ extension AgentPage {
     /// Waits until the page has loaded and then gone `quietFor` without a
     /// change in its document, or a dialog holds it, or `end`.
     private static func settle(_ tab: Tab, until end: ContinuousClock.Instant) async {
+        defer { if ContinuousClock.now >= end { PageNotices.ranOut(on: tab) } }
         while ContinuousClock.now < end, PageNotices.held(tab) == nil {
             guard let page = tab.page, !tab.isLoading, !page.isLoading else {
                 try? await Task.sleep(for: .milliseconds(25))
