@@ -1059,6 +1059,87 @@ private func found(in browser: Browser, by look: () -> Void) async throws -> Fin
     #expect(try await shown() == false)
 }
 
+/// A page's own full-screen button goes full screen on the first click, as
+/// long after the press as the page takes to answer it. The browser goes by
+/// the click the page itself was given, not by how long ago the Mac last
+/// counted one: on a trackpad that count can still be at the click before.
+@MainActor
+@Test func aClickOnAPagesFullScreenButtonIsEnough() async throws {
+    let browser = Browser()
+    let tab = Tab()
+    browser.add(tab)
+    let page = tab.webView
+    page.loadHTMLString(#"<div id="box">x</div>"#, baseURL: somewhere)
+    try await waitFor { !page.isLoading }
+
+    // Called as a click is (WebKit counts it as one), and busy for a moment
+    // before asking, as a heavy page is.
+    _ = try await page.callAsyncJavaScript("const until = Date.now() + 300; while (Date.now() < until); await box.requestFullscreen()",
+                                           contentWorld: .page)
+
+    try await waitFor { browser.fullscreenTab == tab.id }
+    // Given time to be taken back out, it stays.
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(browser.fullscreenTab == tab.id)
+    #expect(try await page.callAsyncJavaScript("return document.fullscreenElement === box", contentWorld: .page) as? Bool == true)
+}
+
+/// So does the button of a video another site's frame shows, an embedded
+/// player: the click in the frame counts for the page it is in.
+@MainActor
+@Test func aClickInAnotherSitesFrameIsEnough() async throws {
+    let pages = try AgentTestPages()
+    defer { pages.stop() }
+    let frame = try await pages.serve("/player", #"<div id="box">x</div><button style="position: fixed; left: 0; top: 0; width: 100px; height: 100px" "#
+        + #"onclick="box.requestFullscreen()">Full screen</button>"#, host: "localhost")
+    let url = try await pages.serve("/", #"<iframe allowfullscreen src="\#(frame)" "#
+        + #"style="position: fixed; left: 0; top: 0; width: 300px; height: 200px; border: 0"></iframe>"#)
+    let browser = Browser()
+    let tab = Tab()
+    browser.add(tab)
+    let page = tab.webView
+    // Real clicks need the page in a window; this one is never shown.
+    let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+    window.contentView = page
+    page.load(URLRequest(url: url))
+    try await waitFor { !page.isLoading }
+    try await waitFor { try await page.callAsyncJavaScript("return document.querySelector('iframe').contentWindow.length === 0", contentWorld: .page) as? Bool == true }
+    try await Task.sleep(for: .milliseconds(300))
+
+    try AgentInput.click(page, at: CGPoint(x: 50, y: 50))
+
+    try await waitFor { browser.fullscreenTab == tab.id }
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(browser.fullscreenTab == tab.id)
+    #expect(try await page.callAsyncJavaScript("return document.fullscreenElement?.tagName", contentWorld: .page) as? String == "IFRAME")
+}
+
+/// A page can't go full screen on its own, without a click or key press,
+/// though it pretends to have been given one and tells the browser itself.
+@MainActor
+@Test func aPageCantForgeItsWayIntoFullScreen() async throws {
+    let browser = Browser()
+    let tab = Tab()
+    browser.add(tab)
+    let page = tab.webView
+    let html = #"<div id="box">x</div><script>"#
+        + #"Object.defineProperty(navigator, 'userActivation', { value: { isActive: true, hasBeenActive: true } });"#
+        + #"box.requestFullscreen(); document.dispatchEvent(new Event('nerda-fullscreen-enter'));</script>"#
+    page.loadHTMLString(html, baseURL: somewhere)
+    try await waitFor { !page.isLoading }
+    func shown() async throws -> Bool {
+        try await page.callAsyncJavaScript("return document.fullscreenElement !== null", contentWorld: .page) as? Bool == true
+    }
+    for _ in 0..<50 {
+        guard try await shown() else { break }
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(try await shown() == false)
+    #expect(browser.fullscreenTab == nil)
+}
+
 // MARK: - Session
 
 private func temporaryFolder() throws -> URL {
