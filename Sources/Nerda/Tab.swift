@@ -135,12 +135,18 @@ final class Tab: Identifiable {
             if isAsleep != (page == nil) { isAsleep = page == nil }
             if page == nil, playsAudio { playsAudio = false }
             if page == nil, isFloating { isFloating = false }
+            if page == nil { forgetVideos() }
         }
     }
     /// Whether the page has a video floating (Picture in Picture), as WebKit
     /// last said (`Browser.webView(_:hasVideoInPictureInPictureDidChange:)`):
     /// never taken from Nerda having asked, which WebKit may ignore.
     var isFloating = false
+    /// The videos its page's frames told of (`ChosenVideo`): which may float.
+    @ObservationIgnored private(set) var videos = PageVideos()
+    /// Each frame that told of videos, by its document's name, to float or
+    /// land them in; none known stands for the main frame.
+    @ObservationIgnored private(set) var videoFrames: [String: WKFrameInfo] = [:]
     /// Whether its page is let go (`sleep`), kept in step with `page` so a
     /// pinned site's icon can show it, where `page` itself isn't watched.
     private(set) var isAsleep = true
@@ -817,6 +823,8 @@ final class Tab: Identifiable {
     /// until it has something to show, so the ground under it never shows through.
     func pageDidCommit() {
         committed = page?.url
+        // A new document in the page: its frames' videos went with the old one.
+        forgetVideos()
         hasUnsavedWork = false
         departureApproved = false
         // A new document, a reload's included: checked again once it has loaded.
@@ -1098,6 +1106,25 @@ final class Tab: Identifiable {
         return own
     }
 
+    /// What `frame`'s document says of its videos at `now`.
+    /// `info` nil for the main frame.
+    func heardVideos(frame: String, in info: WKFrameInfo?, _ told: [PageVideos.Told], at now: TimeInterval) {
+        videos.heard(frame: frame, told, at: now)
+        videoFrames[frame] = info
+    }
+
+    /// `frame`'s document went: another came, or the frame was taken out.
+    func videosGone(frame: String) {
+        videos.gone(frame: frame)
+        videoFrames[frame] = nil
+    }
+
+    /// None of its page's videos are known: a new document, or no page.
+    func forgetVideos() {
+        videos = PageVideos()
+        videoFrames = [:]
+    }
+
     /// Weak: a store's preferences go with it.
     private static let preferences = NSMapTable<WKWebsiteDataStore, WKPreferences>.weakToStrongObjects()
 
@@ -1136,6 +1163,8 @@ final class Tab: Identifiable {
         controller.add(middleClicks, contentWorld: .defaultClient, name: "middleClick")
         controller.addUserScript(keepFocus)
         controller.addUserScript(unseenMedia)
+        // After unseenMedia: its hook marks the play() a page loaded out of sight holds.
+        ChosenVideo.install(in: controller)
         controller.addUserScript(LiveRate.script)
         // Not for incognito: what it plays isn't kept on disk.
         if dataStore.isPersistent, mediaCacheOn { controller.addUserScript(MediaCache.script) }

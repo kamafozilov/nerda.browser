@@ -11,6 +11,10 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 - Help › Report a Problem… also carries how long a video took to float as you left its tab, and to go back into its page as you came back, with Auto Picture-in-Picture on, so a slow or missing float you report can be looked into.
 
+### Changed
+
+- With Auto Picture-in-Picture on, only a video you chose floats as you leave its tab or Nerda: one you started or turned the sound on for, playing with sound for at least three seconds. Muted videos playing by themselves in a feed, hover previews, a muted tab's video and pages with only sound stay where they are, and where a page has several videos the largest floats. A video a page started with its sound on by itself floats once you press play or turn its sound on.
+
 ### Fixed
 
 - Scrolling with two fingers no longer goes back or forward by itself. A swipe has to go sideways from the start and stay sideways, as in Safari and Chrome; once your fingers move up or down, it is a scroll until you lift them. Before, a scroll that set off a little sideways, or a quick flick down a feed, could leave the page.

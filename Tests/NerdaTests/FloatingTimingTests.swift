@@ -7,7 +7,8 @@ import WebKit
 /// clock: the owner leaving a tab whose video Nerda asks to float, and
 /// coming back to it, timed until WebKit says the video floats or has
 /// landed (`_webView:hasVideoInPictureInPictureDidChange:`). WebKit's word
-/// is given here as WebKit gives it, to the browser; nothing floats.
+/// is given here as WebKit gives it, to the browser; nothing floats. Each
+/// tab's page has a video the owner chose, as its frame would tell it.
 @MainActor
 struct FloatingTimingTests {
     /// The record's clock, moved on by the test.
@@ -47,9 +48,13 @@ struct FloatingTimingTests {
         let browser = Browser(dataStore: .nonPersistent(), forAgents: forAgents)
         browser.recorder = recorder
         browser.pictureInPictureSettings = settings
+        browser.videoClock = { clock.now }
         let a = browser.open(URL(string: "about:blank")!)
         let b = browser.open(URL(string: "about:blank")!)
         browser.select(b.id)
+        let video = PageVideos.Told(element: 1, playing: true, muted: false, hasSound: true, hasPicture: true,
+                                    ownerStarted: true, area: 640 * 360)
+        for tab in [a, b] { tab.heardVideos(frame: "main", in: nil, [video], at: clock.now - FloatingRule.heardAtLeast) }
         return Setup(browser: browser, recorder: recorder, clock: clock, a: a, b: b, settings: settings, suite: suite)
     }
 
@@ -133,6 +138,18 @@ struct FloatingTimingTests {
         setup.clock.now += 0.08
         setup.webKitSays(setup.a, floating: true)
         #expect(setup.timed(.floating).map { ($0 * 1000).rounded() } == [80])
+    }
+
+    /// The same video the owner chose floats from their own tab, never by
+    /// itself from an Agent tab.
+    @Test func anAgentTabsVideoNeverFloatsByItself() throws {
+        let owners = try setup()
+        defer { owners.close() }
+        let agents = try setup(forAgents: true)
+        defer { agents.close() }
+        #expect(owners.browser.videoToFloat(in: owners.a) != nil)
+        #expect(agents.browser.videoToFloat(in: agents.a) == nil)
+        #expect(!agents.browser.ownerLeft(agents.a))
     }
 
     /// An Agent tab's video is known to float, and never timed.

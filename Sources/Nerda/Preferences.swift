@@ -147,9 +147,9 @@ nonisolated enum SearchSuggestions {
     static var isOn: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
 }
 
-/// A video playing with sound floats over everything when its tab is left,
-/// and goes back into its page when the tab is come back to, as in Arc; and,
-/// if chosen too, when Nerda is left for another app.
+/// A video the owner chose floats over everything when its tab is left
+/// (`FloatingRule`), and goes back into its page when the tab is come back
+/// to, as in Arc; and, if chosen too, when Nerda is left for another app.
 enum PictureInPicture {
     static let key = "autoPictureInPicture"
     static let appsKey = "autoPictureInPictureForApps"
@@ -159,17 +159,8 @@ enum PictureInPicture {
     /// On in `settings`: the app's, or a test's own.
     static func isOn(in settings: UserDefaults) -> Bool { settings.bool(forKey: key) }
 
-    // Run by the app, which counts as a click, as WebKit wants for picture in picture.
-    // ponytail: the page's own frame only; a video in an iframe (an embed) stays put.
-    static let enter = """
-        (() => {
-            const playing = [...document.querySelectorAll('video')]
-                .filter(v => !v.paused && !v.ended && !v.muted && v.volume > 0 && v.webkitSupportsPresentationMode?.('picture-in-picture'))
-                .sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0];
-            playing?.webkitSetPresentationMode('picture-in-picture');
-        })();
-        """
-
+    /// Lands a video floating from the page's own frame, however it floated
+    /// (`ChosenVideo` floats and lands in every frame).
     static let exit = """
         document.querySelectorAll('video').forEach(v => {
             if (v.webkitPresentationMode === 'picture-in-picture') v.webkitSetPresentationMode('inline');

@@ -34,11 +34,19 @@ final class MediaTestBed {
     let server: MediaServer
     let browser: Browser
     let window: NSWindow
+    /// The browser's clock for how long a video has been heard
+    /// (`Browser.videoClock`), moved on by the bed and its tests alone.
+    let clock = Clock()
     private var pages = 0
+
+    @MainActor final class Clock {
+        var now: TimeInterval = 1000
+    }
 
     init() async throws {
         server = try MediaServer()
         browser = browserRunningOutOfSight()
+        browser.videoClock = { [clock] in clock.now }
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
                           styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -49,18 +57,33 @@ final class MediaTestBed {
 
     /// A new tab, shown, with a page playing `media`, started by a script
     /// from Nerda as the owner's click would: once it plays, its media time
-    /// has moved on.
+    /// has moved on, and Nerda has heard it long enough for it to float as
+    /// its tab is left (`FloatingRule.heardAtLeast`, on the bed's clock).
     func play(_ media: BedMedia) async throws -> MediaPage {
         let page = try await open(media)
         try await page.play()
+        try await heardLongEnough(page)
         return page
     }
 
-    /// A new tab, shown, with a page holding `media`, ready to play.
-    func open(_ media: BedMedia) async throws -> MediaPage {
+    /// Once Nerda knows `page`'s video plays, the bed's clock moves on past
+    /// the time a video must be heard before it may float.
+    func heardLongEnough(_ page: MediaPage) async throws {
+        try await waitFor("Nerda never heard of the page's video playing: \(page.tab.videos.all)") {
+            page.tab.videos.all.contains { $0.told.playing }
+        }
+        clock.now += FloatingRule.heardAtLeast
+    }
+
+    /// A new tab, shown, with a page holding `media`, ready to play. With
+    /// `startingByItself`, the page plays it of its own accord, with no click
+    /// or key of the owner's behind it (a feed, a hover preview); `muted`
+    /// has it muted from the start.
+    func open(_ media: BedMedia, startingByItself: Bool = false, muted: Bool = false) async throws -> MediaPage {
         pages += 1
         let source = try await serve(media, as: "/media/\(pages)")
-        let url = try await server.serve("/page/\(pages)", html: MediaPage.html(source: source))
+        let html = MediaPage.html(source: source, startingByItself: startingByItself, muted: muted)
+        let url = try await server.serve("/page/\(pages)", html: html)
         let tab = browser.open(URL(string: "about:blank")!)
         // The window is behind the owner's, often covered by them: a page in
         // it hearing so would be hidden to WebKit, which pauses its video,
@@ -128,6 +151,15 @@ final class MediaPage {
         try await run("await bed.play()")
     }
 
+    /// Returns once no input of the owner's is in effect in the page: a new
+    /// document starts out with one for a moment, as if the owner had
+    /// clicked. After this, only what a test does next counts as theirs.
+    func waitForNoOwnersInput() async throws {
+        try await waitFor("The page never stopped reading an input of the owner's in effect") {
+            try await read("bed.ownersInput") == false
+        }
+    }
+
     /// Pauses, and returns once it has.
     func pause() async throws { try await run("await bed.pause()") }
 
@@ -179,10 +211,16 @@ final class MediaPage {
 
     /// The page: the element at the bed's volume before it has a source, its
     /// helper (`bed`) and the source attached.
-    static func html(source: Source) -> String {
+    static func html(source: Source, startingByItself: Bool = false, muted: Bool = false) -> String {
         let attach = switch source {
         case .src(let url): "media.src = \(String(reflecting: url.absoluteString));"
         }
+        // Only once nothing the owner (or Nerda, for them) did is still in
+        // effect: a new document can start out with that for a moment.
+        let start = startingByItself ? """
+            const byItself = () => navigator.userActivation.isActive ? setTimeout(byItself, 50) : media.play();
+            byItself();
+            """ : ""
         return """
             <!doctype html>
             <meta charset="utf-8">
@@ -192,6 +230,7 @@ final class MediaPage {
             <script>
             const media = document.querySelector('video');
             media.volume = \(MediaTestBed.inaudible);
+            media.muted = \(muted);
             const now = () => performance.now() / 1000;
             const bed = window.bed = {
                 samples: [],
@@ -229,7 +268,12 @@ final class MediaPage {
             // No requestVideoFrameCallback: watching frames has WebKit report
             // media time frame by frame, which a page playing a video doesn't.
             setInterval(() => bed.sample('tick'), 20);
+            // Whether an input of the owner's is in effect, as the page's own
+            // timer sees it: a script from Nerda always reads one in effect.
+            bed.ownersInput = true;
+            setInterval(() => { bed.ownersInput = navigator.userActivation.isActive; }, 20);
             \(attach)
+            \(start)
             </script>
             """
     }

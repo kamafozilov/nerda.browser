@@ -48,16 +48,10 @@ final class Browser: NSObject {
             if selectedID != oldValue { exitPageFullscreen() }
             // Accounts listed under a box of the tab left behind.
             if selectedID != oldValue { passwordChoices = nil }
-            if selectedID != oldValue, PictureInPicture.isOn(in: pictureInPictureSettings) {
-                // A muted tab's video has no sound to keep hearing.
-                if let left = tabs.first(where: { $0.id == oldValue && !$0.isMuted }), let page = left.page {
-                    page.evaluateJavaScript(PictureInPicture.enter)
-                    askedToFloat(left)
-                }
-                if let selected, let page = selected.page {
-                    page.evaluateJavaScript(PictureInPicture.exit)
-                    askedToLand(selected)
-                }
+            // The video the owner chose floats as they leave its tab, and lands as they come back.
+            if selectedID != oldValue {
+                if let left = tabs.first(where: { $0.id == oldValue }) { ownerLeft(left) }
+                if let selected { ownerCameBack(to: selected) }
             }
             if selectedID != oldValue, Extensions.started { Extensions.shared.activated(self, from: oldValue) }
             // Its page may be the one to translate now.
@@ -102,6 +96,9 @@ final class Browser: NSObject {
     @ObservationIgnored var recorder = Recorder.shared
     /// Where Auto Picture-in-Picture is set: the app's settings, or a test's own.
     @ObservationIgnored var pictureInPictureSettings = UserDefaults.standard
+    /// The clock a video's time heard is kept on (`PageVideos`): the Mac's
+    /// uptime, or a test's own.
+    @ObservationIgnored var videoClock: () -> TimeInterval = Recorder.uptime
     var recentlyClosed: [Session.ClosedTab] = []
     @ObservationIgnored private var closing: Set<Tab.ID> = []
     /// A tab put on screen from the keyboard in the sidebar's list (the
@@ -1414,6 +1411,7 @@ extension Browser: WKNavigationDelegate {
         if fullscreenTab == tab.id { fullscreenTab = nil }
         // Its video went with its process, and WebKit may not say so.
         tab.isFloating = false
+        tab.forgetVideos()
         recorder.letGo(tab)
         tab.ended = reason
         Logger.pages.notice("A page's process ended: \(reason?.word ?? "no reason given", privacy: .public)")
