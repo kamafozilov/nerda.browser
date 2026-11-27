@@ -49,14 +49,16 @@ final class Browser: NSObject {
             if let selected {
                 recent.removeAll { $0 === selected }
                 recent.append(selected)
+                // A page that came in out of sight is in sight from now.
+                if selected.document.inSightSince == nil { selected.document.inSightSince = videoClock() }
             }
             // As in Chrome, going to another tab takes the page out of full screen.
             if selectedID != oldValue { exitPageFullscreen() }
             // Accounts listed under a box of the tab left behind.
             if selectedID != oldValue { passwordChoices = nil }
+            // The video the owner chose floats as they leave its tab, and lands as they come back.
             if selectedID != oldValue, PictureInPicture.isOn(in: pictureInPictureSettings) {
-                // A muted tab's video has no sound to keep hearing.
-                if let left = tabs.first(where: { $0.id == oldValue && !$0.isMuted }) {
+                if let left = tabs.first(where: { $0.id == oldValue }) {
                     float(left)
                     // Floating already, it gets no word from WebKit to wait for.
                     if keptInSight == nil, left === shownBefore, !left.isFloating, floats(leaving: left) { keepInSight(left) }
@@ -109,6 +111,9 @@ final class Browser: NSObject {
     @ObservationIgnored var lastFramesOn: Bool?
     /// Where Auto Picture-in-Picture is set: the app's settings, or a test's own.
     @ObservationIgnored var pictureInPictureSettings = UserDefaults.standard
+    /// The clock a video's time heard is kept on (`PageVideos`): the Mac's
+    /// uptime, or a test's own.
+    @ObservationIgnored var videoClock: () -> TimeInterval = Recorder.uptime
     /// How a tab's video is asked to float and land (`float`, `land`):
     /// WebKit's toggle, or a test's own.
     @ObservationIgnored var floatingToggle = FloatingToggle.webKit()
@@ -253,21 +258,16 @@ final class Browser: NSObject {
     @ObservationIgnored private var keeping = 0
     /// The record whose tab switch waits for the new page, while one does.
     @ObservationIgnored private var holding: Recorder?
-    /// Whether leaving `tab` floats its video, the test's to say in its
-    /// place (`floats(leaving:)`).
+    /// Whether leaving `tab` floats its video, the test's to say in the
+    /// rule's place (`videoToFloat`, `floats(leaving:)`).
     @ObservationIgnored var floatsOnLeaving: ((Tab) -> Bool)?
     /// The tab whose video floated as the owner left this window
     /// (`windowLeft`), to land as they come back to it.
     @ObservationIgnored weak var leftFloating: Tab?
 
-    /// Whether leaving `tab`, with Auto Picture-in-Picture on, floats its
-    /// video: a page of the owner's playing sound, its tab not muted.
-    // ponytail: sound is all Nerda knows of at once; a page playing sound with
-    // no video to float (music, a podcast) is kept in sight the whole wait.
-    func floats(leaving tab: Tab) -> Bool {
-        if let floatsOnLeaving { return floatsOnLeaving(tab) }
-        return !isForAgents && tab.page != nil && tab.playsAudio && !tab.isMuted
-    }
+    /// Whether leaving `tab` floats its video: it has one the owner chose
+    /// (`videoToFloat`), with Auto Picture-in-Picture on.
+    func floats(leaving tab: Tab) -> Bool { videoToFloat(in: tab) != nil }
 
     /// `tab`, just left, stays in sight; the tab switch is timed to the new
     /// page shown (`showSelected`).
@@ -1020,6 +1020,16 @@ extension Browser: WKNavigationDelegate {
             recorder.stepped(tab)
         }
         if action.targetFrame?.isMainFrame ?? true {
+            // Whether the document this brings is one the owner went to: a
+            // redirect carries on where the navigation it follows went.
+            if let tab = tab(for: webView) {
+                if Self.isRedirect(action) {
+                    if tab.navigatingForOwner != nil { tab.navigatingForOwner = action.request.url }
+                } else {
+                    tab.navigatingForOwner = tab.ownerAsked || Self.clicked(action) ? action.request.url : nil
+                    tab.ownerAsked = false
+                }
+            }
             siteSettings.applyBlocking(to: preferences, for: action.request.url)
             if HTTPSUpgrade.isOn, let url = action.request.url, httpsUpgrade.applies(to: url) {
                 preferences.preferredHTTPSNavigationPolicy = .automaticFallbackToHTTP
@@ -1182,6 +1192,15 @@ extension Browser: WKNavigationDelegate {
     private static func clicked(_ action: WKNavigationAction) -> Bool {
         let key = "_isUserInitiated"
         guard action.responds(to: NSSelectorFromString(key)) else { return action.navigationType == .linkActivated }
+        return action.value(forKey: key) as? Bool ?? false
+    }
+
+    /// Whether it follows a redirect, by WebKit's own word (SPI). Should
+    /// that go, none does, and a redirect's page is the owner's only when
+    /// the owner's click itself went there.
+    private static func isRedirect(_ action: WKNavigationAction) -> Bool {
+        let key = "_isRedirect"
+        guard action.responds(to: NSSelectorFromString(key)) else { return false }
         return action.value(forKey: key) as? Bool ?? false
     }
 
@@ -1491,6 +1510,7 @@ extension Browser: WKNavigationDelegate {
         if fullscreenTab == tab.id { fullscreenTab = nil }
         // Its video went with its process, and WebKit may not say so.
         tab.isFloating = false
+        tab.forgetVideos()
         if tab === keptInSight { showSelected() }
         tab.floatingAsked = nil
         recorder.letGo(tab)

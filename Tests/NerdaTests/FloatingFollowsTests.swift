@@ -236,7 +236,8 @@ struct FloatingFollowsTests {
 
 /// What the owner wants beside what WebKit says, with no window and nothing
 /// really floating: WebKit's word is given here as WebKit gives it, and
-/// pages are blank, so Nerda's script finds no video to ask.
+/// pages are blank, so Nerda's script finds no video to ask. Each tab's
+/// page is told as having a video the owner chose.
 @MainActor
 struct FloatingFollowsOwnerTests {
     @MainActor private final class Clock {
@@ -256,6 +257,9 @@ struct FloatingFollowsOwnerTests {
         let a = browser.open(URL(string: "about:blank")!)
         let b = browser.open(URL(string: "about:blank")!)
         browser.pictureInPictureSettings = settings
+        // A video the owner chose, as its frame would tell it: the blank page
+        // itself has none, so Nerda's script finds none to ask.
+        for tab in [a, b] { tab.playsAVideoTheOwnerChose(in: browser) }
         return (browser, a, b, { settings.removePersistentDomain(forName: suite) })
     }
 

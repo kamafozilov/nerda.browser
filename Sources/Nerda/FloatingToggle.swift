@@ -8,7 +8,7 @@ import WebKit
 /// is made ready, which WebKit does only for a Touch Bar.
 // ponytail: WebKit SPI (WKWebViewPrivate), each call made only when the
 // page answers to it. Should one go, Nerda floats by its script again
-// (`PictureInPicture.enter`): the page's own frame only.
+// (`ChosenVideo`), in the chosen video's own frame.
 struct FloatingToggle {
     /// Makes ready the page's media controls manager, pointed at the video
     /// WebKit picks now (`_updateMediaPlaybackControlsManager`).
@@ -73,11 +73,17 @@ struct FloatingAsk {
 /// else the script; one ask at a time, never both. The owner's own moves
 /// are timed in the record; the asks that follow on from WebKit's word are not.
 extension Browser {
-    /// The owner left `tab`: its video is to float. Timed from now, asked
+    /// The owner left `tab`: its video is to float, if it has one they
+    /// chose (`videoToFloat`), that one, decided now. Timed from now, asked
     /// now or once the change under way is done; not when it floats already.
-    func float(_ tab: Tab) {
+    /// Whether it has one to float.
+    @discardableResult
+    func float(_ tab: Tab) -> Bool {
+        guard let video = videoToFloat(in: tab) else { return false }
         tab.wantsFloating = true
+        tab.floatingVideo = video
         if follow(tab) || tab.floatingAsked != nil { askedToFloat(tab) }
+        return true
     }
 
     /// The owner came back to `tab`: its video is to be in its page.
@@ -117,15 +123,18 @@ extension Browser {
         return tab.wantsFloating ? askToFloat(tab, page) : askToLand(tab, page)
     }
 
-    /// Nothing while it floats already: the toggle would land it.
+    /// The video chosen as the owner left, even when asked again after
+    /// WebKit's word. Nothing while it floats already: the toggle would land it.
     private func askToFloat(_ tab: Tab, _ page: WKWebView) -> Bool {
+        guard let video = tab.floatingVideo else { return false }
         let toggle = floatingToggle
         let native = toggle.available(page)
         if tab.isFloating || (native && toggle.isActive(page)) { return false }
-        // Only a page playing sound has a video to keep hearing; the toggle
-        // would float a paused one. Made ready again here, as WebKit's pick
-        // may have changed since the sound started.
-        if native, tab.playsAudio {
+        // The toggle floats WebKit's pick, which can be another video of the
+        // page than the one chosen, a larger paused or muted one (measured),
+        // so only where the page has that one alone. Made ready again here,
+        // as WebKit's pick may have changed since the sound started.
+        if native, tab.playsAudio, tab.videos.all.map(\.id) == [video] {
             toggle.makeReady(page)
             if toggle.canToggle(page) {
                 toggle.toggle(page)
@@ -133,12 +142,14 @@ extension Browser {
                 return true
             }
         }
-        ask(tab, floats: true, by: PictureInPicture.enter, in: page)
+        // Else by Nerda's script, in the video's own frame.
+        ask(tab, floats: true, by: "globalThis.nerdaVideos?.float(\(video.element)) === true", in: page,
+            frame: tab.videoFrames[video.frame], world: .defaultClient)
         return true
     }
 
-    /// Never toggled when nothing floats: that would float it. The script
-    /// then still runs, as before WebKit's word: it does nothing where no
+    /// Never toggled when nothing floats: that would float it. The scripts
+    /// then still run, as before WebKit's word: they do nothing where no
     /// video floats.
     private func askToLand(_ tab: Tab, _ page: WKWebView) -> Bool {
         let toggle = floatingToggle
@@ -147,10 +158,17 @@ extension Browser {
             asked(tab, floats: false)
             return true
         }
-        if tab.isFloating {
+        let frame = tab.floatingVideo.map { tab.videoFrames[$0.frame] }
+        if tab.isFloating, let frame {
+            ask(tab, floats: false, by: "globalThis.nerdaVideos?.land() === true", in: page, frame: frame, world: .defaultClient)
+        } else if tab.isFloating {
+            // Floated by the page's own button, with nothing chosen.
             ask(tab, floats: false, by: PictureInPicture.exit, in: page)
         } else {
             page.evaluateJavaScript(PictureInPicture.exit)
+            for frame in tab.videoFrames.values {
+                page.evaluateJavaScript("globalThis.nerdaVideos?.land()", in: frame, in: .defaultClient)
+            }
         }
         return true
     }
@@ -161,13 +179,15 @@ extension Browser {
     }
 
     /// By the script, which answers whether it found a video to ask: one
-    /// that found none started nothing, and holds up nothing after it.
-    private func ask(_ tab: Tab, floats: Bool, by script: String, in page: WKWebView) {
+    /// that found none started nothing, and holds up nothing after it. In
+    /// the page's own world of its main frame, or `world` of `frame`.
+    private func ask(_ tab: Tab, floats: Bool, by script: String, in page: WKWebView,
+                     frame: WKFrameInfo? = nil, world: WKContentWorld = .page) {
         asked(tab, floats: floats)
         let number = floatingAsks
-        page.evaluateJavaScript(script) { [weak self, weak tab] answer, _ in
+        page.evaluateJavaScript(script, in: frame, in: world) { [weak self, weak tab] result in
             MainActor.assumeIsolated {
-                guard let self, let tab, answer as? Bool != true, tab.floatingAsked?.number == number else { return }
+                guard let self, let tab, (try? result.get()) as? Bool != true, tab.floatingAsked?.number == number else { return }
                 tab.floatingAsked = nil
                 // Asked again only if the owner changed their mind meanwhile.
                 if tab.wantsFloating != floats { self.follow(tab) }

@@ -45,6 +45,9 @@ final class MediaTestBed {
     let server: MediaServer
     let browser: Browser
     let window: NSWindow
+    /// The browser's clock for how long a video has been heard
+    /// (`Browser.videoClock`), moved on by the bed and its tests alone.
+    let clock = Clock()
     private(set) var pages = 0
     /// Windows of the bed's other than its own (`openBare`), closed with it.
     var windows: [NSWindow] = []
@@ -54,6 +57,10 @@ final class MediaTestBed {
 
     /// Held while the bed lives (`MediaGate`).
     private let gate: MediaGate.Hold
+
+    @MainActor final class Clock {
+        var now: TimeInterval = 1000
+    }
 
     /// `browser`: the bed's window's, an incognito one's unless given.
     /// `liveRate`: whether Nerda's live-speed handling (`LiveRate`) is on
@@ -66,6 +73,7 @@ final class MediaTestBed {
         server = try MediaServer()
         self.browser = browser
         LiveRate.force(liveRate, for: browser.dataStore)
+        browser.videoClock = { [clock] in clock.now }
         // Never into a space of its own when a page goes full screen (`BedWindow`).
         window = BedWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
                            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -77,20 +85,38 @@ final class MediaTestBed {
 
     /// A new tab, shown, with a page playing `media`, started by a script
     /// from Nerda as the owner's click would: once it plays, its media time
-    /// has moved on.
+    /// has moved on, and Nerda has heard it long enough for it to float as
+    /// its tab is left (`FloatingRule.heardAtLeast`, on the bed's clock).
     func play(_ media: BedMedia, inFrame: Bool = false) async throws -> MediaPage {
         let page = try await open(media, inFrame: inFrame)
         try await page.play()
+        try await heardLongEnough(page)
         return page
+    }
+
+    /// Once Nerda knows `page`'s video plays, the bed's clock moves on past
+    /// the time a video must be heard before it may float.
+    func heardLongEnough(_ page: MediaPage) async throws {
+        try await waitFor("Nerda never heard of the page's video playing: \(page.tab.videos.all)") {
+            page.tab.videos.all.contains { $0.told.playing }
+        }
+        clock.now += FloatingRule.heardAtLeast
     }
 
     /// A new tab, shown, with a page holding `media`, ready to play; `inFrame`,
     /// the bed page is in a frame of a page from another origin, with nothing
-    /// else in it, and the bed's scripts run in that frame.
-    func open(_ media: BedMedia, inFrame: Bool = false) async throws -> MediaPage {
+    /// else in it, and the bed's scripts run in that frame. With
+    /// `startingByItself`, the page plays it of its own accord, with no click
+    /// or key of the owner's behind it (a feed, a hover preview); with
+    /// `startingOnResize`, so too, but only once its window is resized
+    /// (`bed.window.setContentSize`) with no input in effect, when the test
+    /// says; `muted` has it muted from the start.
+    func open(_ media: BedMedia, inFrame: Bool = false, startingByItself: Bool = false,
+              startingOnResize: Bool = false, muted: Bool = false) async throws -> MediaPage {
         nextPage()
         let source = try await serve(media, as: "/media/\(pages)")
-        var url = try await server.serve("/page/\(pages)", html: MediaPage.html(source: source))
+        let html = MediaPage.html(source: source, startingByItself: startingByItself, startingOnResize: startingOnResize, muted: muted)
+        var url = try await server.serve("/page/\(pages)", html: html)
         if inFrame {
             let framing = try self.framing ?? MediaServer()
             self.framing = framing
@@ -104,13 +130,19 @@ final class MediaTestBed {
         try await waitFor("The tab never joined the bed's window") { tab.webView.window === window }
         tab.go(to: url)
         let page = MediaPage(tab: tab)
-        try await waitFor("The bed's page never loaded with its media") {
+        var readyState: Int?
+        try await waitFor("""
+            The bed's page never loaded with its media: at \(tab.webView.url?.absoluteString ?? "no address") for \(url), \
+            loading \(tab.webView.isLoading), ready state \(readyState.map(String.init) ?? "unread"), \
+            requests \(server.requests)
+            """) {
             guard tab.webView.url == url, !tab.webView.isLoading else { return false }
             if inFrame {
                 page.frame = await MediaPage.firstFrame(in: tab.webView)
                 guard page.frame != nil else { return false }
             }
-            return try await page.state().readyState >= 1
+            readyState = try await page.state().readyState
+            return readyState.map { $0 >= 1 } ?? false
         }
         return page
     }
@@ -322,12 +354,25 @@ final class MediaPage {
 
     /// The page: the element at the bed's volume before it has a source, its
     /// helper (`bed`) and the source attached.
-    static func html(source: Source) -> String {
+    static func html(source: Source, startingByItself: Bool = false, startingOnResize: Bool = false,
+                     muted: Bool = false) -> String {
         let attach = switch source {
         case .src(let url): "media.src = \(String(reflecting: url.absoluteString));"
         case .mediaSource(let stream): mediaSourceScript(stream)
         case .live(let stream): liveScript(stream)
         }
+        // Only once nothing the owner (or Nerda, for them) did is still in
+        // effect: a new document can start out with that for a moment.
+        let start = startingByItself ? """
+            const byItself = () => navigator.userActivation.isActive ? setTimeout(byItself, 50) : media.play();
+            byItself();
+            """ : startingOnResize ? """
+            addEventListener('resize', function start() {
+                if (navigator.userActivation.isActive) return;
+                removeEventListener('resize', start);
+                media.play();
+            });
+            """ : ""
         return """
             <!doctype html>
             <meta charset="utf-8">
@@ -337,6 +382,7 @@ final class MediaPage {
             <script>
             const media = document.querySelector('video');
             media.volume = \(MediaTestBed.inaudible);
+            media.muted = \(muted);
             const now = () => performance.now() / 1000;
             const bed = window.bed = {
                 samples: [],
@@ -375,6 +421,7 @@ final class MediaPage {
             // media time frame by frame, which a page playing a video doesn't.
             setInterval(() => bed.sample('tick'), 20);
             \(attach)
+            \(start)
             </script>
             """
     }
