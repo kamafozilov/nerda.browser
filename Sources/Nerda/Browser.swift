@@ -99,6 +99,9 @@ final class Browser: NSObject {
     /// The clock a video's time heard is kept on (`PageVideos`): the Mac's
     /// uptime, or a test's own.
     @ObservationIgnored var videoClock: () -> TimeInterval = Recorder.uptime
+    /// How a tab's video is asked to float and land (`float`, `land`):
+    /// WebKit's toggle, or a test's own.
+    @ObservationIgnored var floatingToggle = FloatingToggle.webKit()
     var recentlyClosed: [Session.ClosedTab] = []
     @ObservationIgnored private var closing: Set<Tab.ID> = []
     /// A tab put on screen from the keyboard in the sidebar's list (the

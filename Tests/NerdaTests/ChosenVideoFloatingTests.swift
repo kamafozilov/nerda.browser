@@ -216,6 +216,18 @@ struct ChosenVideoFloatingTests {
         try await setup.comeBack(to: page)
     }
 
+    /// A video in a frame from another origin floats by Nerda's own script
+    /// too, in its frame, where WebKit's toggle is missing.
+    @Test func withoutWebKitsToggleAVideoInAFrameStillFloats() async throws {
+        let setup = try await Setup()
+        defer { setup.close() }
+        setup.bed.browser.floatingToggle = .webKit(answers: { _, _ in false })
+        let page = try await setup.bed.play(.file(), inFrame: true)
+        setup.turnOn()
+        try await setup.leaveAndFloat(page)
+        try await setup.comeBack(to: page)
+    }
+
     /// With one tab's video floating, leaving another tab with its own
     /// lands the one floating and floats the other.
     @Test func oneVideoFloatsAtATime() async throws {

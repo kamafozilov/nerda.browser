@@ -67,9 +67,12 @@ enum GeneratedMovie {
         // caught up, so fed by turns from one loop, the two wait on each other.
         let frames = Int(seconds * Double(framesPerSecond)), perFrame = sampleRate / framesPerSecond
         let picture = Feed(video, count: frames) { frame in
-            guard let pool = pictures.pixelBufferPool else { return false }
+            // A buffer of its own for each frame, not one from the writer's
+            // pool: with two movies written at once, that pool now and then
+            // went from under a frame being made (a crash in CoreVideo,
+            // `CVPixelBufferPoolCreatePixelBuffer`, taking the whole run).
             var buffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
+            CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA, nil, &buffer)
             guard let buffer else { return false }
             draw(frame, into: buffer)
             return pictures.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: CMTimeScale(framesPerSecond)))

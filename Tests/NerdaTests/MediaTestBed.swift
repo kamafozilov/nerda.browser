@@ -38,6 +38,9 @@ final class MediaTestBed {
     /// (`Browser.videoClock`), moved on by the bed and its tests alone.
     let clock = Clock()
     private var pages = 0
+    /// Serves the pages that hold a bed page in a frame, from another port:
+    /// another origin, as a player embedded on another site is.
+    private var framing: MediaServer?
 
     @MainActor final class Clock {
         var now: TimeInterval = 1000
@@ -59,8 +62,8 @@ final class MediaTestBed {
     /// from Nerda as the owner's click would: once it plays, its media time
     /// has moved on, and Nerda has heard it long enough for it to float as
     /// its tab is left (`FloatingRule.heardAtLeast`, on the bed's clock).
-    func play(_ media: BedMedia) async throws -> MediaPage {
-        let page = try await open(media)
+    func play(_ media: BedMedia, inFrame: Bool = false) async throws -> MediaPage {
+        let page = try await open(media, inFrame: inFrame)
         try await page.play()
         try await heardLongEnough(page)
         return page
@@ -75,15 +78,23 @@ final class MediaTestBed {
         clock.now += FloatingRule.heardAtLeast
     }
 
-    /// A new tab, shown, with a page holding `media`, ready to play. With
+    /// A new tab, shown, with a page holding `media`, ready to play; `inFrame`,
+    /// the bed page is in a frame of a page from another origin, with nothing
+    /// else in it, and the bed's scripts run in that frame. With
     /// `startingByItself`, the page plays it of its own accord, with no click
     /// or key of the owner's behind it (a feed, a hover preview); `muted`
     /// has it muted from the start.
-    func open(_ media: BedMedia, startingByItself: Bool = false, muted: Bool = false) async throws -> MediaPage {
+    func open(_ media: BedMedia, inFrame: Bool = false, startingByItself: Bool = false,
+              muted: Bool = false) async throws -> MediaPage {
         pages += 1
         let source = try await serve(media, as: "/media/\(pages)")
         let html = MediaPage.html(source: source, startingByItself: startingByItself, muted: muted)
-        let url = try await server.serve("/page/\(pages)", html: html)
+        var url = try await server.serve("/page/\(pages)", html: html)
+        if inFrame {
+            let framing = try self.framing ?? MediaServer()
+            self.framing = framing
+            url = try await framing.serve("/embed/\(pages)", html: MediaPage.embedding(url))
+        }
         let tab = browser.open(URL(string: "about:blank")!)
         // The window is behind the owner's, often covered by them: a page in
         // it hearing so would be hidden to WebKit, which pauses its video,
@@ -94,6 +105,10 @@ final class MediaTestBed {
         let page = MediaPage(tab: tab)
         try await waitFor("The bed's page never loaded with its media") {
             guard tab.webView.url == url, !tab.webView.isLoading else { return false }
+            if inFrame {
+                page.frame = await MediaPage.firstFrame(in: tab.webView)
+                guard page.frame != nil else { return false }
+            }
             return try await page.state().readyState >= 1
         }
         return page
@@ -113,6 +128,7 @@ final class MediaTestBed {
         for tab in browser.tabs { browser.close(tab.id) }
         window.close()
         server.stop()
+        framing?.stop()
     }
 }
 
@@ -122,6 +138,8 @@ final class MediaTestBed {
 @MainActor
 final class MediaPage {
     let tab: Nerda.Tab
+    /// The frame the bed page is in, when it is in one (`MediaTestBed.open(_:inFrame:)`).
+    var frame: WKFrameInfo?
 
     init(tab: Nerda.Tab) { self.tab = tab }
 
@@ -195,13 +213,39 @@ final class MediaPage {
     }
 
     private func run(_ script: String) async throws {
-        _ = try await tab.webView.callAsyncJavaScript(script, contentWorld: .page)
+        _ = try await tab.webView.callAsyncJavaScript(script, in: frame, contentWorld: .page)
     }
 
     /// The JSON `expression` comes to in the page, decoded.
     private func read<Value: Decodable>(_ expression: String) async throws -> Value {
-        let json = try await tab.webView.callAsyncJavaScript("return JSON.stringify(\(expression))", contentWorld: .page)
+        let json = try await tab.webView.callAsyncJavaScript("return JSON.stringify(\(expression))", in: frame, contentWorld: .page)
         return try JSONDecoder().decode(Value.self, from: Data(try #require(json as? String).utf8))
+    }
+
+    /// The first frame in `page`, through WebKit SPI (`_frames:`), which
+    /// tests may use: nil until it has one.
+    static func firstFrame(in page: WKWebView) async -> WKFrameInfo? {
+        let frames = NSSelectorFromString("_frames:")
+        guard page.responds(to: frames) else { return nil }
+        typealias Frames = @convention(c) (AnyObject, Selector, @escaping @convention(block) (NSObject?) -> Void) -> Void
+        return await withCheckedContinuation { (done: CheckedContinuation<WKFrameInfo?, Never>) in
+            unsafeBitCast(page.method(for: frames), to: Frames.self)(page, frames) { tree in
+                let children = tree?.value(forKey: "childFrames") as? [NSObject] ?? []
+                done.resume(returning: children.first?.value(forKey: "info") as? WKFrameInfo)
+            }
+        }
+    }
+
+    /// A page with nothing in it but `url` in a frame, at a player's usual
+    /// embedded size, granted nothing (`allow`) a real embed may lack.
+    static func embedding(_ url: URL) -> String {
+        """
+            <!doctype html>
+            <meta charset="utf-8">
+            <title>A bed page in a frame</title>
+            <style>html, body { margin: 0; background: #222 } iframe { border: 0; display: block }</style>
+            <iframe src=\(String(reflecting: url.absoluteString)) width="560" height="315"></iframe>
+            """
     }
 
     /// Where the page's `<video>` gets its media.

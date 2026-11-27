@@ -229,27 +229,20 @@ extension Browser {
                                   tabMuted: tab.isMuted, agentTab: isForAgents)
     }
 
-    /// The owner left `tab`: its video floats if it is one they chose.
-    /// Whether it asked. One floats at a time without more: the system's
-    /// floating window is one for the app, so another floating lands the
-    /// first, in whichever window or profile (`oneVideoFloatsAtATime`).
+    /// The owner left `tab`: its video floats if it is one they chose
+    /// (`float`). Whether it asked. One floats at a time without more: the
+    /// system's floating window is one for the app, so another floating
+    /// lands the first, in whichever window or profile (`oneVideoFloatsAtATime`).
     @discardableResult
     func ownerLeft(_ tab: Tab) -> Bool {
-        guard let video = videoToFloat(in: tab), let page = tab.page else { return false }
-        page.evaluateJavaScript("nerdaVideos.float(\(video.element))", in: tab.videoFrames[video.frame], in: .defaultClient)
-        askedToFloat(tab)
+        guard let video = videoToFloat(in: tab) else { return false }
+        float(tab, video)
         return true
     }
 
-    /// The owner came back to `tab`: its video lands in its page, from
-    /// whichever frame it floats.
+    /// The owner came back to `tab`: its video lands in its page (`land`).
     func ownerCameBack(to tab: Tab) {
-        guard PictureInPicture.isOn(in: pictureInPictureSettings), let page = tab.page else { return }
-        // The main frame's, though it told of no video: one the page floated by its own button.
-        page.evaluateJavaScript(PictureInPicture.exit)
-        for frame in tab.videoFrames.values {
-            page.evaluateJavaScript("globalThis.nerdaVideos?.land()", in: frame, in: .defaultClient)
-        }
-        askedToLand(tab)
+        guard PictureInPicture.isOn(in: pictureInPictureSettings), tab.page != nil else { return }
+        land(tab)
     }
 }
