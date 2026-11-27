@@ -32,7 +32,7 @@ struct MediaTestBedTests {
             try await page.play()
         })
         #expect(clock.marks.map(\.name) == ["pause", "play"])
-        #expect(clock.jumps(over: MediaClock.tolerance).isEmpty)
+        #expect(clock.jumps(over: MediaClock.tolerance).isEmpty, "\(clock.record)")
     }
 
     /// The same check, with the page seeking two seconds on while paused.
