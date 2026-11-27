@@ -6,6 +6,9 @@ import WebKit
 /// and letting go once it has filled goes there. WebKit's own swipe drags the
 /// whole page aside instead, over a snapshot of the page it goes to.
 class SwipingWebView: WKWebView {
+    /// What told its process Low Power Mode came on, held while the page is
+    /// in that process (`Tab.ModePage`).
+    var modePage: Tab.ModePage?
     /// The swipe under way, from fingers down to fingers up.
     private var swipe: Swipe?
     /// Which way the fingers are going since they came down, until it's
