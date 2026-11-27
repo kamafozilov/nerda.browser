@@ -2668,6 +2668,10 @@ func errorsAreCountedOnThisMacOnly(address: String, counted: Int) async throws {
     #expect(run("v.playbackRate = 1.04; v.playbackRate = 1; v.real = 1.5") == [1.5, 1.5])
     #expect(run("v.playbackRate = 1.5; v.playbackRate = 1") == [1, 1])
     #expect(run("v.playbackRate = 2; try { v.playbackRate = NaN } catch {}") == [2, 2])
+    // A stream the page builds itself (Media Source) plays the speeds asked
+    // for: in WebKit a live one at 1.0001 stops for good (#162).
+    #expect(run("v.currentSrc = 'blob:https://live.example/1'; v.playbackRate = 1.04; v.playbackRate = 1") == [1, 1])
+    #expect(run("v.srcObject = {}; v.playbackRate = 1.04; v.playbackRate = 1") == [1, 1])
     #expect(context.exception == nil)
 }
 

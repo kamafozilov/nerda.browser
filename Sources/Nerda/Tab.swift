@@ -1131,7 +1131,7 @@ final class Tab: Identifiable {
         controller.add(middleClicks, contentWorld: .defaultClient, name: "middleClick")
         controller.addUserScript(keepFocus)
         controller.addUserScript(unseenMedia)
-        controller.addUserScript(LiveRate.script)
+        if LiveRate.isOn(for: dataStore) { controller.addUserScript(LiveRate.script) }
         // Not for incognito: what it plays isn't kept on disk.
         if dataStore.isPersistent, mediaCacheOn { controller.addUserScript(MediaCache.script) }
         controller.addUserScript(pageErrors)
