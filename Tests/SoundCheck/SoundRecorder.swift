@@ -1,27 +1,31 @@
-import AudioToolbox
-import CoreAudio
+import CoreGraphics
+import CoreMedia
 import Darwin
 import Foundation
+import ScreenCaptureKit
 import Synchronization
 
 /// Whether sound may be recorded here, and why not.
 public enum SoundRecording {
-    /// The system's permission to record other apps' sound ("System Audio
-    /// Recording Only" in Privacy & Security), as this process has it. It
-    /// belongs to the app this process runs from, such as the terminal.
+    /// The system's permission to record the screen and the sound of apps
+    /// ("Screen & System Audio Recording" in Privacy & Security), as this
+    /// process has it. It belongs to the app this process runs from, such
+    /// as the terminal: a test run started there uses that app's.
     public enum Permission: Sendable, Equatable {
         case granted, denied, notAsked
         /// The system didn't say, its private call being gone.
         case unknown
 
         /// Read without asking: never puts the system's question on screen.
+        /// Granted or not from the public call; denied or never asked from
+        /// the private one, when it is there.
         public static var current: Permission {
+            if CGPreflightScreenCaptureAccess() { return .granted }
             guard let tcc = dlopen("/System/Library/PrivateFrameworks/TCC.framework/TCC", RTLD_LAZY),
                   let preflight = dlsym(tcc, "TCCAccessPreflight")
             else { return .unknown }
             typealias Preflight = @convention(c) (CFString, CFDictionary?) -> Int32
-            return switch unsafeBitCast(preflight, to: Preflight.self)("kTCCServiceAudioCapture" as CFString, nil) {
-            case 0: .granted
+            return switch unsafeBitCast(preflight, to: Preflight.self)("kTCCServiceScreenCapture" as CFString, nil) {
             case 1: .denied
             case 2: .notAsked
             default: .unknown
@@ -50,9 +54,9 @@ public enum SoundRecording {
         let app = responsibleApp.map { "\($0), the app this runs from," } ?? "the app this runs from"
         let missing = switch permission {
         case .granted: String?.none
-        case .denied: "\(app) was denied System Audio Recording"
-        case .notAsked: "\(app) has not been asked for System Audio Recording"
-        case .unknown: "the system didn't say whether \(app) may use System Audio Recording"
+        case .denied: "\(app) was denied Screen Recording"
+        case .notAsked: "\(app) has not been asked for Screen Recording"
+        case .unknown: "the system didn't say whether \(app) may use Screen Recording"
         }
         return missing.map { Unavailable(description: "No sound recorded: \($0)") }
     }
@@ -70,146 +74,130 @@ public enum SoundRecording {
     }
 }
 
-/// The sound some processes play, recorded with the system's process tap
-/// as they play it, and kept from the speakers while it records where the
-/// system allows (`mutedWhenTapped`). Mono, at the output device's rate.
-///
-/// A WebKit page's sound comes out of its GPU process (`WKWebView`'s
-/// `_gpuProcessIdentifier`), shared by every page of the app: what all of
-/// them play is recorded, and kept from the speakers, together.
+/// The sound an app plays, recorded with the system's screen capture as
+/// the app plays it: mono, 48,000 samples a second. Screen capture takes an
+/// app's sound with the sound of the processes working for it, WebKit's GPU
+/// process among them, so what every page of the app plays is recorded
+/// together. It can't keep the sound from the speakers: what is recorded is
+/// heard, so a page recorded plays at a volume nobody hears (the bed's
+/// 0.001, −80 dB).
 ///
 /// Made only with the permission (`SoundRecording.Permission`); without it
-/// no call to the system's sound is made at all, and it throws why.
-public final class SoundRecorder: @unchecked Sendable {
+/// no call to screen capture is made at all, and it throws why.
+public final class SoundRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
     /// Samples a second.
-    public let rate: Double
-    private let tap: AudioObjectID, device: AudioObjectID
-    private var reading: AudioDeviceIOProcID?
+    public let rate = 48_000.0
+    private let stream: SCStream
     private let queue = DispatchQueue(label: "SoundRecorder")
     private let recorded = Recorded()
 
-    /// The samples so far, added to on the device's queue.
+    /// The samples so far, and where screen capture's own delivery broke,
+    /// added to on the recorder's queue.
     private final class Recorded: Sendable {
-        let samples = Mutex<[Float]>([])
+        struct State {
+            var samples: [Float] = []
+            /// Where the last buffer's sound ended, by its timestamps.
+            var next: CMTime?
+            var sounding = false
+            var breaks: [Double] = []
+        }
+        let state = Mutex(State())
     }
 
-    /// Starts recording what `processes` play.
-    public init(processes: [pid_t], permission: SoundRecording.Permission = .current) throws {
+    private init(_ stream: SCStream) { self.stream = stream }
+
+    /// Starts recording the sound of the app whose process is `app`, with
+    /// the processes working for it.
+    public static func start(app: pid_t = getpid(), permission: SoundRecording.Permission = .current) async throws -> SoundRecorder {
         if let refusal = SoundRecording.refusal(permission) { throw refusal }
-        let objects = try processes.map(Self.soundObject)
-        let description = CATapDescription(stereoMixdownOfProcesses: objects)
-        description.name = "Nerda sound check"
-        description.isPrivate = true
-        description.muteBehavior = .mutedWhenTapped
-        var tap = AudioObjectID(kAudioObjectUnknown)
-        try Self.check(AudioHardwareCreateProcessTap(description, &tap), "creating the process tap")
-        self.tap = tap
-        var format = AudioStreamBasicDescription()
-        do {
-            try Self.read(tap, kAudioTapPropertyFormat, into: &format)
-            guard format.mFormatID == kAudioFormatLinearPCM, format.mFormatFlags & kAudioFormatFlagIsFloat != 0, format.mBitsPerChannel == 32 else {
-                throw SoundRecording.Unavailable(description: "The process tap gives sound as \(format), not 32-bit floats")
-            }
-        } catch {
-            AudioHardwareDestroyProcessTap(tap)
-            throw error
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        guard let application = content.applications.first(where: { $0.processID == app }) else {
+            throw SoundRecording.Unavailable(description: "No sound recorded: screen capture knows no app with process \(app)")
         }
-        rate = format.mSampleRate
-        // A private device of the tap alone, on the output device's clock.
-        var output = AudioObjectID(kAudioObjectUnknown), uid: CFString = "" as CFString
-        do {
-            try Self.read(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultSystemOutputDevice, into: &output)
-            try Self.read(output, kAudioDevicePropertyDeviceUID, into: &uid)
-        } catch {
-            AudioHardwareDestroyProcessTap(tap)
-            throw error
+        guard let display = content.displays.first else {
+            throw SoundRecording.Unavailable(description: "No sound recorded: screen capture knows no display")
         }
-        let aggregate: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "Nerda sound check",
-            kAudioAggregateDeviceUIDKey: UUID().uuidString,
-            kAudioAggregateDeviceMainSubDeviceKey: uid as String,
-            kAudioAggregateDeviceIsPrivateKey: true,
-            kAudioAggregateDeviceIsStackedKey: false,
-            kAudioAggregateDeviceTapAutoStartKey: true,
-            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: uid as String]],
-            kAudioAggregateDeviceTapListKey: [[kAudioSubTapDriftCompensationKey: true, kAudioSubTapUIDKey: description.uuid.uuidString]],
-        ]
-        var device = AudioObjectID(kAudioObjectUnknown)
-        if let error = Self.failure(AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &device), "creating the recording device") {
-            AudioHardwareDestroyProcessTap(tap)
-            throw error
-        }
-        self.device = device
-        let channels = Int(max(format.mChannelsPerFrame, 1))
-        let status = AudioDeviceCreateIOProcIDWithBlock(&reading, device, queue) { [recorded] _, input, _, _, _ in
-            // Interleaved floats, the channels averaged to one.
-            for buffer in UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input)) {
-                guard let data = buffer.mData else { continue }
-                let floats = data.assumingMemoryBound(to: Float.self)
-                let perBuffer = Int(buffer.mNumberChannels) > 0 ? Int(buffer.mNumberChannels) : channels
-                let frames = Int(buffer.mDataByteSize) / 4 / perBuffer
-                var mono = [Float](repeating: 0, count: frames)
-                for frame in 0..<frames {
-                    var sum: Float = 0
-                    for channel in 0..<perBuffer { sum += floats[frame * perBuffer + channel] }
-                    mono[frame] = sum / Float(perBuffer)
-                }
-                recorded.samples.withLock { $0 += mono }
-                break
-            }
-        }
-        if let error = Self.failure(status, "reading the recording device") ?? (reading == nil ? Self.failure(-1, "reading the recording device") : nil)
-            ?? Self.failure(AudioDeviceStart(device, reading), "starting the recording device") {
-            tear()
-            throw error
-        }
+        let configuration = SCStreamConfiguration()
+        configuration.capturesAudio = true
+        configuration.captureMicrophone = false
+        configuration.excludesCurrentProcessAudio = false
+        configuration.sampleRate = 48_000
+        configuration.channelCount = 1
+        // The picture isn't wanted: the least of it, as seldom as allowed.
+        configuration.width = 2
+        configuration.height = 2
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        configuration.showsCursor = false
+        let stream = SCStream(filter: SCContentFilter(display: display, including: [application], exceptingWindows: []),
+                              configuration: configuration, delegate: nil)
+        let recorder = SoundRecorder(stream)
+        try stream.addStreamOutput(recorder, type: .audio, sampleHandlerQueue: recorder.queue)
+        try await stream.startCapture()
+        return recorder
     }
 
     /// Stops recording, and gives what was recorded.
-    public func stop() -> [Float] {
-        tear()
-        return recorded.samples.withLock { $0 }
+    public func stop() async throws -> [Float] {
+        try await stream.stopCapture()
+        return recorded.state.withLock { $0.samples }
     }
 
-    private var torn = false
+    /// Where, in seconds into the recording, screen capture's delivery left
+    /// sound out or gave it twice, by its timestamps, once sound had come:
+    /// a fault there is the recording's, not the page's. Its first buffers,
+    /// all silence, may be stamped apart from the rest.
+    public var breaks: [Double] { recorded.state.withLock { $0.breaks } }
 
-    private func tear() {
-        guard !torn else { return }
-        torn = true
-        if let reading {
-            AudioDeviceStop(device, reading)
-            AudioDeviceDestroyIOProcID(device, reading)
+    /// How many seconds are recorded so far.
+    public var seconds: Double { recorded.state.withLock { Double($0.samples.count) } / rate }
+
+    /// How many seconds are recorded since the first sound: screen capture
+    /// gives silence for its first tenth of a second or so, before the
+    /// app's sound reaches it (measured 2026-11-27: 0.07–0.16 s).
+    public var heard: Double {
+        recorded.state.withLock { state in
+            guard let first = state.samples.firstIndex(where: { $0 != 0 }) else { return 0 }
+            return Double(state.samples.count - first) / rate
         }
-        if device != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(device) }
-        AudioHardwareDestroyProcessTap(tap)
     }
 
-    deinit { tear() }
-
-    /// The system's sound object of the process `pid`.
-    private static func soundObject(of pid: pid_t) throws -> AudioObjectID {
-        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
-                                                 mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        var pid = pid, object = AudioObjectID(kAudioObjectUnknown), size = UInt32(MemoryLayout<AudioObjectID>.size)
-        try check(AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, UInt32(MemoryLayout<pid_t>.size), &pid, &size, &object),
-                  "finding process \(pid)'s sound")
-        guard object != kAudioObjectUnknown else {
-            throw SoundRecording.Unavailable(description: "Process \(pid) has played no sound the system knows of")
+    public func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .audio, buffer.isValid, let samples = Self.mono(buffer) else { return }
+        let time = buffer.presentationTimeStamp, length = CMTime(value: CMTimeValue(samples.count), timescale: CMTimeScale(rate))
+        recorded.state.withLock { state in
+            if state.sounding, let next = state.next, abs((time - next).seconds) > 0.001 {
+                state.breaks.append(Double(state.samples.count) / rate)
+            }
+            state.sounding = state.sounding || samples.contains { $0 != 0 }
+            state.next = time + length
+            state.samples += samples
         }
-        return object
     }
 
-    private static func read<Value>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, into value: inout Value) throws {
-        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        var size = UInt32(MemoryLayout<Value>.size)
-        try check(AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value), "reading \(selector)")
-    }
-
-    private static func check(_ status: OSStatus, _ doing: String) throws {
-        if let error = failure(status, doing) { throw error }
-    }
-
-    private static func failure(_ status: OSStatus, _ doing: String) -> SoundRecording.Unavailable? {
-        status == noErr ? nil : SoundRecording.Unavailable(description: "The system's sound failed \(doing): \(status)")
+    /// The buffer's sound as one channel of floats: its channels averaged.
+    private static func mono(_ buffer: CMSampleBuffer) -> [Float]? {
+        guard let format = buffer.formatDescription?.audioStreamBasicDescription,
+              format.mFormatID == kAudioFormatLinearPCM, format.mFormatFlags & kAudioFormatFlagIsFloat != 0, format.mBitsPerChannel == 32
+        else { return nil }
+        let frames = CMSampleBufferGetNumSamples(buffer)
+        var samples = [Float](repeating: 0, count: frames)
+        do {
+            try buffer.withAudioBufferList { list, _ in
+                let interleaved = format.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0
+                var channels = 0
+                for audio in list {
+                    guard let data = audio.mData?.assumingMemoryBound(to: Float.self) else { continue }
+                    let inBuffer = interleaved ? Int(audio.mNumberChannels) : 1
+                    for frame in 0..<min(frames, Int(audio.mDataByteSize) / 4 / inBuffer) {
+                        for channel in 0..<inBuffer { samples[frame] += data[frame * inBuffer + channel] }
+                    }
+                    channels += inBuffer
+                }
+                if channels > 1 { for index in samples.indices { samples[index] /= Float(channels) } }
+            }
+        } catch {
+            return nil
+        }
+        return samples
     }
 }
