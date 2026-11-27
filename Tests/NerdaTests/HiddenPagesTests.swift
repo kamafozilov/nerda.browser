@@ -100,7 +100,7 @@ private final class StreamServer: @unchecked Sendable {
 /// for each test's own store, so other tests' pages run on as they were;
 /// these take turns all the same, each timing how its page runs.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .apartFromAccessibility)
 struct HiddenPagesTests {
     /// A suspended page answers nothing for this long, and more, where a
     /// running one answers ten events a second.
