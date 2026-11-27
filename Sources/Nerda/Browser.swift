@@ -99,6 +99,12 @@ final class Browser: NSObject {
     /// How a tab's video is asked to float and land (`float`, `land`):
     /// WebKit's toggle, or a test's own.
     @ObservationIgnored var floatingToggle = FloatingToggle.webKit()
+    /// What tells how long ago Nerda asked a video to float or land
+    /// (`FloatingAsk`): the Mac's uptime, or a test's own.
+    @ObservationIgnored var floatingClock: () -> TimeInterval = Recorder.uptime
+    /// How many times this browser asked a video to float or land: each
+    /// ask's number (`FloatingAsk`).
+    @ObservationIgnored var floatingAsks = 0
     var recentlyClosed: [Session.ClosedTab] = []
     @ObservationIgnored private var closing: Set<Tab.ID> = []
     /// A tab put on screen from the keyboard in the sidebar's list (the
@@ -280,21 +286,21 @@ final class Browser: NSObject {
         sessionTimer?.invalidate()
     }
 
-    /// Tabs out of sight at least this long, and not busy (playing, on a call),
-    /// sleep; of those, only the ones taking more than `size`, if given.
+    /// Tabs out of sight at least this long, and not busy (playing, on a call)
+    /// nor floating their video, paused there or not, sleep; of those, only the ones taking more than `size`, if given.
     /// Pinned ones only with `pinsToo`: being always ready is what they are for.
     /// With `sparingRevisited`, not one gone to more than `revisited` times.
     func sleepIdleTabs(unseenFor age: TimeInterval, pinsToo: Bool = false, over size: UInt64 = 0,
                        picturing: Bool = true, sparingRevisited: Bool = false) {
         let cutoff = Date.now.addingTimeInterval(-age)
         for tab in tabs where tab.id != selectedID && (pinsToo || !tab.isPinned) && !tab.isAsleep && !tab.isKeptAwake
-            && tab.lastSeen <= cutoff && (size == 0 || (tab.memory ?? 0) > size)
+            && !tab.isFloating && tab.lastSeen <= cutoff && (size == 0 || (tab.memory ?? 0) > size)
             && !(sparingRevisited && tab.switchCount > Self.revisited) {
             Task {
                 // Asked of the page, so it may have come on screen in the meantime.
                 guard await !tab.isBusy(), tab.id != selectedID else { return }
                 let look = picturing ? await tab.snapshot() : nil
-                if tab.id != selectedID, !tab.hasUnsavedWork, !tab.isKeptAwake { tab.sleep(keeping: look) }
+                if tab.id != selectedID, !tab.hasUnsavedWork, !tab.isKeptAwake, !tab.isFloating { tab.sleep(keeping: look) }
             }
         }
     }
@@ -711,6 +717,7 @@ extension Browser: WKUIDelegate {
         guard let tab = tab(for: page) else { return }
         tab.isFloating = floating
         if !isForAgents { recorder.floated(tab, floating) }
+        heard(tab, floating: floating)
     }
 
     /// Nerda asked `tab`'s video to float as the owner left it: timed in
@@ -1411,6 +1418,7 @@ extension Browser: WKNavigationDelegate {
         if fullscreenTab == tab.id { fullscreenTab = nil }
         // Its video went with its process, and WebKit may not say so.
         tab.isFloating = false
+        tab.floatingAsked = nil
         recorder.letGo(tab)
         tab.ended = reason
         Logger.pages.notice("A page's process ended: \(reason?.word ?? "no reason given", privacy: .public)")

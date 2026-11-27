@@ -14,6 +14,8 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Fixed
 
+- With Auto Picture-in-Picture on, a video ends up where you are however quickly you switch tabs: leaving its tab and coming straight back leaves it in its page, and coming back and leaving again straight away leaves it floating. Before, a quick change of mind could leave it floating over its own tab, or back in its page behind another one.
+- A floating video goes when you close its tab or its window, and a tab whose video floats is never put to sleep, so the video you are watching isn't taken away. Before, closing the tab could leave the video floating.
 - Scrolling with two fingers no longer goes back or forward by itself. A swipe has to go sideways from the start and stay sideways, as in Safari and Chrome; once your fingers move up or down, it is a scroll until you lift them. Before, a scroll that set off a little sideways, or a quick flick down a feed, could leave the page.
 - A page that asks to keep sideways swipes to itself, as some maps, spreadsheets and editors do, keeps them: swiping there moves the page instead of going back, as in Chrome.
 - A video's full-screen button, on YouTube, X or any other site, goes full screen on the first click. Before, the video often grew for a moment and went straight back, and it took a few quick clicks in a row to stay in full screen.
