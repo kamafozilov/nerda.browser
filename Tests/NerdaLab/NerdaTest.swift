@@ -111,6 +111,8 @@ enum Shell {
 final class Watch {
     let pid: pid_t
     private(set) var checks = 0
+    /// Checks where Launch Services didn't say which app was in front.
+    private(set) var unread = 0
     private(set) var broken: [String] = []
     private var task: Task<Void, Never>?
     var onBroken: (() -> Void)?
@@ -144,7 +146,9 @@ final class Watch {
         checks += 1
         var found: [String] = []
         // Asked off the main thread: Launch Services' tool takes a while.
-        if await Task.detached(operation: { Watch.frontmost() }).value == pid { found.append("Nerda Test was the app in front") }
+        let front = await Task.detached(operation: { Watch.frontmost() }).value
+        if front == nil { unread += 1 }
+        if front == pid { found.append("Nerda Test was the app in front") }
         let screens = Self.screens()
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
         var known: [[String: Any]]?

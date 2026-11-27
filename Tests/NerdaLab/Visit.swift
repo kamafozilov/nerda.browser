@@ -243,7 +243,9 @@ struct Visit {
         _ = try await run(Probe.watch, frame: frame)
         _ = try await run(Probe.roomToPlay, frame: frame)
         let before = try decode(try await run(Probe.take, frame: frame))
-        let recorder = spec.kind == .local && soundRefused == nil ? try await SoundRecorder.start(app: nerda.pid) : nil
+        // Every site's sound is recorded: on the bed's own media to compare
+        // with the sweep, on a site's to show how loud it came out.
+        let recorder = soundRefused == nil ? try await SoundRecorder.start(app: nerda.pid) : nil
         var floating: LabRun.Floating?
         var expected: [String] = []
         do {
@@ -353,7 +355,8 @@ struct Visit {
 
     private func sound(_ samples: [Float]?, _ recorder: SoundRecorder?, _ action: LabRun.ActionName) -> LabRun.Sound {
         guard spec.kind == .local else {
-            return .notMeasured("a site's own sound has no sweep to compare with")
+            let loudest = samples.map { Quiet.decibels($0.map(abs).max() ?? 0) } ?? "not recorded"
+            return .notMeasured("a site's own sound has no sweep to compare with; it came out at \(loudest) of full scale at its loudest")
         }
         if let soundRefused { return .notMeasured(soundRefused) }
         guard let samples, let recorder else { return .notMeasured("nothing recorded") }
