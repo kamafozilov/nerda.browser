@@ -56,6 +56,7 @@ final class Tab: Identifiable {
     private(set) var playsAudio = false {
         didSet {
             if oldValue, !playsAudio { lastHeard = .now }
+            if playsAudio, !oldValue { (delegate as? Browser)?.soundStarted(self) }
             if playsAudio != oldValue, Extensions.started { Extensions.shared.changed(self, .playingAudio) }
         }
     }

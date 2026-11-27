@@ -160,7 +160,8 @@ enum PictureInPicture {
     static func isOn(in settings: UserDefaults) -> Bool { settings.bool(forKey: key) }
 
     // Run by the app, which counts as a click, as WebKit wants for picture in picture.
-    // ponytail: the page's own frame only; a video in an iframe (an embed) stays put.
+    // The page's own frame only: where WebKit's toggle is (`Browser.float`),
+    // it is asked first, and reaches a video in a frame (an embed) too.
     static let enter = """
         (() => {
             const playing = [...document.querySelectorAll('video')]
