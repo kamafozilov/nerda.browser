@@ -92,8 +92,10 @@ extension MediaPage {
     /// it comes back to 1: it nudges on and off without end, one round in
     /// some 4 s.
     enum Live {
-        /// How far behind the edge the page keeps, in seconds of media.
-        static let target = 2.0
+        /// How far behind the edge the page keeps, in seconds of media: two
+        /// whole segments ahead of it or more, so a page kept busy still has
+        /// them appended in time.
+        static let target = 3.0
         /// How much further behind it falls before it catches up.
         static let band = 0.02
         /// The speed it catches up at: within 0.1 of 1, as live players use.
@@ -159,11 +161,13 @@ extension MediaPage {
     /// again, from now on: in up to two rounds of `Live`'s.
     func nudged() async throws {
         let from: Int = try await read("bed.live.nudges.length")
-        var nudges: [Double] = [], latency = 0.0
-        try await waitFor("The live page never nudged its speed off 1 and back; it nudged \(nudges), \(latency) s behind",
+        var nudges: [Double] = [], latency = 0.0, ahead = 0.0, state: State?
+        try await waitFor("The live page never nudged its speed off 1 and back; it nudged \(nudges), \(latency) s behind, \(ahead) s buffered ahead, \(String(describing: state))",
                           timeout: .seconds(15)) {
             nudges = try await read("bed.live.nudges.slice(\(from)).map(n => n.rate)")
             latency = try await read("bed.live.latency()")
+            ahead = try await read("media.buffered.length ? media.buffered.end(media.buffered.length - 1) - media.currentTime : 0")
+            state = try await self.state()
             guard let off = nudges.firstIndex(where: { $0 != 1 }) else { return false }
             return nudges[off...].contains(1)
         }

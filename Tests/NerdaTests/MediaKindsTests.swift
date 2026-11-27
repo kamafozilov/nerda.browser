@@ -82,8 +82,10 @@ struct MediaKindsTests {
         #expect(rates.starts(with: [MediaPage.Live.nudge, 1, MediaPage.Live.nudge, 1]))
         let latency: Double = try await page.read("bed.live.latency()")
         #expect(abs(latency - MediaPage.Live.target) < 0.5)
+        // Fetched as the edge moved on, each once it was whole, not all at once.
+        let edge: Double = try await page.read("bed.live.edge()")
         let segments = bed.server.requests.filter { $0.hasPrefix("GET /media/1/") && $0.contains(".m4s") }
-        #expect(segments.count < 15, "Fetched as the edge moved on, not all at once: \(segments.count)")
+        #expect(segments.count <= Int(edge.rounded(.down)) + 1, "\(segments.count) segments with the edge at \(edge) s")
     }
 
     /// Nudged on and off for a minute, a live stream plays on all the

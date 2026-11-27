@@ -56,11 +56,13 @@ struct MediaActionsTests {
     ///
     /// - At each change of speed, the page's or Nerda's (`LiveRate`'s
     ///   1.0001), media stands still 0.05–0.5 s, the picture with it, on
-    ///   every kind; on AVPlayer (a file, HLS) media time can go back too.
+    ///   every kind, and stepping up, often once more 0.3–0.9 s later
+    ///   (60–145 ms); on AVPlayer (a file, HLS) media time can go back too.
     ///   `speedEveryTime`: the check itself changes speed, and WebKit's
     ///   hold has always shown.
     /// - After a seek, media plays 50–140 ms, then stands still 0.05–0.3 s:
-    ///   always on AVPlayer, now and then in Media Source (`restart`). The
+    ///   always on AVPlayer, now and then in Media Source (`restart`), there
+    ///   after a pause too (live: 77–82 ms, bare `WKWebView` too). The
     ///   same once on HLS as it played again at the wake notice (67–91 ms,
     ///   in one full run of three; none in 24 rounds bare or in Nerda).
     /// - Just after a change of speed, the picture of a Media Source stream
@@ -87,7 +89,9 @@ struct MediaActionsTests {
             }
         }
         let speeds = clock.marks.filter { $0.name.hasPrefix("speed") || $0.name.hasPrefix("nudge") }
-        let atSpeed = { (wall: Double) in speeds.contains { wall >= $0.wall - 0.05 && wall <= $0.wall + 0.6 } }
+        // WebKit's holds come at the change and, stepping up, once more up to
+        // 0.9 s after it (measured in a bare `WKWebView` too).
+        let atSpeed = { (wall: Double) in speeds.contains { wall >= $0.wall - 0.05 && wall <= $0.wall + 1 } }
         let afterSeek = { (wall: Double) in restart.map { wall >= $0.wall && wall <= $0.wall + 1 } ?? false }
         let speedJumps = jumps.filter { atSpeed($0.wall) }, speedStalls = stalls.filter { atSpeed($0.wall) }
         let seekStalls = stalls.filter { !atSpeed($0.wall) && afterSeek($0.wall) }
@@ -142,7 +146,11 @@ struct MediaActionsTests {
         } else {
             #expect(abs(ahead) <= Self.inStep, "Picture and media time apart at the pause: \(String(describing: still))")
         }
-        expectSmooth(clock, picture, kind, still: still)
+        // Playing again is a start: on Media Source, now and then WebKit's
+        // hold after one (77 ms 0.18 s after play in a bare `WKWebView`).
+        let play = clock.marks.last { $0.name == "play" }?.wall
+        let restart: (wall: Double, everyTime: Bool)? = kind.isMediaSource ? play.map { ($0, false) } : nil
+        expectSmooth(clock, picture, kind, restart: restart, still: still)
     }
 
     /// Jumps once, to where it was asked to, and plays on from there.
