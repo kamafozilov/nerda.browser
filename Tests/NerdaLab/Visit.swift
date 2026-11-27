@@ -290,7 +290,16 @@ struct Visit {
         let media = LabRun.Media(samples: clock.samples.count, jumps: jumps.map(\.description),
                                  stalls: clock.stalls(over: MediaClock.tolerance).map(\.description))
         let dropped = taken.dropped >= 0 && before.dropped >= 0 ? taken.dropped - before.dropped : nil
-        var measured = LabRun.Action(action: action, media: media, sound: sound(samples, recorder, action), droppedFrames: dropped, floating: floating)
+        var heard = sound(samples, recorder, action)
+        // Where the page held its media time paused, beside where the sound
+        // stopped and came back: sound queued and dropped at the pause, or
+        // lost at the restart.
+        if action == .pauseAndPlay, case .measured(let lost, let faults) = heard,
+           let pause = clock.marks.first(where: { $0.name == "pause" }),
+           let held = clock.samples.first(where: { $0.paused && $0.wall >= pause.wall }) {
+            heard = .measured(lostMs: lost, faults: faults + [String(format: "the page paused at currentTime %.3f s", held.media)])
+        }
+        var measured = LabRun.Action(action: action, media: media, sound: heard, droppedFrames: dropped, floating: floating)
         if let samples, let recordings {
             let name = "\(spec.name)-\(action.rawValue).wav".replacing(" ", with: "-").replacing(",", with: "").lowercased()
             try? FileManager.default.createDirectory(at: recordings, withIntermediateDirectories: true)
