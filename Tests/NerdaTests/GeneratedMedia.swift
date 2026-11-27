@@ -45,9 +45,19 @@ enum GeneratedMovie {
         defer { try? FileManager.default.removeItem(at: file) }
         let writer = try AVAssetWriter(outputURL: file, fileType: .mp4)
         writer.shouldOptimizeForNetworkUse = true
-        let video = AVAssetWriterInput(mediaType: .video, outputSettings: [
+        try write(seconds: seconds, sound: sound, with: writer)
+        return try Data(contentsOf: file)
+    }
+
+    /// Picture and sound for `seconds` through `writer`, finished, on the
+    /// caller's thread; `compression` adds to the picture's settings.
+    static func write(seconds: Double, sound: GeneratedSound, with writer: AVAssetWriter,
+                              compression: [String: Any] = [:]) throws {
+        var videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height,
-        ])
+        ]
+        if !compression.isEmpty { videoSettings[AVVideoCompressionPropertiesKey] = compression }
+        let video = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         let audio = AVAssetWriterInput(mediaType: .audio, outputSettings: [
             AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: sampleRate, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 64_000,
         ])
@@ -94,7 +104,6 @@ enum GeneratedMovie {
             throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "The movie never finished"])
         }
         guard writer.status == .completed else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
-        return try Data(contentsOf: file)
     }
 
     /// One input of the writer fed `count` pieces, `append` making and

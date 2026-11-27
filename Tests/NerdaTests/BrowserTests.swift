@@ -410,6 +410,9 @@ private let somewhere = URL(string: "https://example.com")!
 /// A closed tab's page goes quiet at once, even while something still holds it.
 @MainActor
 @Test func closedTabsStopPlaying() async throws {
+    // Not while a test sends the Mac's sleep notice, which pauses it.
+    let gate = await MediaGate.run.shared()
+    defer { gate.release() }
     // A second of silence, looped: playing, as far as WebKit is concerned.
     let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

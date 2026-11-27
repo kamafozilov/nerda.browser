@@ -10,6 +10,17 @@ enum BedMedia: Sendable, Hashable {
     /// A movie file in `<video src>`, which WebKit plays through AVPlayer:
     /// long enough that no wait of a test reaches its end.
     case file(seconds: Double = 30, sound: GeneratedSound = .tone(hertz: 440))
+    /// A stream a page builds itself from segments it fetches (Media Source
+    /// Extensions), as YouTube's and most players do: WebKit plays it
+    /// through its own renderer, not AVPlayer.
+    case mediaSource(seconds: Double = 30, sound: GeneratedSound = .tone(hertz: 440))
+    /// An HLS stream (a playlist of fragmented MP4 segments) in `<video
+    /// src>`, which WebKit plays through AVPlayer, as Safari does.
+    case hls(seconds: Double = 30, sound: GeneratedSound = .tone(hertz: 440))
+    /// A live stream in Media Source: segments come out as its edge moves
+    /// on, and the page nudges its speed to keep close to the edge, as live
+    /// players do (`MediaPage.Live`).
+    case live(seconds: Double = 120, sound: GeneratedSound = .tone(hertz: 440))
 }
 
 /// The media test bed: a browser in a plain window of its own, behind the
@@ -34,13 +45,25 @@ final class MediaTestBed {
     let server: MediaServer
     let browser: Browser
     let window: NSWindow
-    private var pages = 0
+    private(set) var pages = 0
+    /// Windows of the bed's other than its own (`openBare`), closed with it.
+    var windows: [NSWindow] = []
 
-    init() async throws {
+    /// Held while the bed lives (`MediaGate`).
+    private let gate: MediaGate.Hold
+
+    /// `liveRate`: whether Nerda's live-speed handling (`LiveRate`) is on
+    /// in the bed's pages. `alone`: no other page of the run plays media
+    /// while the bed lives, for what reaches every page of the run (the
+    /// system's sleep notice).
+    init(liveRate: Bool = true, alone: Bool = false) async throws {
+        gate = alone ? await MediaGate.run.alone() : await MediaGate.run.shared()
         server = try MediaServer()
         browser = browserRunningOutOfSight()
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
-                          styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        LiveRate.force(liveRate, for: browser.dataStore)
+        // Never into a space of its own when a page goes full screen (`BedWindow`).
+        window = BedWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
+                           styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: BrowserView(browser: browser, window: window))
         window.orderBack(nil)
@@ -58,7 +81,7 @@ final class MediaTestBed {
 
     /// A new tab, shown, with a page holding `media`, ready to play.
     func open(_ media: BedMedia) async throws -> MediaPage {
-        pages += 1
+        nextPage()
         let source = try await serve(media, as: "/media/\(pages)")
         let url = try await server.serve("/page/\(pages)", html: MediaPage.html(source: source))
         let tab = browser.open(URL(string: "about:blank")!)
@@ -78,18 +101,32 @@ final class MediaTestBed {
 
     /// Serves what `media` needs under `path`, and answers what the page's
     /// `<video>` is to play.
-    private func serve(_ media: BedMedia, as path: String) async throws -> MediaPage.Source {
+    func serve(_ media: BedMedia, as path: String) async throws -> MediaPage.Source {
         switch media {
         case .file(let seconds, let sound):
             let movie = try await GeneratedMovie.mp4(seconds: seconds, sound: sound)
             return .src(try await server.serve("\(path).mp4", movie, type: "video/mp4"))
+        case .mediaSource(let seconds, let sound):
+            let movie = try await GeneratedMovie.cachedSegments(seconds: seconds, sound: sound)
+            return .mediaSource(try await serve(movie, at: path))
+        case .hls(let seconds, let sound):
+            let movie = try await GeneratedMovie.cachedSegments(seconds: seconds, sound: sound)
+            return .src(try await servePlaylist(movie, at: path))
+        case .live(let seconds, let sound):
+            let movie = try await GeneratedMovie.cachedSegments(seconds: seconds, sound: sound)
+            return .live(try await serve(movie, at: path))
         }
     }
 
+    /// Counts one more page, for its paths on the server.
+    func nextPage() { pages += 1 }
+
     func close() {
         for tab in browser.tabs { browser.close(tab.id) }
+        for window in windows { window.close() }
         window.close()
         server.stop()
+        gate.release()
     }
 }
 
@@ -98,9 +135,20 @@ final class MediaTestBed {
 /// 20 ms and at each of its events, and marks each action as it is done.
 @MainActor
 final class MediaPage {
-    let tab: Nerda.Tab
+    /// The page's tab; a bare page (`MediaTestBed.openBare`) has none.
+    var tab: Nerda.Tab { owner! }
+    let webView: WKWebView
+    private let owner: Nerda.Tab?
 
-    init(tab: Nerda.Tab) { self.tab = tab }
+    init(tab: Nerda.Tab) {
+        owner = tab
+        webView = tab.webView
+    }
+
+    init(webView: WKWebView) {
+        owner = nil
+        self.webView = webView
+    }
 
     /// How the element stands now.
     struct State: Decodable {
@@ -154,7 +202,8 @@ final class MediaPage {
         return MediaClock(samples: taken.samples, marks: taken.marks)
     }
 
-    private func played(beyond media: Double, _ when: String) async throws {
+    /// Returns once the media plays at `media` seconds or beyond.
+    func played(beyond media: Double, _ when: String) async throws {
         var last: State?
         try await waitFor("The media never played to \(media) s \(when); it was \(String(describing: last))") {
             last = try await state()
@@ -163,18 +212,23 @@ final class MediaPage {
     }
 
     private func run(_ script: String) async throws {
-        _ = try await tab.webView.callAsyncJavaScript(script, contentWorld: .page)
+        _ = try await webView.callAsyncJavaScript(script, contentWorld: .page)
     }
 
     /// The JSON `expression` comes to in the page, decoded.
-    private func read<Value: Decodable>(_ expression: String) async throws -> Value {
-        let json = try await tab.webView.callAsyncJavaScript("return JSON.stringify(\(expression))", contentWorld: .page)
+    func read<Value: Decodable>(_ expression: String) async throws -> Value {
+        let json = try await webView.callAsyncJavaScript("return JSON.stringify(\(expression))", contentWorld: .page)
         return try JSONDecoder().decode(Value.self, from: Data(try #require(json as? String).utf8))
     }
 
     /// Where the page's `<video>` gets its media.
     enum Source {
         case src(URL)
+        /// Built from `Stream`'s segments in a `MediaSource`, all appended.
+        case mediaSource(Stream)
+        /// Built from `Stream`'s segments as its edge reaches them, its
+        /// speed nudged towards the edge (`Live`).
+        case live(Stream)
     }
 
     /// The page: the element at the bed's volume before it has a source, its
@@ -182,6 +236,8 @@ final class MediaPage {
     static func html(source: Source) -> String {
         let attach = switch source {
         case .src(let url): "media.src = \(String(reflecting: url.absoluteString));"
+        case .mediaSource(let stream): mediaSourceScript(stream)
+        case .live(let stream): liveScript(stream)
         }
         return """
             <!doctype html>
