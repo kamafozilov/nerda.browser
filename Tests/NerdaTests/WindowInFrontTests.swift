@@ -34,6 +34,13 @@ struct WindowInFrontTests {
             window.isReleasedWhenClosed = false
             delegate = AppDelegate(window: window, browser: browser)
             delegate.inFront = inFront
+            // Left for another app, the window is covered whole; and no
+            // session but its own is saved.
+            delegate.cover = { _ in
+                let screen = CGRect(x: 0, y: 0, width: 1000, height: 1000), window = CGRect(x: 0, y: 0, width: 100, height: 100)
+                return WindowCover(window: window, screens: [screen], above: [window])
+            }
+            delegate.browsers = { [] }
             tab = browser.open(URL(string: "about:blank")!)
             browser.pictureInPictureSettings = settings
             // Blank, it plays nothing: as though it played a video with sound.
@@ -42,7 +49,7 @@ struct WindowInFrontTests {
 
         func becomesMain() { delegate.windowDidBecomeMain(notice(NSWindow.didBecomeMainNotification)) }
         func minimises() { delegate.windowWillMiniaturize(notice(NSWindow.willMiniaturizeNotification)) }
-        func appResignsActive() { delegate.applicationWillResignActive(Notification(name: NSApplication.willResignActiveNotification)) }
+        func appResignsActive() { delegate.applicationDidResignActive(Notification(name: NSApplication.didResignActiveNotification)) }
         func appBecomesActive() { delegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification)) }
         func comesOutOfTheDock() { delegate.windowDidDeminiaturize(notice(NSWindow.didDeminiaturizeNotification)) }
 
@@ -208,7 +215,7 @@ struct WindowInFrontTests {
         #expect(setup.a.tab.wantsFloating && !setup.b.tab.wantsFloating)
     }
 
-    /// The video floated as Nerda was left for another app (`appLeft`), and
+    /// The video floated as Nerda was left for another app, its window covered, and
     /// the owner comes back through another of its windows: the video stays
     /// floating, in whichever order AppKit says the app is active and the
     /// window is in front.

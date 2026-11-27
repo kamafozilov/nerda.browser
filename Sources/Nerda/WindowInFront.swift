@@ -30,14 +30,6 @@ final class WindowInFront {
         browser.windowLeft()
     }
 
-    /// Nerda is being left for another app: the video of the window in front
-    /// floats, with "Also when switching to another app" on, an incognito
-    /// window's too.
-    func appLeft() {
-        guard let browser = front, PictureInPicture.isOnForApps(in: browser.pictureInPictureSettings) else { return }
-        browser.windowLeft()
-    }
-
     /// Back in Nerda: the video of the window in front lands, and only that
     /// one. Come back to through another window, the one left keeps its
     /// video floating; told before or after that window is in front, it

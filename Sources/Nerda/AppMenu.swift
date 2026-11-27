@@ -756,6 +756,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var dockMenu: (() -> NSMenu)?
     /// Which window is in front, for floating: the app's, or a test's own.
     var inFront = WindowInFront.app
+    /// How much of a window other windows cover: as on screen, or a test's own.
+    var cover: @MainActor (NSWindow) -> WindowCover = WindowCover.read
+    /// How often the cover is read while nothing tells it changed.
+    var coverReadEvery: TimeInterval = 1
+    /// The browsers whose sessions are saved: every profile's window, or a test's own.
+    var browsers: () -> [Browser] = { Windows.browsers }
+    /// The window left in front for another app, while it is watched.
+    private(set) var away: CoverWatch?
 
     init(window: NSWindow, browser: Browser) {
         self.window = window
@@ -864,12 +872,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? { dockMenu?() }
 
     /// Going to another app is a good moment: nothing is happening here. Not
-    /// waited for, as quitting does: the switch isn't held up by it.
-    func applicationDidResignActive(_ notification: Notification) { save(waiting: false) }
+    /// waited for, as quitting does: the switch isn't held up by it. With a
+    /// video about to float, written on a later turn of the main loop, as
+    /// reading the page on screen would hold floating up; quitting before
+    /// then writes it all the same.
+    func applicationDidResignActive(_ notification: Notification) {
+        if leftForAnotherApp() {
+            DispatchQueue.main.async { MainActor.assumeIsolated { self.save(waiting: false) } }
+        } else {
+            save(waiting: false)
+        }
+    }
 
     /// The video on screen floats while another app is in front (Settings ›
-    /// General). Asked before Nerda's window stops being the main one.
-    func applicationWillResignActive(_ notification: Notification) { inFront.appLeft() }
+    /// General), once the window in front is hidden or at least half
+    /// covered: one still in full view, on another screen say, stays in its
+    /// page. Read now, as the other app comes forward, and then whenever
+    /// what covers the window may change (`CoverWatch`). Whether it floats now.
+    private func leftForAnotherApp() -> Bool {
+        away?.stop()
+        away = nil
+        // The window in front, an incognito one's included (`WindowInFront`).
+        let browser = inFront.front ?? self.browser
+        guard let window = browser === self.browser ? self.window : browser.window,
+              PictureInPicture.isOnForApps(in: browser.pictureInPictureSettings) else { return false }
+        let watch = CoverWatch(window: window, browser: browser, cover: cover)
+        if watch.check() { return true }
+        watch.start(every: coverReadEvery)
+        away = watch
+        return false
+    }
 
     /// Made active after a hidden start (opened by hand, its Dock tile
     /// absent): Nerda opens as any launch does.
@@ -877,12 +909,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         HiddenStart.shared?.showWindow()
     }
 
-    /// Back in Nerda, the video of the window in front goes back into its page.
-    func applicationDidBecomeActive(_ notification: Notification) { inFront.appCameBack() }
+    /// Back in Nerda, the video of the window in front goes back into its
+    /// page: only that one, come back to through another window.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        away?.stop()
+        away = nil
+        inFront.appCameBack()
+    }
 
     /// Every profile's window: their tabs and history.
     func save(waiting: Bool = true) {
-        for browser in Windows.browsers {
+        for browser in browsers() {
             browser.saveSession(waiting: waiting)
             browser.profile.history.save(waiting: waiting)
         }
