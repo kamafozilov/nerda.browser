@@ -50,8 +50,6 @@ struct KeptInSightTests {
         let a = browser.open(URL(string: "about:blank")!)
         browser.select(a.id)
         browser.floatsOnLeaving = floats
-        // Each page with a video the owner chose, so a leave asks it to float.
-        for tab in [a, b] { tab.playsAVideoTheOwnerChose(in: browser) }
         return Setup(browser: browser, recorder: recorder, clock: clock, a: a, b: b, settings: settings, suite: suite)
     }
 
@@ -170,8 +168,6 @@ struct KeptInSightTests {
         // The opening and selecting of the setup settled first.
         try await waitFor("The setup never settled") { setup.recorder.timings().count >= 2 }
         let before = setup.timed(.tabSwitch).count
-        // Told again: the blank page's own commit meanwhile forgot its videos.
-        setup.a.playsAVideoTheOwnerChose(in: setup.browser)
         setup.browser.select(setup.b.id)
         setup.clock.now += 0.1
         // The main loop goes to sleep, more than once, with the page kept.

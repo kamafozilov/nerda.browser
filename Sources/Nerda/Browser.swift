@@ -256,8 +256,8 @@ final class Browser: NSObject {
     @ObservationIgnored private var keeping = 0
     /// The record whose tab switch waits for the new page, while one does.
     @ObservationIgnored private var holding: Recorder?
-    /// Whether leaving `tab` floats its video, the test's to say in its
-    /// place (`floats(leaving:)`).
+    /// Whether leaving `tab` floats its video, the test's to say in the
+    /// rule's place (`videoToFloat`, `floats(leaving:)`).
     @ObservationIgnored var floatsOnLeaving: ((Tab) -> Bool)?
     /// The tab whose video floated as the owner left this window
     /// (`windowLeft`), to land as they come back to it.
@@ -265,10 +265,7 @@ final class Browser: NSObject {
 
     /// Whether leaving `tab` floats its video: it has one the owner chose
     /// (`videoToFloat`), with Auto Picture-in-Picture on.
-    func floats(leaving tab: Tab) -> Bool {
-        if let floatsOnLeaving { return floatsOnLeaving(tab) }
-        return videoToFloat(in: tab) != nil
-    }
+    func floats(leaving tab: Tab) -> Bool { videoToFloat(in: tab) != nil }
 
     /// `tab`, just left, stays in sight; the tab switch is timed to the new
     /// page shown (`showSelected`).

@@ -232,6 +232,10 @@ extension Browser {
     /// `float` floats, and `floats(leaving:)` keeps in sight for.
     func videoToFloat(in tab: Tab) -> PageVideo.ID? {
         guard tab.page != nil else { return nil }
+        // A test's say in the rule's place: the page's first video, or none named.
+        if let floatsOnLeaving {
+            return floatsOnLeaving(tab) ? tab.videos.all.first?.id ?? PageVideo.ID(frame: "", element: 0) : nil
+        }
         return FloatingRule.video(among: tab.videos.all, at: videoClock(), on: PictureInPicture.isOn(in: pictureInPictureSettings),
                                   tabMuted: tab.isMuted, agentTab: isForAgents)
     }
