@@ -172,7 +172,7 @@ struct ChosenVideoFloatingTests {
         let setup = try await Setup()
         defer { setup.close() }
         let bed = setup.bed
-        let movie = try await GeneratedMovie.mp4(seconds: 30, sound: .tone(hertz: 440))
+        let movie = try await GeneratedMovie.cachedMP4(seconds: 30, sound: .tone(hertz: 440))
         let source = try await bed.server.serve("/later.mp4", movie, type: "video/mp4")
         let url = try await bed.server.serve("/later", html: MediaPage.html(source: .src(source), startingOnResize: true))
         let tab = bed.browser.open(URL(string: "about:blank")!)

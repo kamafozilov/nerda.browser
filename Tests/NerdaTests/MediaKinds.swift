@@ -21,6 +21,21 @@ extension GeneratedMovie {
         made[key] = making
         return try await making.value
     }
+
+    /// Made once per run for each length and sound, as `cachedSegments`:
+    /// a second or more each to make, under load several, and most beds
+    /// play the same 30 s file, a floating test two of them while it holds
+    /// the Mac's `FloatingLock`.
+    @MainActor private static var madeFiles: [String: Task<Data, any Error>] = [:]
+
+    @MainActor
+    static func cachedMP4(seconds: Double, sound: GeneratedSound) async throws -> Data {
+        let key = "\(seconds) \(sound)"
+        if let made = madeFiles[key] { return try await made.value }
+        let making = Task { try await mp4(seconds: seconds, sound: sound) }
+        madeFiles[key] = making
+        return try await making.value
+    }
 }
 
 extension MediaPage {
@@ -159,8 +174,14 @@ extension MediaPage {
 
     /// Returns once the live page has nudged its speed off 1 and back to 1
     /// again, from now on: in up to two rounds of `Live`'s.
-    func nudged() async throws {
-        let from: Int = try await read("bed.live.nudges.length")
+    func nudged() async throws { try await nudged(since: try await read("bed.live.nudges.length")) }
+
+    /// Returns once the live page's nudges from the `from`th on (as
+    /// `bed.live.nudges.length` was) have gone off 1 and back to 1. The
+    /// page is off 1 nearly all the time, back at 1 for 0.1–0.2 s of each
+    /// round of some 6 s (measured 2026-11-27): counted from just before
+    /// it goes off, this takes one round, not the two `nudged()` can.
+    func nudged(since from: Int) async throws {
         var nudges: [Double] = [], latency = 0.0, ahead = 0.0, state: State?
         try await waitFor("The live page never nudged its speed off 1 and back; it nudged \(nudges), \(latency) s behind, \(ahead) s buffered ahead, \(String(describing: state))",
                           timeout: .seconds(15)) {
