@@ -130,10 +130,14 @@ struct HiddenPagesTests {
         return Heard(events: Int(values[0]), longestWait: values[1], ticks: Int(values[2]))
     }
 
-    /// A tab out of sight on the server's page, with Low Power Mode off.
-    private func listeningTab(_ server: StreamServer) async throws -> (Browser, Nerda.Tab) {
+    /// A tab out of sight on the server's page, with Low Power Mode off,
+    /// and a page in sight elsewhere for as long as the test keeps it: what
+    /// the tab answers reaches the server when it sends it, not as late as a
+    /// busy Mac leaves the pages' network process with none (`PageInSight`).
+    private func listeningTab(_ server: StreamServer) async throws -> (Browser, Nerda.Tab, PageInSight) {
+        let inSight = try await PageInSight()
         let browser = browserRunningOutOfSight()
-        return (browser, try await listeningTab(server, in: browser))
+        return (browser, try await listeningTab(server, in: browser), inSight)
     }
 
     /// Another tab of `browser` out of sight on the server's page.
@@ -155,7 +159,7 @@ struct HiddenPagesTests {
     @Test func aHiddenPageKeepsRunning() async throws {
         let server = try StreamServer()
         defer { server.stop() }
-        let (browser, tab) = try await listeningTab(server)
+        let (browser, tab, inSight) = try await listeningTab(server)
         try await Task.sleep(for: .seconds(8))
 
         let since = Date()
@@ -168,7 +172,7 @@ struct HiddenPagesTests {
         let over = Date().timeIntervalSince(since)
         let heard = try await heard(tab, over: over)
         #expect(Double(heard.ticks) < 10 * over / 2, "\(heard) over \(over) s")
-        withExtendedLifetime(browser) {}
+        withExtendedLifetime((browser, inSight)) {}
     }
 
     /// Low Power Mode turned on suspends a page already out of sight, and
@@ -180,7 +184,7 @@ struct HiddenPagesTests {
     @Test func hiddenPagesFollowLowPowerMode() async throws {
         let server = try StreamServer()
         defer { server.stop() }
-        let (browser, tab) = try await listeningTab(server)
+        let (browser, tab, inSight) = try await listeningTab(server)
         let page = tab.webView
         // A page just loaded runs a while longer whatever the mode.
         try await Task.sleep(for: .seconds(3))
@@ -204,7 +208,7 @@ struct HiddenPagesTests {
         }
         #expect(!suspended, "WebKit suspended the page again")
         #expect(tab.webView === page)
-        withExtendedLifetime(browser) {}
+        withExtendedLifetime((browser, inSight)) {}
     }
 
     /// Low Power Mode reaches every page of a profile out of sight, not
@@ -213,7 +217,7 @@ struct HiddenPagesTests {
     @Test func lowPowerModeReachesEveryHiddenPageOfAProfile() async throws {
         let first = try StreamServer(), second = try StreamServer()
         defer { first.stop(); second.stop() }
-        let (browser, tab) = try await listeningTab(first)
+        let (browser, tab, inSight) = try await listeningTab(first)
         let other = try await listeningTab(second, in: browser)
         let pids = (try #require(tab.pid), try #require(other.pid))
         try #require(pids.0 != pids.1, "the two pages share a process: the test can't tell")
@@ -232,7 +236,7 @@ struct HiddenPagesTests {
         try await waitFor("Both pages answering again") {
             first.answered(after: off) >= 20 && second.answered(after: off) >= 20
         }
-        withExtendedLifetime(browser) {}
+        withExtendedLifetime((browser, inSight)) {}
     }
 
     /// A page made as the mode changes, before Nerda hears of it (the Mac's
@@ -242,7 +246,7 @@ struct HiddenPagesTests {
     @Test func aPageMadeAsTheModeChangesTakesTheOpenOnesWithIt() async throws {
         let server = try StreamServer()
         defer { server.stop() }
-        let (browser, _) = try await listeningTab(server)
+        let (browser, _, inSight) = try await listeningTab(server)
         try await Task.sleep(for: .seconds(3))
 
         LowPowerMode.force(true, for: browser.dataStore)
@@ -252,7 +256,7 @@ struct HiddenPagesTests {
         try await waitFor("Paused", timeout: .seconds(10)) { server.longestQuiet(since: on) >= Self.paused }
         LowPowerMode.force(false, for: browser.dataStore)
         LowPowerMode.changed()
-        withExtendedLifetime(browser) {}
+        withExtendedLifetime((browser, inSight)) {}
     }
 
     /// Low Power Mode set for one data store, as a test sets it for its own,
