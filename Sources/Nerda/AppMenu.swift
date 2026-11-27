@@ -903,6 +903,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return false
     }
 
+    /// Hide Nerda (⌘H): its windows are put away, as one is into the Dock,
+    /// and the front window's video floats with Auto Picture-in-Picture on,
+    /// "Also when switching to another app" or not. Asked before the windows
+    /// go; leaving for another app with it asks nothing more (`windowLeft`).
+    func applicationWillHide(_ notification: Notification) { inFront.hiding() }
+
     /// Made active after a hidden start (opened by hand, its Dock tile
     /// absent): Nerda opens as any launch does.
     func applicationWillBecomeActive(_ notification: Notification) {

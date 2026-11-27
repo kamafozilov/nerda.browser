@@ -50,6 +50,7 @@ struct WindowInFrontTests {
         func becomesMain() { delegate.windowDidBecomeMain(notice(NSWindow.didBecomeMainNotification)) }
         func minimises() { delegate.windowWillMiniaturize(notice(NSWindow.willMiniaturizeNotification)) }
         func appResignsActive() { delegate.applicationDidResignActive(Notification(name: NSApplication.didResignActiveNotification)) }
+        func appHides() { delegate.applicationWillHide(Notification(name: NSApplication.willHideNotification)) }
         func appBecomesActive() { delegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification)) }
         func comesOutOfTheDock() { delegate.windowDidDeminiaturize(notice(NSWindow.didDeminiaturizeNotification)) }
 
@@ -64,10 +65,12 @@ struct WindowInFrontTests {
         let b: Window
         private let suite = "dev.nerda.tests.window-in-front.\(UUID().uuidString)"
 
-        init(_ a: Kind, _ b: Kind, on: Bool = true) throws {
+        /// `forApps`: "Also when switching to another app", on with Auto
+        /// Picture-in-Picture unless said.
+        init(_ a: Kind, _ b: Kind, on: Bool = true, forApps: Bool? = nil) throws {
             let settings = try #require(UserDefaults(suiteName: suite))
             settings.set(on, forKey: PictureInPicture.key)
-            settings.set(on, forKey: PictureInPicture.appsKey)
+            settings.set(forApps ?? on, forKey: PictureInPicture.appsKey)
             self.a = try Window(a, inFront: inFront, settings: settings)
             self.b = try Window(b, inFront: inFront, settings: settings)
         }
@@ -246,6 +249,38 @@ struct WindowInFrontTests {
         if !activeFirst { setup.a.appBecomesActive() }
         #expect(!setup.a.tab.wantsFloating)
     }
+
+    /// Hiding Nerda (⌘H): the front window's video floats, with Auto
+    /// Picture-in-Picture on, whether or not "Also when switching to another
+    /// app" is; asked once, though Nerda is left for another app with it;
+    /// and lands as the owner comes back.
+    @Test(arguments: [false, true])
+    func hidingNerdaFloatsTheFrontWindowsVideoOnce(forApps: Bool) throws {
+        let setup = try Setup(.regular, .incognito, forApps: forApps)
+        defer { setup.close() }
+        setup.b.becomesMain()
+        setup.a.becomesMain()
+        let asks = setup.a.browser.floatingAsks, behind = setup.b.browser.floatingAsks
+        setup.a.appHides()
+        setup.a.appResignsActive()
+        #expect(setup.a.tab.wantsFloating)
+        #expect(setup.a.browser.floatingAsks == asks + 1, "Asked \(setup.a.browser.floatingAsks - asks) times")
+        #expect(setup.b.browser.floatingAsks == behind, "Asked again of a window not in front")
+        setup.a.appBecomesActive()
+        setup.a.becomesMain()
+        #expect(!setup.a.tab.wantsFloating)
+    }
+
+    /// Hiding Nerda with Auto Picture-in-Picture off floats nothing.
+    @Test func hidingNerdaWithAutoPictureInPictureOffFloatsNothing() throws {
+        let setup = try Setup(.regular, .incognito, on: false)
+        defer { setup.close() }
+        setup.a.becomesMain()
+        setup.a.appHides()
+        setup.a.appResignsActive()
+        #expect(setup.a.browser.floatingAsks == 0)
+        #expect(!setup.a.tab.wantsFloating)
+    }
 }
 
 /// Another window coming forward, and the Dock, really floating and landing
@@ -317,6 +352,29 @@ struct WindowInFrontFloatingTests {
         setup.post(NSWindow.didDeminiaturizeNotification)
         setup.post(NSWindow.didBecomeMainNotification)
         try await setup.floating.settled(floating: false, "Out of the Dock")
+        #expect(setup.floating.words.seen == [true, false])
+    }
+
+    /// Hiding Nerda (⌘H) floats the video, with "Also when switching to
+    /// another app" on too: leaving for another app with it, its window
+    /// hidden, asks nothing more; coming back to Nerda lands it.
+    @Test func hidingNerdaFloatsTheVideoOnceAndComingBackLandsIt() async throws {
+        let lock = try await FloatingLock.take()
+        defer { lock.release() }
+        let setup = try await Setup(.incognito)
+        defer { setup.close() }
+        let browser = setup.floating.bed.browser
+        browser.pictureInPictureSettings.set(true, forKey: PictureInPicture.appsKey)
+        setup.delegate.cover = { _ in WindowCover(window: CGRect(x: 0, y: 0, width: 100, height: 100), screens: [], above: [], hidden: true) }
+        setup.delegate.browsers = { [] }
+        setup.delegate.applicationWillHide(Notification(name: NSApplication.willHideNotification))
+        let asks = browser.floatingAsks
+        setup.delegate.applicationDidResignActive(Notification(name: NSApplication.didResignActiveNotification))
+        try await setup.floating.settled(floating: true, "Nerda hidden")
+        #expect(browser.floatingAsks == asks, "Asked again as Nerda was left")
+        setup.delegate.applicationDidBecomeActive(Notification(name: NSApplication.didBecomeActiveNotification))
+        setup.post(NSWindow.didBecomeMainNotification)
+        try await setup.floating.settled(floating: false, "Back in Nerda")
         #expect(setup.floating.words.seen == [true, false])
     }
 }

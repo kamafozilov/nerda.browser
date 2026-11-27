@@ -30,6 +30,13 @@ final class WindowInFront {
         browser.windowLeft()
     }
 
+    /// Nerda is being hidden: the window in front is left, as one going into
+    /// the Dock is, and stays the one in front, to land its video as the
+    /// owner comes back.
+    func hiding() {
+        front?.windowLeft()
+    }
+
     /// Back in Nerda: the video of the window in front lands, and only that
     /// one. Come back to through another window, the one left keeps its
     /// video floating; told before or after that window is in front, it
