@@ -32,9 +32,10 @@ struct FloatingTests {
         let landing = recorder.timings().filter { $0.kind == .landing }.map(\.seconds)
         print("Floating, \(floating.count) times: \(Self.summary(floating))")
         print("Landing, \(landing.count) times: \(Self.summary(landing))")
-        // Leaving and coming back, in turn: a leave is timed to the new page shown.
-        let switches = recorder.timings().filter { $0.kind == .tabSwitch }.map(\.seconds)
-        let leaves = stride(from: 0, to: switches.count, by: 2).map { switches[$0] }
+        // A leave's switch is timed to the new page shown, after WebKit's
+        // word: the one recorded straight after each floating.
+        let timings = recorder.timings()
+        let leaves = zip(timings, timings.dropFirst()).filter { $0.kind == .floating && $1.kind == .tabSwitch }.map(\.1.seconds)
         print("Tab switch leaving the video, \(leaves.count) times: \(Self.summary(leaves))")
         #expect(floating.count == Self.rounds)
         #expect(landing.count == Self.rounds)
