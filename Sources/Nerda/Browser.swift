@@ -16,7 +16,10 @@ final class Browser: NSObject {
         // the list took longer than the change itself.
         didSet {
             let open = Set(tabs.map(ObjectIdentifier.init))
-            for tab in oldValue where !open.contains(ObjectIdentifier(tab)) && tab !== handedOver { tab.silence() }
+            for tab in oldValue where !open.contains(ObjectIdentifier(tab)) && tab !== handedOver {
+                tab.silence()
+                recorder.letGo(tab)
+            }
             recent.removeAll { !open.contains(ObjectIdentifier($0)) }
             if selected.map({ !open.contains(ObjectIdentifier($0)) }) ?? (selectedID != nil) { findSelected() }
             sessionChanged()
@@ -45,10 +48,10 @@ final class Browser: NSObject {
             if selectedID != oldValue { exitPageFullscreen() }
             // Accounts listed under a box of the tab left behind.
             if selectedID != oldValue { passwordChoices = nil }
-            if selectedID != oldValue, PictureInPicture.isOn {
+            if selectedID != oldValue, PictureInPicture.isOn(in: pictureInPictureSettings) {
                 // A muted tab's video has no sound to keep hearing.
-                tabs.first { $0.id == oldValue && !$0.isMuted }?.page?.evaluateJavaScript(PictureInPicture.enter)
-                selected?.page?.evaluateJavaScript(PictureInPicture.exit)
+                if let left = tabs.first(where: { $0.id == oldValue && !$0.isMuted }) { float(left) }
+                if let selected { land(selected) }
             }
             if selectedID != oldValue, Extensions.started { Extensions.shared.activated(self, from: oldValue) }
             // Its page may be the one to translate now.
@@ -91,6 +94,11 @@ final class Browser: NSObject {
     /// Where this window's tab operations are timed: the app's one record,
     /// or a test's own.
     @ObservationIgnored var recorder = Recorder.shared
+    /// Where Auto Picture-in-Picture is set: the app's settings, or a test's own.
+    @ObservationIgnored var pictureInPictureSettings = UserDefaults.standard
+    /// How a tab's video is asked to float and land (`float`, `land`):
+    /// WebKit's toggle, or a test's own.
+    @ObservationIgnored var floatingToggle = FloatingToggle.webKit()
     var recentlyClosed: [Session.ClosedTab] = []
     @ObservationIgnored private var closing: Set<Tab.ID> = []
     /// A tab put on screen from the keyboard in the sidebar's list (the
@@ -694,6 +702,28 @@ final class Browser: NSObject {
 /// open as tabs; one that closes itself closes its tab. A page's alerts, and
 /// its file pickers, come up as sheets over it.
 extension Browser: WKUIDelegate {
+    /// WebKit's word that a page's video floats (Picture in Picture), or is
+    /// back in its page: SPI (WKUIDelegatePrivate), told only to a delegate
+    /// that answers to it. Without it no tab is known to float, and nothing
+    /// is timed. An Agent tab's is known, never timed.
+    @objc(_webView:hasVideoInPictureInPictureDidChange:)
+    func webView(_ page: WKWebView, hasVideoInPictureInPictureDidChange floating: Bool) {
+        guard let tab = tab(for: page) else { return }
+        tab.isFloating = floating
+        if !isForAgents { recorder.floated(tab, floating) }
+    }
+
+    /// Nerda asked `tab`'s video to float as the owner left it: timed in
+    /// the record until WebKit says it floats. Only the owner's tabs.
+    func askedToFloat(_ tab: Tab) {
+        if !isForAgents { recorder.leaving(tab) }
+    }
+
+    /// Nerda asked `tab`'s video to land as the owner came back to it.
+    func askedToLand(_ tab: Tab) {
+        if !isForAgents { recorder.returning(to: tab) }
+    }
+
     // WebKit's beforeunload delegate on the supported macOS versions is SPI.
     @objc(_webView:runBeforeUnloadConfirmPanelWithMessage:initiatedByFrame:completionHandler:)
     func beforeUnload(_ page: WKWebView, message: String, frame: WKFrameInfo,
@@ -1379,6 +1409,9 @@ extension Browser: WKNavigationDelegate {
     func pageEnded(_ webView: WKWebView, reason: PageEnd?) {
         guard let tab = tab(for: webView) else { return }
         if fullscreenTab == tab.id { fullscreenTab = nil }
+        // Its video went with its process, and WebKit may not say so.
+        tab.isFloating = false
+        recorder.letGo(tab)
         tab.ended = reason
         Logger.pages.notice("A page's process ended: \(reason?.word ?? "no reason given", privacy: .public)")
         // Ended by Nerda itself, for not answering: loaded again, or asleep

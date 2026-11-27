@@ -7,6 +7,11 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- Help › Report a Problem… also carries how long a video took to float as you left its tab, and to go back into its page as you came back, with Auto Picture-in-Picture on, so a slow or missing float you report can be looked into.
+- A video in a player embedded on another site, such as a YouTube video in an article, floats when you leave its tab with Auto Picture-in-Picture on, and goes back into its page when you come back, as a video on the page itself does. Before, it stayed in the page.
+
 ### Fixed
 
 - Scrolling with two fingers no longer goes back or forward by itself. A swipe has to go sideways from the start and stay sideways, as in Safari and Chrome; once your fingers move up or down, it is a scroll until you lift them. Before, a scroll that set off a little sideways, or a quick flick down a feed, could leave the page.
