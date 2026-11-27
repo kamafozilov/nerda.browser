@@ -36,6 +36,11 @@ final class LocalMedia {
         return movie
     }
 
+    /// The movie itself, served.
+    func fileMovie() async throws -> URL {
+        try await server.serve("/media/sweep.mp4", try await movie(), type: "video/mp4")
+    }
+
     func file() async throws -> URL {
         let movie = try await server.serve("/media/sweep.mp4", try await movie(), type: "video/mp4")
         return try await server.serve("/file.html", html: page(movie, title: "The sweep, a file"))

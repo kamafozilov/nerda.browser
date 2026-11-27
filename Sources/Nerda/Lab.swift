@@ -91,11 +91,43 @@ enum Lab {
 
     static var client: Client?
 
+    /// Any window of the app moved onto a screen is put back off it at
+    /// once and told of (`state`'s `windows`): the run's own watch sees
+    /// what is left of it, and the log says what moved it.
+    static var strayed: [String] = []
+
+    /// Something the run should know of, with where it was asked from:
+    /// in /tmp/dev.nerda.lab.windows.log.
+    static func told(_ what: String) {
+        strayed.append(what + ": " + Thread.callStackSymbols.dropFirst(2).prefix(12).map { $0.split(separator: " ", maxSplits: 3).last.map(String.init) ?? $0 }.joined(separator: " | "))
+        try? (strayed.joined(separator: "\n") + "\n").write(toFile: "/tmp/dev.nerda.lab.windows.log", atomically: true, encoding: .utf8)
+    }
+
+    static func floats(_ window: NSWindow) -> Bool { String(describing: type(of: window)) == "PIPPanel" }
+
+    static func guardWindows() {
+        Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                // The system's floating window (`PIPPanel`, made in the app's
+                // own process) is the one window allowed on screen.
+                for window in NSApp.windows where window.isVisible && !Lab.floats(window)
+                    && NSScreen.screens.contains(where: { $0.frame.intersects(window.frame) }) {
+                    let said = "\(type(of: window)) at \(window.frame), level \(window.level.rawValue), alpha \(window.alphaValue), "
+                        + "parent \(window.parent.map { "\(type(of: $0))" } ?? "none"), content \(window.contentView.map { "\(type(of: $0))" } ?? "none")"
+                    strayed.append(said)
+                    try? (strayed.joined(separator: "\n") + "\n").write(toFile: "/tmp/dev.nerda.lab.windows.log", atomically: true, encoding: .utf8)
+                    if window is BrowserWindow { park(window) } else { window.orderOut(nil) }
+                }
+            }
+        }
+    }
+
     /// Starts asking the run what to do, for `browser`'s window.
     static func start(_ browser: Browser) {
         guard let address else { return }
         browser.pictureInPictureSettings = settings
         settings.removePersistentDomain(forName: settingsName)
+        guardWindows()
         client = Client(address: address, browser: browser)
         client?.run()
     }
@@ -149,14 +181,18 @@ enum Lab {
                         continue
                     }
                     missed = 0
-                    let answer: [String: Any]
-                    do {
-                        answer = ["id": command.id, "ok": true, "value": try await perform(command)]
-                    } catch {
-                        answer = ["id": command.id, "ok": false, "error": "\(error)"]
+                    // Each on its own, so a page's script that never ends
+                    // holds up only the run's wait for it, not every command after.
+                    Task { @MainActor in
+                        let answer: [String: Any]
+                        do {
+                            answer = ["id": command.id, "ok": true, "value": try await self.perform(command)]
+                        } catch {
+                            answer = ["id": command.id, "ok": false, "error": "\(error)"]
+                        }
+                        await self.reply(answer)
+                        if command.op == "quit" { NSApp.terminate(nil) }
                     }
-                    await reply(answer)
-                    if command.op == "quit" { NSApp.terminate(nil) }
                 }
             }
         }
@@ -210,7 +246,9 @@ enum Lab {
                 return true
             case "close":
                 let tab = try tab(command)
-                browser.close(tab.id)
+                // The window goes with its last tab, and its pages out of sight with it.
+                if browser.tabs.count == 1 { browser.open(URL(string: "about:blank")!, inBackground: true) }
+                browser.close(tab.id, discarding: true)
                 return true
             case "floating":
                 settings.set(command.on ?? false, forKey: PictureInPicture.key)
@@ -228,6 +266,7 @@ enum Lab {
                 state["floating"] = tab.isFloating
                 state["playsAudio"] = tab.playsAudio
                 state["chosen"] = browser.videoToFloat(in: tab) != nil
+                state["strayed"] = Lab.strayed.map { String($0.prefix(200)) }
                 return state
             case "frames":
                 let tab = try tab(command)
@@ -253,6 +292,9 @@ enum Lab {
                 typealias Setter = @convention(c) (AnyObject, Selector, Float) -> Void
                 unsafeBitCast(page.method(for: quieter), to: Setter.self)(page, quieter, Float(min(max(command.value ?? 0, 0), 1)))
                 return true
+            case "windows":
+                // The system's floating window shows as a window of this process (`PIPPanel`).
+                return NSApp.windows.filter(Lab.floats).map(\.windowNumber)
             case "quit":
                 return true
             default:

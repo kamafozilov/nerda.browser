@@ -16,6 +16,7 @@ final class NerdaTest {
     let app: URL
     let channel: Channel
     private(set) var pid: pid_t = 0
+    weak var watch: Watch?
 
     init(app: URL, channel: Channel) {
         self.app = app
@@ -115,10 +116,22 @@ final class Watch {
 
     init(pid: pid_t) { self.pid = pid }
 
+    /// Asks Nerda Test which of its windows are the system's floating
+    /// window, made in its process: the one window allowed on screen.
+    var floating: (() async -> [Int]?)?
+    /// The floating window's showings on screen, allowed.
+    private(set) var floated = 0
+    /// While a video floats and lands, and a moment after: the system's
+    /// window flies between the page's place (off screen, in the parked
+    /// window) and the screen's corner, as a window of Nerda Test's that
+    /// isn't always one of its own windows.
+    var flying = false
+    var flewUntil = Date.distantPast
+
     func start() {
         task = Task { [weak self] in
             while !Task.isCancelled {
-                self?.check()
+                await self?.check()
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
@@ -126,18 +139,26 @@ final class Watch {
 
     func stop() { task?.cancel() }
 
-    func check() {
+    func check() async {
         checks += 1
         var found: [String] = []
         if Self.frontmost() == pid { found.append("Nerda Test was the app in front") }
         let screens = Self.screens()
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        var allowed: [Int]?
         for window in windows where (window[kCGWindowOwnerPID as String] as? Int).map(pid_t.init) == pid {
             guard let bounds = window[kCGWindowBounds as String] as? NSDictionary,
-                  let rect = CGRect(dictionaryRepresentation: bounds), rect.width > 2, rect.height > 2 else { continue }
-            if screens.contains(where: { $0.intersects(rect) }) {
-                found.append("a window of Nerda Test's was on screen at \(Int(rect.minX)),\(Int(rect.minY)) \(Int(rect.width))×\(Int(rect.height))")
+                  let rect = CGRect(dictionaryRepresentation: bounds), rect.width > 2, rect.height > 2,
+                  screens.contains(where: { $0.intersects(rect) }) else { continue }
+            let layer = window[kCGWindowLayer as String] as? Int ?? 0, alpha = window[kCGWindowAlpha as String] as? Double ?? 1
+            let number = window[kCGWindowNumber as String] as? Int ?? 0
+            if allowed == nil { allowed = await floating?() ?? [] }
+            if allowed?.contains(number) == true || flying || Date() < flewUntil {
+                floated += 1
+                continue
             }
+            found.append("a window of Nerda Test's was on screen at \(Int(rect.minX)),\(Int(rect.minY)) \(Int(rect.width))×\(Int(rect.height))"
+                + " (number \(number), layer \(layer), alpha \(alpha))")
         }
         guard !found.isEmpty else { return }
         broken += found

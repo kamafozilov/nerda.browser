@@ -14,6 +14,8 @@ import SoundCheck
 @MainActor
 enum LabCommand {
     static func main() async -> Int32 {
+        // Each line as it comes, into a log too.
+        setvbuf(stdout, nil, _IOLBF, 0)
         let arguments = Array(CommandLine.arguments.dropFirst())
         let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         guard FileManager.default.fileExists(atPath: root.appending(path: "Package.swift").path) else {
@@ -73,8 +75,10 @@ enum LabCommand {
             try await nerda.start()
             let watching = Watch(pid: nerda.pid)
             watching.onBroken = { kill(nerda.pid, SIGKILL) }
+            watching.floating = { (try? await nerda.send("windows", timeout: 1)) as? [Int] }
             watching.start()
             watch = watching
+            nerda.watch = watching
             let refused = SoundRecording.skipped(environment: [SoundRecording.switchName: "1"])
             // Unheard first, or nothing at all: without a recording, the run can't tell.
             if let refused { throw Quiet.Loud(description: "the pages' volume can't be checked: \(refused)") }
@@ -105,17 +109,27 @@ enum LabCommand {
             print("Stopped: \(error)")
         }
         await nerda.quit()
-        watch?.check()
+        // After Nerda Test, alone: only one app's sound is recorded at a time.
+        print("\(WebKitAlone.name)…")
+        let alone = await WebKitAlone.compare(media, root: root, recordings: folder.appending(path: "lab-\(stamp)", directoryHint: .isDirectory))
+        await watch?.check()
         watch?.stop()
         var broken = watch?.broken ?? []
         if nerda.running { broken.append("Nerda Test was still running at the end") }
-        let floatingAfter = Watch.floatingWindows()
+        // The system's floating window goes a moment after its app.
+        var floatingAfter = Watch.floatingWindows()
+        for _ in 0..<30 where floatingAfter > floatingBefore {
+            try? await Task.sleep(for: .milliseconds(100))
+            floatingAfter = Watch.floatingWindows()
+        }
         if floatingAfter > floatingBefore { broken.append("\(floatingAfter - floatingBefore) floating window(s) were left on screen") }
         if let stopped { broken.append("the run stopped early: \(stopped)") }
 
         let run = LabRun(started: started, ended: Date(), nerda: nerda.version, mac: mac,
-                         safety: LabRun.Safety(checks: watch?.checks ?? 0, broken: broken, quiet: quiet),
-                         sites: results, comparisons: comparisons())
+                         safety: LabRun.Safety(checks: watch?.checks ?? 0, broken: broken,
+                                               quiet: [quiet, watch.map { "The system's floating window was on screen in \($0.floated) of the checks, as floating a video puts it there." }]
+                                                   .compactMap(\.self).joined(separator: " ")),
+                         sites: results, comparisons: comparisons() + [alone])
         let file = folder.appending(path: "lab-\(stamp).json"), summary = folder.appending(path: "lab-\(stamp).md")
         do {
             try run.file().write(to: file)

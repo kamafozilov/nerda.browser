@@ -103,9 +103,10 @@ struct Visit {
     /// media time to run.
     private mutating func findAndStart() async throws {
         let deadline = Date().addingTimeInterval(90)
-        var pressed = false, seen: Set<String> = []
+        var pressed = Date().addingTimeInterval(8), seen: Set<String> = []
         while true {
             guard Date() < deadline else {
+                facts["at the end"] = await described()
                 throw Stop(outcome: .wouldNotPlay("no video played within 90 s" + (seen.isEmpty ? "" : " (seen: \(seen.sorted().joined(separator: ", ")))")))
             }
             if let reached = (try? await nerda.send("state", ["tab": tab]) as? [String: Any])?["url"] as? String,
@@ -113,7 +114,11 @@ struct Visit {
                 facts["reached"] = reached
                 throw Stop(outcome: .wouldNotPlay("\(wall) stood before the video"))
             }
-            let obstacle = (try? await run(spec.obstacle, frame: 0) as? String) ?? ""
+            var obstacle = ""
+            for index in 0..<((try? await frames()) ?? 1) where obstacle.isEmpty {
+                obstacle = (try? await run(spec.obstacle, frame: index) as? String) ?? ""
+            }
+            if obstacle.hasPrefix("error") { throw Stop(outcome: .wouldNotPlay("the player said \(obstacle)")) }
             if !obstacle.isEmpty {
                 seen.insert(obstacle)
                 facts["seen"] = seen.sorted().joined(separator: ", ")
@@ -121,10 +126,20 @@ struct Visit {
                 if obstacle.hasPrefix("ad") || obstacle.hasPrefix("consent") { continue }
             }
             guard let found = try await largestVideo() else {
-                // A player that makes its video only once played (an embed).
-                if !pressed, Date() > deadline.addingTimeInterval(-80) {
-                    pressed = true
-                    for index in 0..<((try? await frames()) ?? 1) { _ = try? await run(Probe.start, frame: index) }
+                // A player that makes its video only once played (an embed),
+                // or that wouldn't start by itself: its play button, every 10 s.
+                if Date() > pressed {
+                    pressed = Date().addingTimeInterval(10)
+                    for index in 0..<((try? await frames()) ?? 1) {
+                        if let said = try? await run(spec.playerPlay, frame: index, world: "page") as? String, !said.isEmpty {
+                            facts["asked"] = said
+                            for refusal in ["UNPLAYABLE", "LOGIN_REQUIRED", "ERROR", "AGE_CHECK"] where said.contains("playable \(refusal)") {
+                                throw Stop(outcome: .wouldNotPlay("the player says: \(said)"))
+                            }
+                        } else if let said = try? await run(Probe.start, frame: index) as? String, said != "none" {
+                            facts["pressed"] = said
+                        }
+                    }
                 }
                 try await Task.sleep(for: .seconds(1))
                 continue
@@ -146,10 +161,31 @@ struct Visit {
         }
         // Pressed as the owner would, then heard long enough for Nerda's
         // floating rule (three seconds).
-        _ = try await run(Probe.pressPauseAndPlay, frame: frame)
-        _ = try await run(Probe.played(3.5), frame: frame, timeout: 25)
-        if let state = try await run(Probe.state, frame: frame) as? String { facts["video"] = state }
+        if try await run(Probe.ownersPlay, frame: frame, world: "page") as? Bool == true { facts["muted as it came"] = "yes, unmuted as the owner would" }
+        try await Task.sleep(for: .milliseconds(500))
+        // A live player may start its stream again after a pause, in another element.
+        _ = try await run(Probe.watch, frame: frame)
+        _ = try await run(Probe.played(3.5, limit: 30), frame: frame, timeout: 35)
+        if let state = try await run(Probe.state, frame: frame) as? String {
+            facts["video"] = state
+            if state.contains("\"muted\":true") {
+                facts["muted still"] = "the site kept its video muted: Nerda's floating rule floats only a video playing with sound"
+                facts["labels"] = try? await run("return [...new Set([...document.querySelectorAll('[aria-label]')].map(e => e.tagName + ':' + e.getAttribute('aria-label')))].slice(0, 60).join(' | ');", frame: frame, world: "page") as? String
+            }
+        }
         facts["frame"] = frame == 0 ? "main" : "frame \(frame)"
+    }
+
+    /// Every frame's address and its videos, for a site where none played.
+    private func described() async -> String {
+        guard let frames = try? await nerda.send("frames", ["tab": tab]) as? [[String: Any]] else { return "no frames" }
+        var said: [String] = []
+        for (index, frame) in frames.enumerated() {
+            let videos = (try? await run(Probe.describe, frame: index) as? String) ?? "unanswered"
+            let title = (try? await run("return document.title + ' / ' + document.readyState;", frame: index) as? String) ?? ""
+            said.append("frame \(index) \(frame["url"] as? String ?? "") (\(title)): \(videos)")
+        }
+        return said.joined(separator: "; ")
     }
 
     private func frames() async throws -> Int {
@@ -205,6 +241,7 @@ struct Visit {
 
     private func measuring(_ action: LabRun.ActionName) async throws -> LabRun.Action {
         _ = try await run(Probe.watch, frame: frame)
+        _ = try await run(Probe.roomToPlay, frame: frame)
         let before = try decode(try await run(Probe.take, frame: frame))
         let recorder = spec.kind == .local && soundRefused == nil ? try await SoundRecorder.start(app: nerda.pid) : nil
         var floating: LabRun.Floating?
@@ -262,7 +299,12 @@ struct Visit {
 
     private func floatAndLand() async throws -> LabRun.Floating {
         let lock = try await FloatingLock.take()
-        defer { lock.release() }
+        nerda.watch?.flying = true
+        defer {
+            lock.release()
+            nerda.watch?.flying = false
+            nerda.watch?.flewUntil = Date().addingTimeInterval(3)
+        }
         _ = try await nerda.send("floating", ["on": true])
         let chosen = (try await nerda.send("state", ["tab": tab]) as? [String: Any])?["chosen"] as? Bool ?? false
         let floatsBefore = try await timings("floating"), landsBefore = try await timings("landing")

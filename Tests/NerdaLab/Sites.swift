@@ -37,8 +37,8 @@ struct SiteSpec: Sendable {
         SiteSpec(name: "YouTube watch page", kind: .youtube, address: .web("https://www.youtube.com/watch?v=\(video)&t=60s")),
         // Shorts as YouTube gives them out: the first of its feed.
         SiteSpec(name: "YouTube Shorts", kind: .youtube, address: .web("https://www.youtube.com/shorts")),
-        // Lofi Girl's stream, live since 2022.
-        SiteSpec(name: "YouTube live stream", kind: .youtube, address: .web("https://www.youtube.com/watch?v=jfKfPfyJRdk"), live: true),
+        // Lofi Girl's live stream, whichever is live now (its old one ended).
+        SiteSpec(name: "YouTube live stream", kind: .youtube, address: .web("https://www.youtube.com/@LofiGirl/live"), live: true),
         SiteSpec(name: "YouTube player embedded on another site", kind: .youtube, address: .embed(video: video)),
         SiteSpec(name: "X, signed out", kind: .x, address: .web("https://x.com/NASA/status/2039473910987534599")),
         SiteSpec(name: "Twitch live stream", kind: .twitch, address: .twitchLive, live: true),
@@ -65,6 +65,22 @@ struct SiteSpec: Sendable {
         return walls.first { url.contains($0.0) }?.1
     }
 
+    /// A script for the page's own world asking the site's player to play,
+    /// as its own button does, for a player whose video has nothing to play
+    /// yet; empty when the site has no player to ask.
+    var playerPlay: String {
+        switch kind {
+        case .youtube: #"""
+            const player = document.querySelector('#movie_player');
+            if (!player?.playVideo) return '';
+            player.playVideo();
+            const playable = player.getPlayerResponse?.()?.playabilityStatus;
+            return 'the player played (state ' + (player.getPlayerState?.() ?? '?') + ', playable ' + (playable ? playable.status + ' ' + (playable.reason ?? '') : '?') + ')';
+            """#
+        default: "return '';"
+        }
+    }
+
     /// A script for the main frame saying what of the site's own stands
     /// before its video now: an ad, a gate to press, a wall. Empty when
     /// nothing does.
@@ -75,6 +91,8 @@ struct SiteSpec: Sendable {
             const skip = document.querySelector('.ytp-skip-ad-button, .ytp-ad-skip-button-modern, .ytp-ad-skip-button');
             if (skip && skip.offsetParent) { skip.click(); return 'ad (skipped)'; }
             if (player?.classList.contains('ad-showing')) return 'ad';
+            const error = document.querySelector('.ytp-error');
+            if (error && error.offsetParent) return 'error: ' + error.innerText.replace(/\s+/g, ' ').trim();
             if (document.querySelector('ytd-consent-bump-v2-lightbox, tp-yt-paper-dialog #consent-bump')) return 'consent';
             return '';
             """#

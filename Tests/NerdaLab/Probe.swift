@@ -53,11 +53,22 @@ enum Probe {
                     await lab.wait(0.02);
                 }
             };
-            // Media played on by `seconds`, playing.
+            // Media played on by `seconds`, playing. A video the site took
+            // out of its page is told so, and the largest one in it now
+            // watched in its place.
+            lab.replaced = 0;
             lab.played = async (seconds, limit = 20) => {
-                const v = lab.video, from = v.currentTime;
-                await lab.until(`media playing ${seconds} s on from ${from.toFixed(3)} (at ${v.currentTime.toFixed(3)}, paused ${v.paused})`,
-                                () => !v.paused && v.currentTime - from >= seconds, limit);
+                let v = lab.video, from = v.currentTime;
+                await lab.until(`media playing ${seconds} s on from ${from.toFixed(3)} (at ${v.currentTime.toFixed(3)}, paused ${v.paused}, in the page ${v.isConnected})`,
+                                () => {
+                                    if (!v.isConnected && lab.watch() && lab.video !== v) {
+                                        lab.replaced += 1;
+                                        lab.mark('video replaced');
+                                        v = lab.video;
+                                        from = v.currentTime;
+                                    }
+                                    return !v.paused && v.currentTime - from >= seconds;
+                                }, limit);
             };
             // Held for `seconds` by the page's clock.
             lab.hold = async seconds => { const start = performance.now(); while (performance.now() - start < seconds * 1000) await lab.wait(0.01); };
@@ -65,7 +76,7 @@ enum Probe {
                 const v = lab.video;
                 if (!v) return null;
                 const seekable = v.seekable.length ? [v.seekable.start(0), v.seekable.end(v.seekable.length - 1)] : [];
-                return { time: v.currentTime, paused: v.paused, rate: v.playbackRate, readyState: v.readyState, muted: v.muted,
+                return { replaced: lab.replaced, connected: v.isConnected, time: v.currentTime, paused: v.paused, rate: v.playbackRate, readyState: v.readyState, muted: v.muted,
                          volume: v.volume, duration: Number.isFinite(v.duration) ? v.duration : -1, seekable,
                          width: v.videoWidth, height: v.videoHeight, dropped: lab.dropped(), fullscreen: !!document.fullscreenElement };
             };
@@ -99,15 +110,31 @@ enum Probe {
         return 'none';
         """#)
 
-    /// Pressed pause and play, as the owner does, so the video is one the
-    /// owner chose (the floating rule) and plays with sound.
-    static let pressPauseAndPlay = script(#"""
-        const v = lab.video;
-        if (!v.paused) { v.pause(); await lab.until('paused', () => v.paused, 5); }
-        await lab.hold(0.2);
-        await v.play();
-        return true;
-        """#)
+    /// Pressed pause and play, and unmuted, as the owner does to watch a
+    /// video with its sound: one the owner chose, to Nerda's floating rule.
+    /// In the page's own world (`world: page`), where Nerda's hook hears
+    /// what the page's player calls; answers whether it was muted.
+    static let ownersPlay = #"""
+        const area = v => { const r = v.getBoundingClientRect(); return r.width * r.height; };
+        const v = [...document.querySelectorAll('video')].filter(v => v.readyState >= 1).sort((a, b) => area(b) - area(a))[0];
+        const muted = v.muted;
+        if (!v.paused) v.pause();
+        await new Promise(done => setTimeout(done, 200));
+        if (v.muted) v.muted = false;
+        // A player keeping its own mute (Instagram's): its sound button, as the owner presses it.
+        await new Promise(done => setTimeout(done, 300));
+        if (v.muted) {
+            const sound = document.querySelector('[aria-label="Adjust volume"], [aria-label*="unmute" i], [aria-label*="sound off" i], [aria-label*="muted" i]');
+            const target = sound?.closest('button, [role="button"]') ?? sound;
+            for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+                target?.dispatchEvent(new (type.startsWith('pointer') ? PointerEvent : MouseEvent)(type, { bubbles: true, cancelable: true, composed: true }));
+            }
+        }
+        // A live player may load its stream anew on a play after a pause,
+        // aborting this one: the site plays it then itself.
+        try { await v.play(); } catch (error) { if (error.name !== 'AbortError') throw error; }
+        return muted;
+        """#
 
     static let pauseAndPlay = script(#"""
         const v = lab.video;
@@ -169,6 +196,19 @@ enum Probe {
         }
         return true;
         """#
+
+    /// Back near the start of a short video, so an action's measure
+    /// doesn't run into its end: answers whether it went back. Done
+    /// before an action's clock is read.
+    static let roomToPlay = script(#"""
+        const v = lab.video;
+        if (!(v.duration > 0 && Number.isFinite(v.duration)) || v.duration - v.currentTime > 15) return false;
+        const seeked = new Promise(done => v.addEventListener('seeked', done, { once: true }));
+        v.currentTime = 1;
+        await seeked;
+        await lab.played(0.5);
+        return true;
+        """#)
 
     static func mark(_ name: String) -> String { script("lab.mark(\(json(name))); return true;") }
     static func played(_ seconds: Double, limit: Double = 20) -> String {

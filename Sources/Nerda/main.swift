@@ -705,8 +705,18 @@ final class BrowserWindow: NSWindow {
     }
 
     private func keepAway() {
+        // No zoom of the window shown, which AppKit flies across the screen.
+        animationBehavior = .none
         Lab.park(self)
         orderBack(nil)
+    }
+
+    override func order(_ place: NSWindow.OrderingMode, relativeTo otherWindow: Int) {
+        if Lab.isOn {
+            animationBehavior = .none
+            Lab.told("BrowserWindow ordered \(place.rawValue) at \(frame)")
+        }
+        super.order(place, relativeTo: otherWindow)
     }
 }
 
