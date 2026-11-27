@@ -60,7 +60,9 @@ struct MediaActionsTests {
     ///   `speedEveryTime`: the check itself changes speed, and WebKit's
     ///   hold has always shown.
     /// - After a seek, media plays 50–140 ms, then stands still 0.05–0.3 s:
-    ///   always on AVPlayer, now and then in Media Source (`seek`).
+    ///   always on AVPlayer, now and then in Media Source (`restart`). The
+    ///   same once on HLS as it played again at the wake notice (67–91 ms,
+    ///   in one full run of three; none in 24 rounds bare or in Nerda).
     /// - Just after a change of speed, the picture of a Media Source stream
     ///   can be up to 0.15 s behind its media time, for under a second.
     /// - Paused, media time can stand ahead of the picture on show, WebKit's
@@ -68,7 +70,7 @@ struct MediaActionsTests {
     ///   the picture: a jump back to the frame that was on show (`still`;
     ///   measured by #161 with the page busy 70 ms in every 100).
     private func expectSmooth(_ clock: MediaClock, _ picture: MediaPage.Picture?, _ kind: Kind, speedEveryTime: Bool = false,
-                              seek: (wall: Double, everyTime: Bool)? = nil, still: MediaPage.Still? = nil,
+                              restart: (wall: Double, everyTime: Bool)? = nil, still: MediaPage.Still? = nil,
                               sourceLocation: SourceLocation = #_sourceLocation) {
         let stalls = clock.stalls(over: MediaClock.tolerance)
         var jumps = clock.jumps(over: MediaClock.tolerance)
@@ -86,7 +88,7 @@ struct MediaActionsTests {
         }
         let speeds = clock.marks.filter { $0.name.hasPrefix("speed") || $0.name.hasPrefix("nudge") }
         let atSpeed = { (wall: Double) in speeds.contains { wall >= $0.wall - 0.05 && wall <= $0.wall + 0.6 } }
-        let afterSeek = { (wall: Double) in seek.map { wall >= $0.wall && wall <= $0.wall + 1 } ?? false }
+        let afterSeek = { (wall: Double) in restart.map { wall >= $0.wall && wall <= $0.wall + 1 } ?? false }
         let speedJumps = jumps.filter { atSpeed($0.wall) }, speedStalls = stalls.filter { atSpeed($0.wall) }
         let seekStalls = stalls.filter { !atSpeed($0.wall) && afterSeek($0.wall) }
         let otherJumps = jumps.filter { !atSpeed($0.wall) }, otherStalls = stalls.filter { !atSpeed($0.wall) && !afterSeek($0.wall) }
@@ -97,8 +99,8 @@ struct MediaActionsTests {
                 #expect(speedStalls.isEmpty && speedJumps.isEmpty, "\(speedStalls) \(speedJumps)", sourceLocation: sourceLocation)
             }
         }
-        if let seek {
-            withKnownIssue("WebKit holds media still a moment after a seek", isIntermittent: !seek.everyTime) {
+        if let restart {
+            withKnownIssue("WebKit holds media still a moment after it starts again", isIntermittent: !restart.everyTime) {
                 #expect(seekStalls.isEmpty, "\(seekStalls)", sourceLocation: sourceLocation)
             }
         }
@@ -160,7 +162,7 @@ struct MediaActionsTests {
         let before = MediaClock(samples: clock.samples.filter { $0.wall < seek }, marks: clock.marks)
         let after = MediaClock(samples: clock.samples.filter { $0.wall >= seeked.wall }, marks: clock.marks)
         expectSmooth(before, nil, kind)
-        expectSmooth(after, picture, kind, seek: (seek, everyTime: !kind.isMediaSource))
+        expectSmooth(after, picture, kind, restart: (seek, everyTime: !kind.isMediaSource))
     }
 
     /// At 1.5 for half a second, then 1 again; live changes its own speed,
@@ -212,6 +214,8 @@ struct MediaActionsTests {
         let sleep = try #require(clock.marks.first { $0.name == "sleep" }).wall
         let wake = try #require(clock.marks.first { $0.name == "wake" }).wall
         #expect(clock.samples.contains { $0.wall > sleep && $0.wall < wake && $0.paused })
-        expectSmooth(clock, picture, kind)
+        // Playing again at the wake is a start: on AVPlayer, WebKit's hold after one.
+        let restart: (wall: Double, everyTime: Bool)? = kind.isMediaSource ? nil : (wake, false)
+        expectSmooth(clock, picture, kind, restart: restart)
     }
 }
