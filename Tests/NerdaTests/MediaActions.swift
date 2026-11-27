@@ -120,13 +120,22 @@ extension MediaPage {
         var frame: Int?
         var shown: Double
         var current: Double
+        /// How long after the frame was to be shown the page got to read it
+        /// (a busy page reads late, while media time goes on), and the speed.
+        /// Known only where WebKit gives the time to be shown on the page's
+        /// clock (a file, HLS: 20–30 ms); on Media Source it gives another
+        /// clock's, and this is 0.
+        var late: Double
+        var rate: Double
 
         /// How far the picture is from the media time: the frame's own time
-        /// against `currentTime`, in seconds.
-        var apart: Double? { frame.map { Double($0) / Double(GeneratedMovie.framesPerSecond) - current } }
+        /// against `currentTime` as it was when the frame was to be shown.
+        var apart: Double? {
+            frame.map { Double($0) / Double(GeneratedMovie.framesPerSecond) - (current - late * rate) }
+        }
 
         var description: String {
-            "frame \(frame.map(String.init) ?? "unread") shown at \(String(format: "%.3f", shown)) s, media at \(String(format: "%.3f", current)) s"
+            String(format: "frame %@ shown at %.3f s, media at %.3f s, read %.0f ms late", frame.map(String.init) ?? "unread", shown, current, late * 1000)
         }
     }
 
@@ -146,7 +155,11 @@ extension MediaPage {
                     if (value > 192) frame |= 1 << bit;
                     else if (value > 64) grey += 1;
                 }
-                resolve({ frame: grey ? null : frame, shown: shown.mediaTime, current: media.currentTime });
+                resolve({
+                    frame: grey ? null : frame, shown: shown.mediaTime, current: media.currentTime,
+                    late: (late => late >= 0 && late < 1 ? late : 0)((performance.now() - shown.expectedDisplayTime) / 1000),
+                    rate: media.playbackRate,
+                });
             }))
             """)
     }
