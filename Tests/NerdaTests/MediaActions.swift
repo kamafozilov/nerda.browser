@@ -42,17 +42,18 @@ final class MediaGate {
     /// How many wait their turn.
     var waitingCount: Int { waiting.count }
 
-    /// Held beside other shared holds, once no one holds it alone, nor waits to.
+    /// Held beside other shared holds, once no one holds it alone. Not
+    /// kept waiting for one who only waits to hold it alone: a test holding
+    /// a bed may make another, and would wait on itself.
     func shared() async -> Hold { await take(alone: false) }
 
-    /// Held by nobody else.
+    /// Held by nobody else, once no bed is open.
     func alone() async -> Hold { await take(alone: true) }
 
     private func take(alone: Bool) async -> Hold {
-        if waiting.isEmpty, free(for: alone) {
+        if free(for: alone) {
             enter(alone)
         } else {
-            // In turn, so one asking alone isn't kept out by those sharing after it.
             await withCheckedContinuation { waiting.append((alone, $0)) }
         }
         return Hold(self, alone: alone)
@@ -66,8 +67,12 @@ final class MediaGate {
 
     fileprivate func released(_ hold: Hold) {
         if hold.alone { single = false } else { sharing -= 1 }
-        while let next = waiting.first, free(for: next.alone) {
-            waiting.removeFirst()
+        // In the order asked, each that can go now.
+        var index = 0
+        while index < waiting.count {
+            let next = waiting[index]
+            guard free(for: next.alone) else { index += 1; continue }
+            waiting.remove(at: index)
             enter(next.alone)
             next.go.resume()
         }
