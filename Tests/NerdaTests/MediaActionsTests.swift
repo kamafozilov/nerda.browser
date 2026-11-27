@@ -96,8 +96,9 @@ struct MediaActionsTests {
         let speedJumps = jumps.filter { atSpeed($0.wall) }, speedStalls = stalls.filter { atSpeed($0.wall) }
         let seekStalls = stalls.filter { !atSpeed($0.wall) && afterSeek($0.wall) }
         let otherJumps = jumps.filter { !atSpeed($0.wall) }, otherStalls = stalls.filter { !atSpeed($0.wall) && !afterSeek($0.wall) }
-        #expect(otherJumps.isEmpty, "\(otherJumps)", sourceLocation: sourceLocation)
-        #expect(otherStalls.isEmpty, "\(otherStalls)", sourceLocation: sourceLocation)
+        // A failing one shows the whole timeline, so it can be judged after.
+        #expect(otherJumps.isEmpty, "\(otherJumps)\n\(clock.record)", sourceLocation: sourceLocation)
+        #expect(otherStalls.isEmpty, "\(otherStalls)\n\(clock.record)", sourceLocation: sourceLocation)
         if !speeds.isEmpty {
             withKnownIssue("WebKit holds media still at each change of speed", isIntermittent: !speedEveryTime) {
                 #expect(speedStalls.isEmpty && speedJumps.isEmpty, "\(speedStalls) \(speedJumps)", sourceLocation: sourceLocation)
