@@ -705,8 +705,12 @@ final class BrowserWindow: NSWindow {
     }
 
     private func keepAway() {
-        // No zoom of the window shown, which AppKit flies across the screen.
+        // No zoom of the window shown, which AppKit flies across the screen;
+        // and out of Mission Control, which would show it among the owner's,
+        // and of every Space switch, as Agent tabs' window is (AgentWindow).
         animationBehavior = .none
+        collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
+        isExcludedFromWindowsMenu = true
         Lab.park(self)
         orderBack(nil)
     }

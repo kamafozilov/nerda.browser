@@ -75,7 +75,7 @@ enum LabCommand {
             try await nerda.start()
             let watching = Watch(pid: nerda.pid)
             watching.onBroken = { kill(nerda.pid, SIGKILL) }
-            watching.floating = { (try? await nerda.send("windows", timeout: 1)) as? [Int] }
+            watching.windows = { (try? await nerda.send("windows", timeout: 1)) as? [[String: Any]] }
             watching.start()
             watch = watching
             nerda.watch = watching

@@ -294,7 +294,10 @@ enum Lab {
                 return true
             case "windows":
                 // The system's floating window shows as a window of this process (`PIPPanel`).
-                return NSApp.windows.filter(Lab.floats).map(\.windowNumber)
+                return NSApp.windows.map { window -> [String: Any] in
+                    let frame: Any = "\(window.frame)"
+                    return ["number": window.windowNumber, "class": "\(type(of: window))", "visible": window.isVisible, "frame": frame]
+                }
             case "quit":
                 return true
             default:

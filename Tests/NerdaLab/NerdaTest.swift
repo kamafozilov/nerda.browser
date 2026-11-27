@@ -53,7 +53,8 @@ final class NerdaTest {
 
     @discardableResult
     func send(_ op: String, _ parameters: [String: Any] = [:], timeout: Double = 30) async throws -> Any {
-        try await channel.send(op, parameters, timeout: timeout).value
+        guard pid == 0 || running else { throw Failed(description: "Nerda Test isn't running") }
+        return try await channel.send(op, parameters, timeout: timeout).value
     }
 
     /// Quits Nerda Test: asked, then told, then made to.
@@ -118,7 +119,7 @@ final class Watch {
 
     /// Asks Nerda Test which of its windows are the system's floating
     /// window, made in its process: the one window allowed on screen.
-    var floating: (() async -> [Int]?)?
+    var windows: (() async -> [[String: Any]]?)?
     /// The floating window's showings on screen, allowed.
     private(set) var floated = 0
     /// While a video floats and lands, and a moment after: the system's
@@ -142,23 +143,27 @@ final class Watch {
     func check() async {
         checks += 1
         var found: [String] = []
-        if Self.frontmost() == pid { found.append("Nerda Test was the app in front") }
+        // Asked off the main thread: Launch Services' tool takes a while.
+        if await Task.detached(operation: { Watch.frontmost() }).value == pid { found.append("Nerda Test was the app in front") }
         let screens = Self.screens()
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-        var allowed: [Int]?
-        for window in windows where (window[kCGWindowOwnerPID as String] as? Int).map(pid_t.init) == pid {
+        var known: [[String: Any]]?
+        for (index, window) in windows.enumerated() where (window[kCGWindowOwnerPID as String] as? Int).map(pid_t.init) == pid {
             guard let bounds = window[kCGWindowBounds as String] as? NSDictionary,
                   let rect = CGRect(dictionaryRepresentation: bounds), rect.width > 2, rect.height > 2,
                   screens.contains(where: { $0.intersects(rect) }) else { continue }
             let layer = window[kCGWindowLayer as String] as? Int ?? 0, alpha = window[kCGWindowAlpha as String] as? Double ?? 1
             let number = window[kCGWindowNumber as String] as? Int ?? 0
-            if allowed == nil { allowed = await floating?() ?? [] }
-            if allowed?.contains(number) == true || flying || Date() < flewUntil {
+            if known == nil { known = await self.windows?() ?? [] }
+            let mine = known?.first { $0["number"] as? Int == number }
+            if mine?["class"] as? String == "PIPPanel" || flying || Date() < flewUntil {
                 floated += 1
                 continue
             }
             found.append("a window of Nerda Test's was on screen at \(Int(rect.minX)),\(Int(rect.minY)) \(Int(rect.width))×\(Int(rect.height))"
-                + " (number \(number), layer \(layer), alpha \(alpha))")
+                + " (number \(number), layer \(layer), alpha \(alpha), \(index) windows in front of it"
+                + ", the one just in front \(index > 0 ? windows[index - 1][kCGWindowOwnerName as String] as? String ?? "?" : "none"), "
+                + (mine.map { "Nerda Test's \($0["class"] ?? "?") at \($0["frame"] ?? "?"), visible \($0["visible"] ?? "?")" } ?? "not one of Nerda Test's own windows") + ")")
         }
         guard !found.isEmpty else { return }
         broken += found
@@ -166,7 +171,7 @@ final class Watch {
     }
 
     /// The process of the app in front, from Launch Services.
-    static func frontmost() -> pid_t? {
+    nonisolated static func frontmost() -> pid_t? {
         guard let front = Shell.run("/usr/bin/lsappinfo", ["front"]), !front.isEmpty,
               let info = Shell.run("/usr/bin/lsappinfo", ["info", "-only", "pid", front]) else { return nil }
         let digits = info.split(whereSeparator: { !$0.isNumber })
