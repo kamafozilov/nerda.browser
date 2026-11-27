@@ -116,7 +116,8 @@ extension MediaPage {
         /// still, with the picture a frame or more on from where media time
         /// held. On a file or HLS the picture goes on frame by frame after
         /// the pause (`still` to `atPlay`); on Media Source it is on already
-        /// as the pause takes effect (`still` ahead of media time). It stood
+        /// as the pause takes effect (`still` ahead of media time, by more
+        /// than `ahead`). It stood
         /// still by half way through. Measured 2026-11-27 with four other
         /// beds seeking, changing speed, leaving their tab and going full
         /// screen beside it, the same in a bare `WKWebView`: 1–12 frames on
@@ -125,9 +126,15 @@ extension MediaPage {
             let frame = 1 / Double(GeneratedMovie.framesPerSecond)
             guard let to = atPlay.frame, halfWay.frame == to, atPlay.current == still.current,
                   halfWay.current == still.current else { return false }
-            let wentOn = still.frame.map { to > $0 } ?? false, aheadAtPause = (still.ahead ?? 0) < -2 * frame
+            let wentOn = still.frame.map { to > $0 } ?? false, aheadAtPause = (still.ahead ?? 0) < -Self.ahead
             return (wentOn || aheadAtPause) && Double(to) * frame > still.current
         }
+
+        /// How far ahead of media time the picture on show has been seen
+        /// as a pause took effect, unless WebKit made the pause late: 10 ms
+        /// (in 264 pauses, measured 2026-11-27). A frame shows from its own
+        /// time on, so the picture is otherwise behind media time.
+        static let ahead = 0.01
 
         /// The jumps forward at the play after a late pause (`isLate`) that
         /// come to the frame on show as it ended, within two frames: media

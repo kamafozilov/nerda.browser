@@ -48,6 +48,13 @@ struct MediaPausedLateTests {
         #expect(paused(44, 44).isLate)
     }
 
+    /// Ahead by under two frames is as late: a picture shown is never ahead
+    /// of media time otherwise. Frame 42 (1.400 s) on show at 1.369 s.
+    @Test func aPictureJustAheadAsItPausedIsLateToo() {
+        let clock = clock()
+        #expect(paused(42, 42).late(clock.jumps(over: MediaClock.tolerance), in: clock) == clock.jumps(over: MediaClock.tolerance))
+    }
+
     @Test func withThePictureWhereItPausedItIsAJump() {
         let clock = clock()
         #expect(paused(41, 41).late(clock.jumps(over: MediaClock.tolerance), in: clock).isEmpty)

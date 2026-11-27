@@ -69,8 +69,12 @@ struct MediaActionsTests {
     ///   (60–145 ms); on AVPlayer (a file, HLS) media time can go back too.
     ///   `speedEveryTime`: the check itself changes speed, and WebKit's
     ///   hold has always shown.
-    /// - After a seek, media plays 50–140 ms, then stands still 0.05–0.3 s:
-    ///   always on AVPlayer, now and then in Media Source (`restart`), there
+    /// - After a seek, media plays 50–140 ms from where it lands, then
+    ///   stands still 0.05–0.3 s: on AVPlayer always on a quiet Mac, and
+    ///   in 5 of 16 rounds with four other beds' media beside it (Nerda 2 of
+    ///   8, bare 3 of 8: the seek itself took up to 1.25 s then, and the
+    ///   page's sampling missed the hold or there was none); now and then in
+    ///   Media Source (`restart`, from where it lands), there
     ///   after a pause too (live: 77–82 ms, bare `WKWebView` too). The
     ///   same once on HLS as it played again at the wake notice (67–91 ms,
     ///   in one full run of three; none in 24 rounds bare or in Nerda).
@@ -128,7 +132,7 @@ struct MediaActionsTests {
         let seekStalls = stalls.filter { !atSpeed($0.wall) && afterSeek($0) }
         let otherJumps = jumps.filter { !atSpeed($0.wall) }, otherStalls = stalls.filter { !atSpeed($0.wall) && !afterSeek($0) }
         // A failing one shows the whole timeline, so it can be judged after.
-        #expect(otherJumps.isEmpty, "\(otherJumps)\n\(clock.record)", sourceLocation: sourceLocation)
+        #expect(otherJumps.isEmpty, "\(otherJumps)\n\(paused.map { "\($0)\n" } ?? "")\(clock.record)", sourceLocation: sourceLocation)
         #expect(otherStalls.isEmpty, "\(otherStalls)\n\(clock.record)", sourceLocation: sourceLocation)
         if !speeds.isEmpty {
             withKnownIssue("WebKit holds media still at each change of speed", isIntermittent: !speedEveryTime) {
@@ -137,7 +141,7 @@ struct MediaActionsTests {
         }
         if let restart {
             withKnownIssue(restartWhy, isIntermittent: !restart.everyTime) {
-                #expect(seekStalls.isEmpty, "\(seekStalls)", sourceLocation: sourceLocation)
+                #expect(seekStalls.isEmpty, "\(seekStalls)\n\(clock.record)", sourceLocation: sourceLocation)
             }
         }
         guard let picture else { return }
@@ -211,7 +215,8 @@ struct MediaActionsTests {
         let before = MediaClock(samples: clock.samples.filter { $0.wall < seek }, marks: clock.marks)
         let after = MediaClock(samples: clock.samples.filter { $0.wall >= seeked.wall }, marks: clock.marks)
         expectSmooth(before, nil, kind)
-        expectSmooth(after, picture, kind, restart: (seek, everyTime: !kind.isMediaSource))
+        // From where it lands: a busy WebKit can take over a second to seek.
+        expectSmooth(after, picture, kind, restart: (seeked.wall, everyTime: false))
     }
 
     /// At 1.5 for half a second, then 1 again; live changes its own speed,
