@@ -80,12 +80,32 @@ struct MediaActionsTests {
     ///   estimate run on to its cap, and played again, media goes on from
     ///   the picture: a jump back to the frame that was on show (`still`;
     ///   measured by #161 with the page busy 70 ms in every 100).
+    /// - A live Media Source stream shown again after a second behind
+    ///   another tab: as the page appends its next segment, media stands
+    ///   still 0.09–0.15 s, 0.05–0.36 s after the tab is back, in about a
+    ///   quarter of rounds, bare `WKWebView` the same; a stream with all of
+    ///   it appended doesn't (`restart`, `restartLost`).
+    /// - Paused while other pages' media keeps WebKit busy, media can stop
+    ///   later than media time says, which holds where the pause was asked
+    ///   while the picture goes on 1–12 frames; played again, media time
+    ///   comes to the frame on show: a jump forward (`Paused.late`).
     private func expectSmooth(_ clock: MediaClock, _ picture: MediaPage.Picture?, _ kind: Kind, speedEveryTime: Bool = false,
-                              restart: (wall: Double, everyTime: Bool)? = nil, still: MediaPage.Still? = nil,
+                              restart: (wall: Double, everyTime: Bool)? = nil,
+                              restartWhy: Comment = "WebKit holds media still a moment after it starts again",
+                              restartLost: Double = .infinity, paused: MediaPage.Paused? = nil,
                               sourceLocation: SourceLocation = #_sourceLocation) {
         let stalls = clock.stalls(over: MediaClock.tolerance)
         var jumps = clock.jumps(over: MediaClock.tolerance)
+        // On to the frame on show as the pause ended, from a pause WebKit made late.
+        let late = paused?.late(jumps, in: clock) ?? []
+        jumps.removeAll { late.contains($0) }
+        if !late.isEmpty {
+            withKnownIssue("WebKit pauses later than its media time says", isIntermittent: true) {
+                Issue.record("\(late), \(String(describing: paused))", sourceLocation: sourceLocation)
+            }
+        }
         // Back to the frame that was on show at the pause, from an estimate ahead of it.
+        let still = paused?.still
         let frame = 1 / Double(GeneratedMovie.framesPerSecond)
         let toStill = jumps.filter { jump in
             guard let still, let ahead = still.ahead, ahead > 2 * frame, jump.by < 0, jump.after == "play" else { return false }
@@ -101,10 +121,12 @@ struct MediaActionsTests {
         // WebKit's holds come at the change and, stepping up, once more up to
         // 0.9 s after it (measured in a bare `WKWebView` too).
         let atSpeed = { (wall: Double) in speeds.contains { wall >= $0.wall - 0.05 && wall <= $0.wall + 1 } }
-        let afterSeek = { (wall: Double) in restart.map { wall >= $0.wall && wall <= $0.wall + 1 } ?? false }
+        let afterSeek = { (stall: MediaClock.Stall) in
+            restart.map { stall.wall >= $0.wall && stall.wall <= $0.wall + 1 && stall.lost <= restartLost } ?? false
+        }
         let speedJumps = jumps.filter { atSpeed($0.wall) }, speedStalls = stalls.filter { atSpeed($0.wall) }
-        let seekStalls = stalls.filter { !atSpeed($0.wall) && afterSeek($0.wall) }
-        let otherJumps = jumps.filter { !atSpeed($0.wall) }, otherStalls = stalls.filter { !atSpeed($0.wall) && !afterSeek($0.wall) }
+        let seekStalls = stalls.filter { !atSpeed($0.wall) && afterSeek($0) }
+        let otherJumps = jumps.filter { !atSpeed($0.wall) }, otherStalls = stalls.filter { !atSpeed($0.wall) && !afterSeek($0) }
         // A failing one shows the whole timeline, so it can be judged after.
         #expect(otherJumps.isEmpty, "\(otherJumps)\n\(clock.record)", sourceLocation: sourceLocation)
         #expect(otherStalls.isEmpty, "\(otherStalls)\n\(clock.record)", sourceLocation: sourceLocation)
@@ -114,7 +136,7 @@ struct MediaActionsTests {
             }
         }
         if let restart {
-            withKnownIssue("WebKit holds media still a moment after it starts again", isIntermittent: !restart.everyTime) {
+            withKnownIssue(restartWhy, isIntermittent: !restart.everyTime) {
                 #expect(seekStalls.isEmpty, "\(seekStalls)", sourceLocation: sourceLocation)
             }
         }
@@ -139,11 +161,15 @@ struct MediaActionsTests {
     static let behindAfterSpeed = 0.2
     /// How far behind media time the picture has been seen paused.
     static let behindPaused = 0.3
+    /// How long WebKit has been seen to hold a live stream shown again, in
+    /// a bare `WKWebView` as in Nerda: 0.094–0.142 s (measured 2026-11-27).
+    static let heldAfterReturn = 0.2
 
     @Test(arguments: Kind.allCases)
     func pausingASecondAndPlayingCarriesOnWhereItStopped(_ kind: Kind) async throws {
-        var still: MediaPage.Still?
-        let (clock, picture) = try await around(kind) { _, page, _ in still = try await page.pause(for: 1) }
+        var paused: MediaPage.Paused?
+        let (clock, picture) = try await around(kind) { _, page, _ in paused = try await page.pause(for: 1) }
+        let still = paused?.still
         // Paused, the picture on show is the media time's.
         let ahead = try #require(still?.ahead, "The picture couldn't be read paused: \(String(describing: still))")
         // Behind it as WebKit's picture is, by #161's estimate run ahead (0.1 s),
@@ -153,6 +179,11 @@ struct MediaActionsTests {
             withKnownIssue("WebKit's picture behind media time at the pause", isIntermittent: true) {
                 Issue.record("\(String(describing: still))")
             }
+        } else if ahead < -Self.inStep, let paused, paused.isLate {
+            // Ahead of it, a pause WebKit made late (`Paused.late`).
+            withKnownIssue("WebKit pauses later than its media time says", isIntermittent: true) {
+                Issue.record("\(paused)")
+            }
         } else {
             #expect(abs(ahead) <= Self.inStep, "Picture and media time apart at the pause: \(String(describing: still))")
         }
@@ -160,7 +191,7 @@ struct MediaActionsTests {
         // hold after one (77 ms 0.18 s after play in a bare `WKWebView`).
         let play = clock.marks.last { $0.name == "play" }?.wall
         let restart: (wall: Double, everyTime: Bool)? = kind.isMediaSource ? play.map { ($0, false) } : nil
-        expectSmooth(clock, picture, kind, restart: restart, still: still)
+        expectSmooth(clock, picture, kind, restart: restart, paused: paused)
     }
 
     /// Jumps once, to where it was asked to, and plays on from there.
@@ -223,7 +254,12 @@ struct MediaActionsTests {
     @Test(arguments: Kind.allCases)
     func leavingTheTabAndComingBackKeepsPlaying(_ kind: Kind) async throws {
         let (clock, picture) = try await around(kind) { bed, page, _ in try await bed.leaveAndReturn(page) }
-        expectSmooth(clock, picture, kind)
+        // Live: WebKit's hold at the first segment appended once back.
+        let back = clock.marks.last { $0.name == "return" }?.wall
+        let restart: (wall: Double, everyTime: Bool)? = kind.isLive ? back.map { ($0, false) } : nil
+        expectSmooth(clock, picture, kind, restart: restart,
+                     restartWhy: "WebKit holds a live stream still as it appends once its page is shown again",
+                     restartLost: Self.heldAfterReturn)
     }
 
     /// Paused as the Mac goes to sleep, playing again from there as it

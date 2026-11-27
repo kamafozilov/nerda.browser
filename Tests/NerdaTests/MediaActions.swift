@@ -90,14 +90,60 @@ extension MediaPage {
     }
 
     /// Pauses, stays paused `seconds` by the page's clock, and plays again;
-    /// answers the picture as it stood paused.
+    /// answers the picture as it stood paused: just after the pause, half
+    /// way through, and just before playing again.
     @discardableResult
-    func pause(for seconds: Double) async throws -> Still {
+    func pause(for seconds: Double) async throws -> Paused {
         try await pause()
         let still = try await still()
-        try await hold(seconds)
+        try await hold(seconds / 2)
+        let halfWay = try await self.still()
+        try await hold(seconds / 2)
+        let atPlay = try await self.still()
         try await play()
-        return still
+        return Paused(still: still, halfWay: halfWay, atPlay: atPlay)
+    }
+
+    /// The picture on show paused: as the pause took effect (`still`), half
+    /// way through (`halfWay`), and as it ended (`atPlay`).
+    struct Paused: CustomStringConvertible {
+        var still: Still
+        var halfWay: Still
+        var atPlay: Still
+
+        /// WebKit paused later than its media time says: media time held
+        /// where the pause was asked while the media went on, then stood
+        /// still, with the picture a frame or more on from where media time
+        /// held. On a file or HLS the picture goes on frame by frame after
+        /// the pause (`still` to `atPlay`); on Media Source it is on already
+        /// as the pause takes effect (`still` ahead of media time). It stood
+        /// still by half way through. Measured 2026-11-27 with four other
+        /// beds seeking, changing speed, leaving their tab and going full
+        /// screen beside it, the same in a bare `WKWebView`: 1–12 frames on
+        /// (numbers on #157).
+        var isLate: Bool {
+            let frame = 1 / Double(GeneratedMovie.framesPerSecond)
+            guard let to = atPlay.frame, halfWay.frame == to, atPlay.current == still.current,
+                  halfWay.current == still.current else { return false }
+            let wentOn = still.frame.map { to > $0 } ?? false, aheadAtPause = (still.ahead ?? 0) < -2 * frame
+            return (wentOn || aheadAtPause) && Double(to) * frame > still.current
+        }
+
+        /// The jumps forward at the play after a late pause (`isLate`) that
+        /// come to the frame on show as it ended, within two frames: media
+        /// time coming to where the media stopped. The media itself never
+        /// jumped: it stopped late and went on from where it stopped.
+        func late(_ jumps: [MediaClock.Jump], in clock: MediaClock) -> [MediaClock.Jump] {
+            let frame = 1 / Double(GeneratedMovie.framesPerSecond)
+            guard isLate, let to = atPlay.frame else { return [] }
+            return jumps.filter { jump in
+                guard jump.by > 0, jump.after == "play",
+                      let landing = clock.samples.first(where: { $0.wall == jump.wall })?.media else { return false }
+                return abs(landing - Double(to) * frame) <= 2 * frame
+            }
+        }
+
+        var description: String { "\(still), \(halfWay) half way, \(atPlay) as it played again" }
     }
 
     /// The frame on show and the media time, read together while paused,
