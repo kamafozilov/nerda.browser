@@ -9,16 +9,6 @@ import WebKit
 // screen in and out, leaving the tab and coming back, the Mac sleeping and
 // waking. Each marks itself in the page's clock and returns once done.
 
-/// The bed's window. With a page in full screen Nerda takes its window
-/// full screen too (`BrowserView.matchWindowToPage`), into a space of its
-/// own over the owner's screen: this one only counts the asks, so a test's
-/// full screen is the page's, inside the window, and the window stays put.
-final class BedWindow: NSWindow {
-    private(set) var fullScreenAsks = 0
-
-    override func toggleFullScreen(_ sender: Any?) { fullScreenAsks += 1 }
-}
-
 /// Who plays media in this run, for what reaches every page of it at once:
 /// the system's sleep notice, which WebKit hears in the app's process and
 /// pauses every page's media for (measured 2026-11-27, every kind of

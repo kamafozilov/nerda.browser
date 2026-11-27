@@ -162,19 +162,23 @@ enum PictureInPicture {
     // Run by the app, which counts as a click, as WebKit wants for picture in picture.
     // The page's own frame only: where WebKit's toggle is (`Browser.float`),
     // it is asked first, and reaches a video in a frame (an embed) too.
+    // Each answers whether it found a video to ask.
     static let enter = """
         (() => {
             const playing = [...document.querySelectorAll('video')]
                 .filter(v => !v.paused && !v.ended && !v.muted && v.volume > 0 && v.webkitSupportsPresentationMode?.('picture-in-picture'))
                 .sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0];
             playing?.webkitSetPresentationMode('picture-in-picture');
+            return !!playing;
         })();
         """
 
     static let exit = """
-        document.querySelectorAll('video').forEach(v => {
-            if (v.webkitPresentationMode === 'picture-in-picture') v.webkitSetPresentationMode('inline');
-        });
+        (() => {
+            const floating = [...document.querySelectorAll('video')].filter(v => v.webkitPresentationMode === 'picture-in-picture');
+            floating.forEach(v => v.webkitSetPresentationMode('inline'));
+            return floating.length > 0;
+        })();
         """
 }
 

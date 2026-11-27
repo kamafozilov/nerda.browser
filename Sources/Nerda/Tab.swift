@@ -136,12 +136,22 @@ final class Tab: Identifiable {
             if isAsleep != (page == nil) { isAsleep = page == nil }
             if page == nil, playsAudio { playsAudio = false }
             if page == nil, isFloating { isFloating = false }
+            if page == nil { floatingAsked = nil }
         }
     }
     /// Whether the page has a video floating (Picture in Picture), as WebKit
     /// last said (`Browser.webView(_:hasVideoInPictureInPictureDidChange:)`):
     /// never taken from Nerda having asked, which WebKit may ignore.
     var isFloating = false
+    /// Where the owner wants the page's video: floating, as they left the
+    /// tab or Nerda, or in its page, as they came back (`Browser.float`,
+    /// `Browser.land`). Kept beside `isFloating`, WebKit's word, the two
+    /// compared each time WebKit says a change is done.
+    @ObservationIgnored var wantsFloating = false
+    /// The change Nerda asked WebKit for that WebKit hasn't said is done:
+    /// while one is under way WebKit ignores another, so none is asked.
+    /// Goes with the page.
+    @ObservationIgnored var floatingAsked: FloatingAsk?
     /// Whether its page is let go (`sleep`), kept in step with `page` so a
     /// pinned site's icon can show it, where `page` itself isn't watched.
     private(set) var isAsleep = true
@@ -994,6 +1004,8 @@ final class Tab: Identifiable {
         recoloring?.cancel()
         recoloring = nil
         page.stopLoading()
+        // A floating video would float on, with no tab to go back to.
+        page.closeAllMediaPresentations()
         page.setAllMediaPlaybackSuspended(true)
         page.setCameraCaptureState(.none)
         page.setMicrophoneCaptureState(.none)
@@ -1381,6 +1393,8 @@ nonisolated private final class KeyObserver: NSObject {
 /// down as out of sight, as it does a page out of the window.
 struct PageView: NSViewRepresentable {
     let tabs: [Tab]
+    /// The tab whose page shows: the one selected, or the one left kept in
+    /// sight while its video floats (`Browser.inSight`).
     let selected: Tab?
     /// Whether the page takes the keyboard when it comes on screen, so Space
     /// scrolls it. Not while the command bar has it.
@@ -1416,7 +1430,8 @@ struct PageView: NSViewRepresentable {
         // Put on screen from the sidebar's list by the keyboard: it stays there.
         let browser = selected?.delegate as? Browser
         let keepsKeyboard = browser?.keepsKeyboard != nil && browser?.keepsKeyboard == selected?.id
-        browser?.keepsKeyboard = nil
+        // Not while the page left is kept in sight: the ask is the next page's.
+        if browser?.keptInSight == nil { browser?.keepsKeyboard = nil }
         let focused = (window?.firstResponder as? NSView).flatMap { responder in
             pages.first { responder === $0 || responder.isDescendant(of: $0) }
         }

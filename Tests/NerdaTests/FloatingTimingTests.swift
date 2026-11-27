@@ -155,8 +155,7 @@ struct FloatingTimingTests {
     @Test func theRecordsSwitchLeavesFloatingKnown() throws {
         let setup = try setup()
         defer { setup.close() }
-        Speedups.overrides[.recorder] = false
-        defer { Speedups.overrides[.recorder] = nil }
+        setup.recorder.switchedOn = false
         setup.browser.select(setup.a.id)
         setup.browser.select(setup.b.id)
         setup.webKitSays(setup.a, floating: true)

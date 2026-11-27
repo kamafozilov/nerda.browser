@@ -2,7 +2,9 @@ import Foundation
 
 /// The speed-ups of spec #118, each on unless its environment variable,
 /// NERDA_ and its name, is "0" for this run, to time one build with it and
-/// without it on the same Mac (Recorder.swift). Tests set `overrides`.
+/// without it on the same Mac (Recorder.swift). Tests set `overrides`, or
+/// the switch of their own record or window where there is one
+/// (`Recorder.switchedOn`, `Browser.lastFramesOn`).
 enum Speedups {
     /// Each switch, by the name its variable carries.
     enum Name: String, CaseIterable {

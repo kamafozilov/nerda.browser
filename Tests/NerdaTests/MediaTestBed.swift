@@ -145,6 +145,16 @@ final class MediaTestBed {
     }
 }
 
+/// The bed's window. With a page in full screen Nerda takes its window
+/// full screen too (`BrowserView.matchWindowToPage`), into a space of its
+/// own over the owner's screen: this one only counts the asks, so a test's
+/// full screen is the page's, inside the window, and the window stays put.
+final class BedWindow: NSWindow {
+    private(set) var fullScreenAsks = 0
+
+    override func toggleFullScreen(_ sender: Any?) { fullScreenAsks += 1 }
+}
+
 /// A bed page in its tab: its one `<video>`, what can be done to it, and its
 /// clock (`clock(around:)`). The page samples the element's clock every
 /// 20 ms and at each of its events, and marks each action as it is done.

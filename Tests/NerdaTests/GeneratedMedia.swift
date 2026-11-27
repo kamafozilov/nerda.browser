@@ -1,11 +1,15 @@
 import AVFoundation
 import Foundation
+import SoundCheck
 
 /// The sound generated media carries, quiet of itself (`level`): a second
 /// guard beside the volume a page plays it at (`MediaTestBed.inaudible`).
 enum GeneratedSound: Sendable, Hashable {
     /// A sine at `hertz`.
     case tone(hertz: Double)
+    /// Two tones whose pitches tell the media time (`Sweep`), so the sound
+    /// recorded can be compared with what it should have been.
+    case sweep
 
     /// The loudest the sound goes, of full scale: −20 dB.
     static let level = 0.1
@@ -14,6 +18,7 @@ enum GeneratedSound: Sendable, Hashable {
     func sample(at seconds: Double) -> Double {
         switch self {
         case .tone(let hertz): Self.level * sin(2 * .pi * hertz * seconds)
+        case .sweep: Sweep.sample(at: seconds)
         }
     }
 }
@@ -52,7 +57,7 @@ enum GeneratedMovie {
     /// Picture and sound for `seconds` through `writer`, finished, on the
     /// caller's thread; `compression` adds to the picture's settings.
     static func write(seconds: Double, sound: GeneratedSound, with writer: AVAssetWriter,
-                              compression: [String: Any] = [:]) throws {
+                      compression: [String: Any] = [:]) throws {
         var videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height,
         ]

@@ -14,6 +14,9 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Fixed
 
+- With Auto Picture-in-Picture on, leaving a tab whose video is playing keeps that video in sight until it floats: the tab you went to is selected in the sidebar at once, and its page shows as soon as the video is floating, at most a third of a second later. Before, the video vanished with its page and came up late, as a black box over the new tab.
+- With Auto Picture-in-Picture on, a video ends up where you are however quickly you switch tabs: leaving its tab and coming straight back leaves it in its page, and coming back and leaving again straight away leaves it floating. Before, a quick change of mind could leave it floating over its own tab, or back in its page behind another one.
+- A floating video goes when you close its tab or its window, and a tab whose video floats is never put to sleep, so the video you are watching isn't taken away. Before, closing the tab could leave the video floating.
 - A live stream, on Twitch, X or any other site, no longer stops for good while its player catches up with the broadcast. Before, the picture and sound could stand still within a minute while the player still showed it playing, and only a reload brought it back.
 - Scrolling with two fingers no longer goes back or forward by itself. A swipe has to go sideways from the start and stay sideways, as in Safari and Chrome; once your fingers move up or down, it is a scroll until you lift them. Before, a scroll that set off a little sideways, or a quick flick down a feed, could leave the page.
 - A page that asks to keep sideways swipes to itself, as some maps, spreadsheets and editors do, keeps them: swiping there moves the page instead of going back, as in Chrome.

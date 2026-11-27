@@ -20,7 +20,12 @@ import WebKit
 /// frame goes with its page. `NERDA_LAST_FRAME=0` turns it off for a run.
 /// Each `PageSlot` has one.
 final class LastFrame {
-    static var isOn: Bool { Speedups.isOn(.lastFrame) }
+    /// NERDA_LAST_FRAME, or the page's browser's own switch in its place
+    /// (`Browser.lastFramesOn`, a test's): a switch for the whole process
+    /// would reach other tests' windows running beside it.
+    static func isOn(for page: WKWebView) -> Bool {
+        (page.uiDelegate as? Browser)?.lastFramesOn ?? Speedups.isOn(.lastFrame)
+    }
 
     /// What a frame was drawn for. It stands in only for exactly this.
     struct Key: Equatable {
@@ -92,7 +97,7 @@ final class LastFrame {
         arrival = nil
         dropped = nil
         lift()
-        guard Self.isOn, stage.device == nil, let key = Self.key(page) else {
+        guard Self.isOn(for: page), stage.device == nil, let key = Self.key(page) else {
             drop()
             return
         }
@@ -105,7 +110,7 @@ final class LastFrame {
     func arrive(_ page: WKWebView, on stage: PageStage, in slot: NSView) {
         onScreen = true
         turn += 1
-        guard Self.isOn else {
+        guard Self.isOn(for: page) else {
             arrival = .live(because: .off)
             drop()
             return

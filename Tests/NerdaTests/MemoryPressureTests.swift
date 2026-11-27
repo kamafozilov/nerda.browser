@@ -198,3 +198,33 @@ private func weigh(_ tab: Nerda.Tab, megabytes: Int) async throws {
     try await Task.sleep(for: .milliseconds(300))
     #expect(!light[0].isAsleep)
 }
+
+/// The idle timer leaves a tab whose video floats awake, however long
+/// unseen, paused or not, and still puts the others to sleep. WebKit's word
+/// that it floats is given here as WebKit gives it.
+@MainActor
+@Test func theIdleTimerLeavesATabWhoseVideoFloatsAwake() async throws {
+    let (browser, hidden) = try await browser(hidden: 2)
+    browser.webView(hidden[0].webView, hasVideoInPictureInPictureDidChange: true)
+    browser.sleepIdleTabs(unseenFor: 0)
+    try await waitFor("The other tab asleep") { hidden[1].isAsleep }
+    #expect(!hidden[0].isAsleep)
+    #expect(hidden[0].isFloating)
+}
+
+/// Critical pressure passes over a tab whose video floats, the heaviest
+/// though it is, and takes the next one.
+@MainActor
+@Test func criticalPressureLeavesATabWhoseVideoFloatsAwake() async throws {
+    let (browser, hidden) = try await browser(hidden: 2)
+    try await weigh(hidden[0], megabytes: 300)
+    browser.webView(hidden[0].webView, hasVideoInPictureInPictureDidChange: true)
+    let coordinator = coordinator(for: browser)
+    coordinator.lookEvery = .seconds(60)
+    defer { coordinator.pressure(.normal) }
+
+    coordinator.pressure(.critical)
+    try await waitFor("The lighter tab asleep") { hidden[1].isAsleep }
+    #expect(!hidden[0].isAsleep)
+    #expect(hidden[0].isFloating)
+}
