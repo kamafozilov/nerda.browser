@@ -37,7 +37,11 @@ struct ChosenVideoFloatingTests {
         /// Leaves `page`'s tab for the first, and waits for its video to float.
         func leaveAndFloat(_ page: MediaPage, _ comment: Comment = "The video never floated") async throws {
             bed.browser.select(other.tab.id)
-            try await waitFor(comment) { page.tab.isFloating }
+            let tab = page.tab
+            try await waitFor("""
+                \(comment.rawValue): sound \(tab.playsAudio), asked \(String(describing: tab.floatingAsked)), \
+                videos \(tab.videos.all.map(\.told))
+                """) { tab.isFloating }
         }
 
         /// Leaves `page`'s tab for the first: Nerda asks nothing to float.
@@ -90,7 +94,6 @@ struct ChosenVideoFloatingTests {
         #expect(setup.bed.browser.isPrivate)
         let page = try await setup.bed.open(.file())
         try await page.run("media.addEventListener('click', () => media.play())", mark: "click to play")
-        try await page.waitForNoOwnersInput()
         ownerClick(page.tab.webView)
         try await heard(page, "started by the owner") { $0.playing && $0.ownerStarted && !$0.muted }
         setup.bed.clock.now += FloatingRule.heardAtLeast
@@ -104,7 +107,6 @@ struct ChosenVideoFloatingTests {
         let setup = try await Setup()
         defer { setup.close() }
         let page = try await setup.bed.open(.file())
-        try await page.waitForNoOwnersInput()
         try await page.play()
         try await heard(page, "playing") { $0.playing && $0.ownerStarted }
         setup.bed.clock.now += FloatingRule.heardAtLeast - 0.1
@@ -248,12 +250,16 @@ struct ChosenVideoFloatingTests {
         let setup = try await Setup()
         defer { setup.close() }
         let page = try await setup.bed.play(.file())
+        // Returns once the next one plays: what the page told of the first
+        // has come in by then, so Nerda's word on the next is what is waited for.
         try await page.run("""
             const next = media.src;
             media.src = '';
             media.load();
             media.addEventListener('loadedmetadata', () => media.play(), { once: true });
+            const playing = bed.event('playing');
             media.src = next;
+            await playing;
             """, mark: "next")
         try await heard(page, "playing on with its sound") { $0.playing && !$0.muted && $0.hasSound && $0.ownerStarted }
         setup.bed.clock.now += FloatingRule.heardAtLeast

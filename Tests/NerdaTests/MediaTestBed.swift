@@ -104,13 +104,19 @@ final class MediaTestBed {
         try await waitFor("The tab never joined the bed's window") { tab.webView.window === window }
         tab.go(to: url)
         let page = MediaPage(tab: tab)
-        try await waitFor("The bed's page never loaded with its media") {
+        var readyState: Int?
+        try await waitFor("""
+            The bed's page never loaded with its media: at \(tab.webView.url?.absoluteString ?? "no address") for \(url), \
+            loading \(tab.webView.isLoading), ready state \(readyState.map(String.init) ?? "unread"), \
+            requests \(server.requests)
+            """) {
             guard tab.webView.url == url, !tab.webView.isLoading else { return false }
             if inFrame {
                 page.frame = await MediaPage.firstFrame(in: tab.webView)
                 guard page.frame != nil else { return false }
             }
-            return try await page.state().readyState >= 1
+            readyState = try await page.state().readyState
+            return readyState.map { $0 >= 1 } ?? false
         }
         return page
     }
@@ -179,18 +185,6 @@ final class MediaPage {
         let state = try await state()
         try #require(state.volume <= MediaTestBed.inaudible, "The bed's page would be heard at volume \(state.volume)")
         try await run("await bed.play()")
-    }
-
-    /// Returns once no input of the owner's is in effect in the page: a new
-    /// document's own timers read one in effect for about 5 s after it
-    /// loads (measured: 5.0 s each time), as if the owner had clicked.
-    /// After this, only what a test does next counts as theirs. Waited for
-    /// those 5 s and the usual 6 s besides: the state takes WebKit's own
-    /// time to come, not a moment.
-    func waitForNoOwnersInput() async throws {
-        try await waitFor("The page never stopped reading an input of the owner's in effect", timeout: .seconds(11)) {
-            try await read("bed.ownersInput") == false
-        }
     }
 
     /// Pauses, and returns once it has.
@@ -327,10 +321,6 @@ final class MediaPage {
             // No requestVideoFrameCallback: watching frames has WebKit report
             // media time frame by frame, which a page playing a video doesn't.
             setInterval(() => bed.sample('tick'), 20);
-            // Whether an input of the owner's is in effect, as the page's own
-            // timer sees it: a script from Nerda always reads one in effect.
-            bed.ownersInput = true;
-            setInterval(() => { bed.ownersInput = navigator.userActivation.isActive; }, 20);
             \(attach)
             \(start)
             </script>
