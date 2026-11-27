@@ -1027,6 +1027,9 @@ let delegate = AppDelegate(window: window, browser: browser)
 delegate.dockMenu = menu.dock
 app.delegate = delegate
 window.delegate = delegate
+// Shown before it had its delegate, it may have become the main window
+// unheard: in front to begin with, unless another window has said so since.
+if window.isVisible, WindowInFront.app.front == nil { WindowInFront.app.cameForward(browser) }
 // SIGTERM (`kill`, and watch.sh putting in a new build) would end the app on
 // the spot; the tabs and history are saved first.
 signal(SIGTERM, SIG_IGN)

@@ -155,9 +155,10 @@ enum PictureInPicture {
     static let appsKey = "autoPictureInPictureForApps"
 
     static var isOn: Bool { isOn(in: .standard) }
-    static var isOnForApps: Bool { isOn && UserDefaults.standard.bool(forKey: appsKey) }
     /// On in `settings`: the app's, or a test's own.
     static func isOn(in settings: UserDefaults) -> Bool { settings.bool(forKey: key) }
+    /// "Also when switching to another app", on with Auto Picture-in-Picture in `settings`.
+    static func isOnForApps(in settings: UserDefaults) -> Bool { isOn(in: settings) && settings.bool(forKey: appsKey) }
 
     // Run by the app, which counts as a click, as WebKit wants for picture in picture.
     // The page's own frame only: where WebKit's toggle is (`Browser.float`),
