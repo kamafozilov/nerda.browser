@@ -256,6 +256,9 @@ final class Browser: NSObject {
     /// Whether leaving `tab` floats its video, the test's to say in its
     /// place (`floats(leaving:)`).
     @ObservationIgnored var floatsOnLeaving: ((Tab) -> Bool)?
+    /// The tab whose video floated as the owner left this window
+    /// (`windowLeft`), to land as they come back to it.
+    @ObservationIgnored weak var leftFloating: Tab?
 
     /// Whether leaving `tab`, with Auto Picture-in-Picture on, floats its
     /// video: a page of the owner's playing sound, its tab not muted.
