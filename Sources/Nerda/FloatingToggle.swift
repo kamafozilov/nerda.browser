@@ -130,11 +130,11 @@ extension Browser {
         let toggle = floatingToggle
         let native = toggle.available(page)
         if tab.isFloating || (native && toggle.isActive(page)) { return false }
-        // The toggle floats WebKit's pick, a video playing with sound, so
-        // only where that is the one heard in the page. Made ready again
-        // here, as WebKit's pick may have changed since the sound started.
-        let heard = tab.videos.all.filter { $0.told.audible }.map(\.id)
-        if native, tab.playsAudio, heard == [video] {
+        // The toggle floats WebKit's pick, which can be another video of the
+        // page than the one chosen, a larger paused or muted one (measured),
+        // so only where the page has that one alone. Made ready again here,
+        // as WebKit's pick may have changed since the sound started.
+        if native, tab.playsAudio, tab.videos.all.map(\.id) == [video] {
             toggle.makeReady(page)
             if toggle.canToggle(page) {
                 toggle.toggle(page)

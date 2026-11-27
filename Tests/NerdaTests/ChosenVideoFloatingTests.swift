@@ -216,6 +216,72 @@ struct ChosenVideoFloatingTests {
         try await setup.comeBack(to: page)
     }
 
+    /// The owner's video floats, not a larger one beside it that is paused,
+    /// or playing muted: WebKit's toggle picked the larger one (measured).
+    @Test func aVideoBesideALargerSilentOneFloats() async throws {
+        for larger in ["paused", "muted"] {
+            let setup = try await Setup()
+            defer { setup.close() }
+            let page = try await setup.bed.play(.file())
+            try await page.run("""
+                media.style = 'width: 160px; height: 90px';
+                const large = window.large = document.createElement('video');
+                large.style = 'width: 480px; height: 270px';
+                large.volume = \(MediaTestBed.inaudible);
+                large.src = media.src;
+                document.body.append(large);
+                \(larger == "muted" ? "large.muted = true; await large.play();" : "await new Promise(r => large.addEventListener('loadeddata', r, { once: true }));")
+                """, mark: "large")
+            try await waitFor("Nerda never heard of both: \(page.tab.videos.all)") { page.tab.videos.all.count == 2 }
+            setup.bed.clock.now += FloatingRule.heardAtLeast
+            setup.turnOn()
+            try await setup.leaveAndFloat(page, "The video never floated beside a larger \(larger) one")
+            let modes = try await page.read("[media.webkitPresentationMode, large.webkitPresentationMode]") as [String]
+            #expect(modes == ["picture-in-picture", "inline"], "Beside a larger \(larger) one")
+            try await setup.comeBack(to: page)
+        }
+    }
+
+    /// The owner's video going on to another, as a player's next video does,
+    /// and its sound coming a moment after it plays: Nerda hears it again.
+    @Test func aNextVideoInTheSameElementIsHeard() async throws {
+        let setup = try await Setup()
+        defer { setup.close() }
+        let page = try await setup.bed.play(.file())
+        try await page.run("""
+            const next = media.src;
+            media.src = '';
+            media.load();
+            media.addEventListener('loadedmetadata', () => media.play(), { once: true });
+            media.src = next;
+            """, mark: "next")
+        try await heard(page, "playing on with its sound") { $0.playing && !$0.muted && $0.hasSound && $0.ownerStarted }
+        setup.bed.clock.now += FloatingRule.heardAtLeast
+        setup.turnOn()
+        try await setup.leaveAndFloat(page)
+        try await setup.comeBack(to: page)
+    }
+
+    /// The same across two windows, each its own browser: the second
+    /// window's video floating lands the first's.
+    @Test func oneVideoFloatsAtATimeAcrossWindows() async throws {
+        let setup = try await Setup()
+        defer { setup.close() }
+        let first = try await setup.bed.play(.file())
+        setup.turnOn()
+        let bed = try await MediaTestBed()
+        defer { bed.close() }
+        bed.browser.pictureInPictureSettings = setup.settings
+        let elsewhere = try await bed.open(.file())
+        let second = try await bed.play(.file())
+        try await setup.leaveAndFloat(first, "The first window's video never floated")
+        bed.browser.select(elsewhere.tab.id)
+        try await waitFor("The second window's video never floated") { second.tab.isFloating }
+        try await waitFor("The first window's video never landed") { !first.tab.isFloating }
+        bed.browser.select(second.tab.id)
+        try await waitFor("The second window's video never landed") { !second.tab.isFloating }
+    }
+
     /// A video in a frame from another origin floats by Nerda's own script
     /// too, in its frame, where WebKit's toggle is missing.
     @Test func withoutWebKitsToggleAVideoInAFrameStillFloats() async throws {

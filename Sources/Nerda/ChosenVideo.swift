@@ -139,6 +139,9 @@ enum ChosenVideo {
                     numbers.set(video, ++count);
                     elements.set(count, new WeakRef(video));
                     sizes.observe(video);
+                    // A sound track can come after the media's own events (measured).
+                    video.audioTracks?.addEventListener('addtrack', tell);
+                    video.audioTracks?.addEventListener('removetrack', tell);
                 }
                 // Started, or its sound turned on as it plays, at the owner's word.
                 const sound = event.type === 'volumechange' || event.type === 'nerdasound';
@@ -170,8 +173,9 @@ enum ChosenVideo {
 
     /// In the page's world: each play() and each change of mute or volume
     /// is marked on its element as it is made, so Nerda's own world hears
-    /// it while whatever asked for it is still in effect. Added after
-    /// `Tab.unseenMedia`, so its held play() is the one marked.
+    /// it while whatever asked for it is still in effect. Added before
+    /// `Tab.unseenMedia`, which holds a hidden page's play() and gives this
+    /// one back once shown.
     // ponytail: a page's script can see the hook, and mark a call itself:
     // heard only while the owner's click or key is in effect, as theirs.
     static let hook = WKUserScript(source: """

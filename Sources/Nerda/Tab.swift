@@ -1179,9 +1179,9 @@ final class Tab: Identifiable {
         controller.addUserScript(middleClick)
         controller.add(middleClicks, contentWorld: .defaultClient, name: "middleClick")
         controller.addUserScript(keepFocus)
-        controller.addUserScript(unseenMedia)
-        // After unseenMedia: its hook marks the play() a page loaded out of sight holds.
+        // Before unseenMedia, which keeps its hook as the play() it gives back once shown.
         ChosenVideo.install(in: controller)
+        controller.addUserScript(unseenMedia)
         controller.addUserScript(LiveRate.script)
         // Not for incognito: what it plays isn't kept on disk.
         if dataStore.isPersistent, mediaCacheOn { controller.addUserScript(MediaCache.script) }
