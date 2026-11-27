@@ -107,6 +107,9 @@ final class Browser: NSObject {
     /// Where this window's tab operations are timed: the app's one record,
     /// or a test's own.
     @ObservationIgnored var recorder = Recorder.shared
+    /// NERDA_LAST_FRAME for this window's pages alone, a test's; nil
+    /// follows the run's (LastFrame).
+    @ObservationIgnored var lastFramesOn: Bool?
     /// Where Auto Picture-in-Picture is set: the app's settings, or a test's own.
     @ObservationIgnored var pictureInPictureSettings = UserDefaults.standard
     var recentlyClosed: [Session.ClosedTab] = []

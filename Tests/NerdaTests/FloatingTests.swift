@@ -98,7 +98,7 @@ struct FloatingTests {
         try await waitFor("The page left's last frame was never taken") { page.keepsLastFrame }
         bed.browser.select(watched.tab.id)
         try await waitFor("The tab never came back") { page.lastArrival != nil }
-        #expect(page.lastArrival == .lastFrame)
+        #expect(page.lastArrival == .lastFrame, "Came back as \(String(describing: page.lastArrival))")
         try await waitFor("Never landed") { !watched.tab.isFloating }
     }
 

@@ -98,7 +98,11 @@ final class Recorder {
 
     init(clock: @escaping () -> TimeInterval = Recorder.uptime) { self.clock = clock }
 
-    private static var isOn: Bool { Speedups.isOn(.recorder) }
+    /// NERDA_RECORDER for this record alone, set by a test in the run's
+    /// place: a switch for the whole process would reach other tests'
+    /// records running beside it. Nil follows the run's.
+    var switchedOn: Bool?
+    private var isOn: Bool { switchedOn ?? Speedups.isOn(.recorder) }
 
     private static let signposter = OSSignposter(subsystem: Logger.subsystem, category: "tabs")
 
@@ -113,7 +117,7 @@ final class Recorder {
     /// waits leaves the first: a tab opened is selected too, and the pass
     /// that shows both is the open's.
     func begin(_ kind: Kind) {
-        guard pending == nil, Self.isOn else { return }
+        guard pending == nil, isOn else { return }
         pending = (kind, clock(), Self.signposter.beginInterval(kind.signpost), false)
         settleOnSleep()
     }
@@ -153,7 +157,7 @@ final class Recorder {
     /// `kind` took `seconds`, timed by whoever saw it end: a page's first
     /// paint, or the page Back went to on screen.
     func record(_ kind: Kind, seconds: TimeInterval) {
-        guard Self.isOn else { return }
+        guard isOn else { return }
         Self.signposter.emitEvent(kind.signpost, "\(Int(seconds * 1000)) ms")
         add(kind, seconds: seconds)
     }
@@ -319,7 +323,7 @@ extension Recorder {
 
     private func present(_ kind: Kind, _ tab: Tab) {
         letGo(tab)
-        guard Self.isOn else { return }
+        guard isOn else { return }
         // An ID of its own: several tabs' asks can be open at once.
         let interval = Self.signposter.beginInterval(kind.signpost, id: Self.signposter.makeSignpostID())
         tab.timing.presenting = Presenting(kind: kind, start: clock(), interval: interval)
