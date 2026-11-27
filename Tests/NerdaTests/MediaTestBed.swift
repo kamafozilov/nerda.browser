@@ -4,6 +4,7 @@ import SwiftUI
 import Testing
 import WebKit
 @testable import Nerda
+import MediaCheck
 
 /// What a test bed page plays, all of it made as the test runs.
 enum BedMedia: Sendable, Hashable {

@@ -1,5 +1,6 @@
 import Testing
 @testable import Nerda
+import MediaCheck
 
 /// A pause WebKit made later than its media time says (`MediaPage.Paused.late`),
 /// over the timeline of the one a full run failed on (#202's, 2026-11-27):

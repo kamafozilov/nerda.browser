@@ -845,6 +845,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // Started hidden and never opened: no tabs of the owner's, and no one to ask.
         if HiddenStart.shared?.isHidden == true { return .terminateNow }
+        // A lab run's (Lab) quits when the run says, asking no one: its tabs are the run's.
+        if Lab.isOn { return .terminateNow }
         // With no tabs in any window, a profile's or incognito, there is nothing to lose.
         let browsers = NSApp.windows.compactMap { ($0 as? BrowserWindow)?.browser }
         let hasWork = browsers.contains {

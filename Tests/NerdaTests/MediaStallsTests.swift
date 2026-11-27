@@ -1,5 +1,6 @@
 import Testing
 @testable import Nerda
+import MediaCheck
 
 /// Media time standing still while the media plays (`MediaClock.stalls`),
 /// over timelines made up here: a stall is time lost against the wall

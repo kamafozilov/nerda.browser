@@ -3,6 +3,7 @@ import AppKit
 import Foundation
 import WebKit
 @testable import Nerda
+import MediaCheck
 
 // The kinds of media the bed gives out besides a file (`BedMedia`), each
 // generated as the test runs: a Media Source stream, an HLS stream and a

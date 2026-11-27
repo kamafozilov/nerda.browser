@@ -3,6 +3,7 @@ import Foundation
 import Testing
 import WebKit
 @testable import Nerda
+import MediaCheck
 
 /// A video really floating (the system's Picture in Picture) as the owner
 /// leaves its tab, with Auto Picture-in-Picture on, and landing as they

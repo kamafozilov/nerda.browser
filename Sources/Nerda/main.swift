@@ -676,7 +676,7 @@ final class BrowserWindow: NSWindow {
     /// the way in, the window already says it is), which would open the
     /// next time as a window over the whole display: the one before it stays.
     @objc private func remember() {
-        guard !styleMask.contains(.fullScreen), !isMiniaturized else { return }
+        guard !styleMask.contains(.fullScreen), !isMiniaturized, !Lab.isOn else { return }
         WindowFrame(frame: frame, fills: frame == filled || frame == screen?.visibleFrame).save(for: browser.profile.id)
     }
 
@@ -690,6 +690,37 @@ final class BrowserWindow: NSWindow {
     override func noResponder(for eventSelector: Selector) {
         if eventSelector == #selector(keyDown(with:)) { return }
         super.noResponder(for: eventSelector)
+    }
+
+    // A lab run's window (Lab): off every screen, behind, never key, never
+    // full screen; a page's full screen stays inside it.
+    override var canBecomeKey: Bool { Lab.isOn ? false : super.canBecomeKey }
+    override var canBecomeMain: Bool { Lab.isOn ? false : super.canBecomeMain }
+    override func makeKeyAndOrderFront(_ sender: Any?) { Lab.isOn ? keepAway() : super.makeKeyAndOrderFront(sender) }
+    override func orderFront(_ sender: Any?) { Lab.isOn ? keepAway() : super.orderFront(sender) }
+    override func orderFrontRegardless() { Lab.isOn ? keepAway() : super.orderFrontRegardless() }
+    override func toggleFullScreen(_ sender: Any?) { if !Lab.isOn { super.toggleFullScreen(sender) } }
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        Lab.isOn ? frameRect : super.constrainFrameRect(frameRect, to: screen)
+    }
+
+    private func keepAway() {
+        // No zoom of the window shown, which AppKit flies across the screen;
+        // and out of Mission Control, which would show it among the owner's,
+        // and of every Space switch, as Agent tabs' window is (AgentWindow).
+        animationBehavior = .none
+        collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
+        isExcludedFromWindowsMenu = true
+        Lab.park(self)
+        orderBack(nil)
+    }
+
+    override func order(_ place: NSWindow.OrderingMode, relativeTo otherWindow: Int) {
+        if Lab.isOn {
+            animationBehavior = .none
+            Lab.told("BrowserWindow ordered \(place.rawValue) at \(frame)")
+        }
+        super.order(place, relativeTo: otherWindow)
     }
 }
 
@@ -937,7 +968,8 @@ let launchSession = Launch.stage("session") { Session.reading(Session.file) }
 // owner opens Nerda (HiddenStart), its tabs and windows only then.
 let startsHidden = CommandLine.arguments.contains(AgentLauncher.hiddenArgument)
 let app = NSApplication.shared
-if !startsHidden { app.setActivationPolicy(.regular) }
+// A lab run's Nerda Test (Lab) has no Dock icon and is never in front.
+if Lab.isOn { app.setActivationPolicy(.accessory) } else if !startsHidden { app.setActivationPolicy(.regular) }
 // Tabs are ours; no system tab bar, and no Show Tab Bar items in the menus.
 NSWindow.allowsAutomaticWindowTabbing = false
 SpellCheck.registerDefault()
@@ -949,7 +981,8 @@ Launch.stage("history") { History.shared.load(from: History.file, waiting: false
 // Before the tabs: those of bookmarks are told by them.
 Launch.stage("bookmarks") { Bookmarks.shared.load(from: Bookmarks.file) }
 Favicons.shared.folder = Favicons.folder
-if !startsHidden {
+// A lab run starts with no tabs of a run before, and keeps none for the next.
+if !startsHidden, !Lab.isOn {
     Launch.stage("restore") {
         browser.restore(launchSession(), from: Session.file)
         // Read off the main thread, so the tabs' icons are there with the window.
@@ -984,6 +1017,7 @@ Windows.regular = window
 /// owner opens it.
 func showWindows() {
     window.makeKeyAndOrderFront(nil)
+    if Lab.isOn { return Lab.start(browser) }
     // A blank tab has no page to wait for: the window is the launch.
     Launch.watch(window, waitingForPage: browser.selected.map { !$0.isBlank } ?? false)
     Launch.stage("other windows") {

@@ -1,6 +1,7 @@
 import AVFoundation
 import SoundCheck
 import Testing
+import MediaCheck
 
 /// The comparison of a recording with the sweep it should have played
 /// (`SoundComparison`), fed with made-up recordings: the sweep with sound

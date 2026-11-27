@@ -4,6 +4,7 @@ import Observation
 import Testing
 import WebKit
 @testable import Nerda
+import MediaCheck
 
 /// Where the floating video ends up follows where the owner is, however
 /// quickly they move: really floating in the media test bed's hosted window,

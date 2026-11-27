@@ -5,28 +5,28 @@ import UniformTypeIdentifiers
 /// A generated movie cut in fragmented MP4 (CMAF) segments, as a stream is
 /// given out: what a Media Source page appends, and what an HLS playlist
 /// lists. Picture and sound are a `GeneratedMovie`'s, muxed in each segment.
-struct GeneratedSegments: Sendable {
-    struct Segment: Sendable {
-        var data: Data
+public struct GeneratedSegments: Sendable {
+    public struct Segment: Sendable {
+        public var data: Data
         /// Where it starts in media time, and how long it lasts, in seconds.
-        var start: Double
-        var duration: Double
+        public var start: Double
+        public var duration: Double
     }
 
     /// What a player reads first: the tracks and their formats (`ftyp`, `moov`).
-    var initialization: Data
-    var media: [Segment]
+    public var initialization: Data
+    public var media: [Segment]
     /// The codecs as a Media Source type gives them, read from the
     /// initialization segment: `avc1.42C01E,mp4a.40.2`.
-    var codecs: String
+    public var codecs: String
 
-    var duration: Double { media.map(\.duration).reduce(0, +) }
+    public var duration: Double { media.map(\.duration).reduce(0, +) }
 }
 
 extension GeneratedMovie {
     /// The movie of `seconds` in segments of `interval` seconds each, a key
     /// frame starting each. Made on a queue of its own, as `mp4` is.
-    static func segments(seconds: Double, sound: GeneratedSound, every interval: Double = 1) async throws -> GeneratedSegments {
+    public static func segments(seconds: Double, sound: GeneratedSound, every interval: Double = 1) async throws -> GeneratedSegments {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue(label: "GeneratedMovie").async {
                 continuation.resume(with: Result { try writeSegments(seconds: seconds, sound: sound, every: interval) })

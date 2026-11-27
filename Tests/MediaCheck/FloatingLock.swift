@@ -13,16 +13,16 @@ import Foundation
 /// tests of one run apart as it does two runs, and goes with the process
 /// should a run be killed holding it. Waited for off the main thread,
 /// which goes on meanwhile.
-final class FloatingLock: Sendable {
+public final class FloatingLock: Sendable {
     /// The same for every run and every worktree on this Mac.
-    static let path = "/tmp/dev.nerda.tests.floating.lock"
+    public static let path = "/tmp/dev.nerda.tests.floating.lock"
 
     private let descriptor: Int32
 
     private init(descriptor: Int32) { self.descriptor = descriptor }
 
     /// The lock, once no other holds it.
-    static func take(at path: String = path) async throws -> FloatingLock {
+    public static func take(at path: String = path) async throws -> FloatingLock {
         let descriptor = try open(path)
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             DispatchQueue.global().async {
@@ -34,7 +34,7 @@ final class FloatingLock: Sendable {
     }
 
     /// The lock if nobody holds it now, else nil.
-    static func taken(at path: String = path) throws -> FloatingLock? {
+    public static func taken(at path: String = path) throws -> FloatingLock? {
         let descriptor = try open(path)
         guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
             close(descriptor)
@@ -50,7 +50,7 @@ final class FloatingLock: Sendable {
     }
 
     /// Let go of, for the next to float.
-    func release() {
+    public func release() {
         flock(descriptor, LOCK_UN)
         close(descriptor)
     }

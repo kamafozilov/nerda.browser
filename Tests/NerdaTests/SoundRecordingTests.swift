@@ -2,6 +2,7 @@ import Foundation
 import SoundCheck
 import Testing
 @testable import Nerda
+import MediaCheck
 
 /// Recording the sound a page played. Never part of a plain `swift test`:
 /// only what decides whether a recording may be made runs there. The

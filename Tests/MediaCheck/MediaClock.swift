@@ -5,48 +5,73 @@ import Foundation
 /// page (`MediaPage.clock(around:)` reads them), so how late Nerda asked
 /// for them never enters the numbers. Media time jumps when it moves more
 /// than the wall clock let it, or goes back.
-struct MediaClock: Sendable {
+public struct MediaClock: Sendable {
     /// The clock at one moment of the page: `wall` and `media` in seconds.
-    struct Sample: Sendable, Equatable, Decodable {
-        var wall: Double
-        var media: Double
-        var paused: Bool
-        var rate: Double
+    public struct Sample: Sendable, Equatable, Codable {
+        public var wall: Double
+        public var media: Double
+        public var paused: Bool
+        public var rate: Double
         /// What took it: a media event of the element's (`pause`, `seeked`,
         /// `timeupdate`…) or the page's own ticking (`tick`).
-        var event: String = "tick"
+        public var event: String = "tick"
+
+        public init(wall: Double, media: Double, paused: Bool, rate: Double, event: String = "tick") {
+            self.wall = wall
+            self.media = media
+            self.paused = paused
+            self.rate = rate
+            self.event = event
+        }
     }
 
     /// An action done to the page, by name, at its wall time: the bed's own
     /// (`pause`, `play`, `seek`) or a test's.
-    struct Mark: Sendable, Equatable, Decodable {
-        var wall: Double
-        var name: String
+    public struct Mark: Sendable, Equatable, Codable {
+        public var wall: Double
+        public var name: String
+
+        public init(wall: Double, name: String) {
+            self.wall = wall
+            self.name = name
+        }
     }
 
     /// Media time moving where the wall clock didn't let it: `by` seconds,
     /// forward when positive, back when negative, between the samples at
     /// `wall` and the one before; `after` is the last action marked by then.
-    struct Jump: Sendable, Equatable, CustomStringConvertible {
-        var wall: Double
-        var media: Double
-        var by: Double
-        var after: String?
+    public struct Jump: Sendable, Equatable, CustomStringConvertible {
+        public var wall: Double
+        public var media: Double
+        public var by: Double
+        public var after: String?
 
-        var description: String {
+        public init(wall: Double, media: Double, by: Double, after: String?) {
+            self.wall = wall
+            self.media = media
+            self.by = by
+            self.after = after
+        }
+
+        public var description: String {
             String(format: "%+.3f s at media %.3f s%@", by, media, after.map { ", after \($0)" } ?? "")
         }
     }
 
-    var samples: [Sample]
-    var marks: [Mark] = []
+    public var samples: [Sample]
+    public var marks: [Mark] = []
+
+    public init(samples: [Sample], marks: [Mark] = []) {
+        self.samples = samples
+        self.marks = marks
+    }
 
     /// How far media time may stray before it counts as a jump. Measured on
     /// this Mac (2026-11-27), a clean pause and play of a video file strayed
     /// 27 ms at most in 120 rounds, alone and in two full runs side by side:
     /// the step after WebKit's late report of a start, less what the wall
     /// clock let it go since the last time known.
-    static let tolerance = 0.05
+    public static let tolerance = 0.05
 
     /// Every jump of more than `tolerance` seconds either way.
     ///
@@ -84,7 +109,7 @@ struct MediaClock: Sendable {
     /// and neither is a guess.
     ///
     /// After a jump, media is measured from where it went.
-    func jumps(over tolerance: Double) -> [Jump] {
+    public func jumps(over tolerance: Double) -> [Jump] {
         guard let first = samples.first else { return [] }
         // `allowed`: the media time the wall clock let pass since the first
         // sample; `known`: the last time known, and `allowed` as it was then;
@@ -115,7 +140,7 @@ struct MediaClock: Sendable {
 
     /// Every sample and mark, one a line, wall time in ms from the first
     /// mark: what a failing test shows, so its jumps can be judged after.
-    var record: String {
+    public var record: String {
         let zero = marks.first?.wall ?? samples.first?.wall ?? 0
         let lines = samples.map { (wall: $0.wall, line: String(format: "%+8.1f ms  media %.6f  %@ %@", ($0.wall - zero) * 1000, $0.media, $0.paused ? "paused" : "      ", $0.event)) }
             + marks.map { (wall: $0.wall, line: String(format: "%+8.1f ms  mark %@", ($0.wall - zero) * 1000, $0.name)) }
@@ -125,5 +150,5 @@ struct MediaClock: Sendable {
     /// How far WebKit's estimate may have run on when it takes it back, in
     /// media seconds at speed 1: no further than WebKit was measured late
     /// on a start (100–250 ms), the blind spot this clock has anyway.
-    static let estimateRunsOn = 0.25
+    public static let estimateRunsOn = 0.25
 }

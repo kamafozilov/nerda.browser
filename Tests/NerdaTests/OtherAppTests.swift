@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Testing
 @testable import Nerda
+import MediaCheck
 
 /// Leaving Nerda for another app with "Also when switching to another app"
 /// on: the video floats once its window is hidden or at least half covered,
