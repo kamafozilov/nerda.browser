@@ -145,6 +145,17 @@ struct KeptInSightTests {
         #expect(setup.browser.inSight === setup.b)
     }
 
+    /// A video floating already (by the page's own button, or still on its
+    /// way back in) gets no new word from WebKit: the new page shows at once.
+    @Test func aVideoFloatingAlreadyKeepsNothing() throws {
+        var setup: Setup!
+        setup = try self.setup { $0 === setup.a }
+        defer { setup.close() }
+        setup.webKitSays(setup.a, floating: true)
+        setup.browser.select(setup.b.id)
+        #expect(setup.browser.inSight === setup.b)
+    }
+
     /// The tab switch is timed to the new page shown, the floating as a
     /// kind of its own; while the page left is kept, no switch is timed.
     @Test func theSwitchIsTimedWhenTheNewPageShows() async throws {

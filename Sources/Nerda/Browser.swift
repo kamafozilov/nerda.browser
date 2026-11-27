@@ -58,7 +58,8 @@ final class Browser: NSObject {
                 // A muted tab's video has no sound to keep hearing.
                 if let left = tabs.first(where: { $0.id == oldValue && !$0.isMuted }) {
                     float(left)
-                    if keptInSight == nil, left === shownBefore, floats(leaving: left) { keepInSight(left) }
+                    // Floating already, it gets no word from WebKit to wait for.
+                    if keptInSight == nil, left === shownBefore, !left.isFloating, floats(leaving: left) { keepInSight(left) }
                 }
                 if let selected { land(selected) }
             }
