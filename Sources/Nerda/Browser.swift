@@ -286,8 +286,9 @@ final class Browser: NSObject {
         sessionTimer?.invalidate()
     }
 
-    /// Tabs out of sight at least this long, and not busy (playing, on a call)
-    /// nor floating their video, paused there or not, sleep; of those, only the ones taking more than `size`, if given.
+    /// Tabs out of sight at least this long, not busy (playing, on a call)
+    /// and not floating their video, paused there or not, sleep; of those,
+    /// only the ones taking more than `size`, if given.
     /// Pinned ones only with `pinsToo`: being always ready is what they are for.
     /// With `sparingRevisited`, not one gone to more than `revisited` times.
     func sleepIdleTabs(unseenFor age: TimeInterval, pinsToo: Bool = false, over size: UInt64 = 0,
