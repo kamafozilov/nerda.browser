@@ -195,7 +195,7 @@ struct HiddenPagesTests {
         LowPowerMode.force(true, for: browser.dataStore)
         LowPowerMode.changed()
         let on = Date()
-        try await waitFor("Paused", timeout: .seconds(10)) { server.longestQuiet(since: on) >= Self.paused }
+        try await waitFor("Paused, \(states)", timeout: .seconds(10)) { server.longestQuiet(since: on) >= Self.paused }
         #expect(try isSuspended(page), "\(states)")
 
         LowPowerMode.force(false, for: browser.dataStore)
