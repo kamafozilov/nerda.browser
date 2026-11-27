@@ -63,9 +63,27 @@ struct MediaActionsTests {
     ///   always on AVPlayer, now and then in Media Source (`seek`).
     /// - Just after a change of speed, the picture of a Media Source stream
     ///   can be up to 0.15 s behind its media time, for under a second.
+    /// - Paused, media time can stand ahead of the picture on show, WebKit's
+    ///   estimate run on to its cap, and played again, media goes on from
+    ///   the picture: a jump back to the frame that was on show (`still`;
+    ///   measured by #161 with the page busy 70 ms in every 100).
     private func expectSmooth(_ clock: MediaClock, _ picture: MediaPage.Picture?, _ kind: Kind, speedEveryTime: Bool = false,
-                              seek: (wall: Double, everyTime: Bool)? = nil, sourceLocation: SourceLocation = #_sourceLocation) {
-        let jumps = clock.jumps(over: MediaClock.tolerance), stalls = clock.stalls(over: MediaClock.tolerance)
+                              seek: (wall: Double, everyTime: Bool)? = nil, still: MediaPage.Still? = nil,
+                              sourceLocation: SourceLocation = #_sourceLocation) {
+        let stalls = clock.stalls(over: MediaClock.tolerance)
+        var jumps = clock.jumps(over: MediaClock.tolerance)
+        // Back to the frame that was on show at the pause, from an estimate ahead of it.
+        let frame = 1 / Double(GeneratedMovie.framesPerSecond)
+        let toStill = jumps.filter { jump in
+            guard let still, let ahead = still.ahead, ahead > 2 * frame, jump.by < 0, jump.after == "play" else { return false }
+            return abs(jump.media + jump.by - (still.current - ahead)) <= 2 * frame
+        }
+        jumps.removeAll { toStill.contains($0) }
+        if !toStill.isEmpty {
+            withKnownIssue("WebKit's picture behind media time at the pause", isIntermittent: true) {
+                Issue.record("\(toStill), \(String(describing: still))", sourceLocation: sourceLocation)
+            }
+        }
         let speeds = clock.marks.filter { $0.name.hasPrefix("speed") || $0.name.hasPrefix("nudge") }
         let atSpeed = { (wall: Double) in speeds.contains { wall >= $0.wall - 0.05 && wall <= $0.wall + 0.6 } }
         let afterSeek = { (wall: Double) in seek.map { wall >= $0.wall && wall <= $0.wall + 1 } ?? false }
@@ -103,11 +121,26 @@ struct MediaActionsTests {
     /// change of speed, in a bare `WKWebView` as in Nerda (measured
     /// 2026-11-27: 100–143 ms, back within two frames a second later).
     static let behindAfterSpeed = 0.2
+    /// How far behind media time the picture has been seen paused.
+    static let behindPaused = 0.3
 
     @Test(arguments: Kind.allCases)
     func pausingASecondAndPlayingCarriesOnWhereItStopped(_ kind: Kind) async throws {
-        let (clock, picture) = try await around(kind) { _, page in try await page.pause(for: 1) }
-        expectSmooth(clock, picture, kind)
+        var still: MediaPage.Still?
+        let (clock, picture) = try await around(kind) { _, page in still = try await page.pause(for: 1) }
+        // Paused, the picture on show is the media time's.
+        let ahead = try #require(still?.ahead, "The picture couldn't be read paused: \(String(describing: still))")
+        // Behind it as WebKit's picture is, by #161's estimate run ahead (0.1 s),
+        // or just after a change of speed on Media Source (live paused at
+        // 148–163 ms, measured 2026-11-27, `behindAfterSpeed`).
+        if ahead > Self.inStep, ahead <= Self.behindPaused {
+            withKnownIssue("WebKit's picture behind media time at the pause", isIntermittent: true) {
+                Issue.record("\(String(describing: still))")
+            }
+        } else {
+            #expect(abs(ahead) <= Self.inStep, "Picture and media time apart at the pause: \(String(describing: still))")
+        }
+        expectSmooth(clock, picture, kind, still: still)
     }
 
     /// Jumps once, to where it was asked to, and plays on from there.

@@ -84,12 +84,55 @@ extension MediaPage {
         try await waitFor("The page's clock never reached \(until) s", timeout: .seconds(seconds + 6)) { try await now() >= until }
     }
 
-    /// Pauses, stays paused `seconds` by the page's clock, and plays again.
-    func pause(for seconds: Double) async throws {
+    /// Pauses, stays paused `seconds` by the page's clock, and plays again;
+    /// answers the picture as it stood paused.
+    @discardableResult
+    func pause(for seconds: Double) async throws -> Still {
         try await pause()
+        let still = try await still()
         try await hold(seconds)
         try await play()
+        return still
     }
+
+    /// The frame on show and the media time, read together while paused,
+    /// when no frame comes for `picture()` to read.
+    struct Still: Decodable, CustomStringConvertible {
+        var frame: Int?
+        var current: Double
+
+        /// How far media time is ahead of the picture, in seconds.
+        var ahead: Double? { frame.map { current - Double($0) / Double(GeneratedMovie.framesPerSecond) } }
+
+        var description: String {
+            String(format: "frame %@ on show paused at %.3f s", frame.map(String.init) ?? "unread", current)
+        }
+    }
+
+    func still() async throws -> Still {
+        try await read("({ frame: \(Self.frameOnShow), current: media.currentTime })")
+    }
+
+    /// A script expression: the number the frame on show carries, drawn to
+    /// a canvas (`GeneratedMovie`'s squares), or null when it can't be read.
+    private static let frameOnShow = """
+        (() => {
+            const canvas = document.createElement('canvas');
+            canvas.width = \(GeneratedMovie.width);
+            canvas.height = \(GeneratedMovie.height);
+            const context = canvas.getContext('2d', { willReadFrequently: true });
+            context.drawImage(media, 0, 0, canvas.width, canvas.height);
+            const square = \(GeneratedMovie.frameSquare);
+            const row = context.getImageData(0, square / 2, \(GeneratedMovie.frameBits) * square, 1).data;
+            let frame = 0, grey = 0;
+            for (let bit = 0; bit < \(GeneratedMovie.frameBits); bit += 1) {
+                const value = row[(bit * square + square / 2) * 4 + 1];
+                if (value > 192) frame |= 1 << bit;
+                else if (value > 64) grey += 1;
+            }
+            return grey ? null : frame;
+        })()
+        """
 
     /// Plays at `rate` until `seconds` of media have played, then at 1
     /// again, each change marked `speed` and the rate.
@@ -132,21 +175,8 @@ extension MediaPage {
     func picture() async throws -> Picture {
         try await read("""
             await new Promise(resolve => media.requestVideoFrameCallback((when, shown) => {
-                const canvas = document.createElement('canvas');
-                canvas.width = \(GeneratedMovie.width);
-                canvas.height = \(GeneratedMovie.height);
-                const context = canvas.getContext('2d', { willReadFrequently: true });
-                context.drawImage(media, 0, 0, canvas.width, canvas.height);
-                const square = \(GeneratedMovie.frameSquare);
-                const row = context.getImageData(0, square / 2, \(GeneratedMovie.frameBits) * square, 1).data;
-                let frame = 0, grey = 0;
-                for (let bit = 0; bit < \(GeneratedMovie.frameBits); bit += 1) {
-                    const value = row[(bit * square + square / 2) * 4 + 1];
-                    if (value > 192) frame |= 1 << bit;
-                    else if (value > 64) grey += 1;
-                }
                 resolve({
-                    frame: grey ? null : frame, shown: shown.mediaTime, current: media.currentTime,
+                    frame: \(Self.frameOnShow), shown: shown.mediaTime, current: media.currentTime,
                     late: (late => late >= 0 && late < 1 ? late : 0)((performance.now() - shown.expectedDisplayTime) / 1000),
                     rate: media.playbackRate,
                 });
