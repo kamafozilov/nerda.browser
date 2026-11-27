@@ -153,7 +153,7 @@ final class MediaTestBed {
     func serve(_ media: BedMedia, as path: String) async throws -> MediaPage.Source {
         switch media {
         case .file(let seconds, let sound):
-            let movie = try await GeneratedMovie.mp4(seconds: seconds, sound: sound)
+            let movie = try await GeneratedMovie.cachedMP4(seconds: seconds, sound: sound)
             return .src(try await server.serve("\(path).mp4", movie, type: "video/mp4"))
         case .mediaSource(let seconds, let sound):
             let movie = try await GeneratedMovie.cachedSegments(seconds: seconds, sound: sound)

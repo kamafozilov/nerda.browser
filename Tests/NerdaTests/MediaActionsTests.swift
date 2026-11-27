@@ -32,15 +32,24 @@ struct MediaActionsTests {
     /// The clock around `action` on a page playing `kind`, from a second
     /// into the media (a start has stalls of its own), for live once its
     /// page has nudged its speed and Nerda's handling (`LiveRate`) is at
-    /// work; and the picture after.
+    /// work; and the picture after. `action` is given the bed, the page,
+    /// and for live how many nudges the page had made as the clock started.
+    ///
+    /// Live from where `nudged()` returns, as the page comes back to 1 at
+    /// the end of its second round (some 13 s in), not the next time it
+    /// does: started at the end of its first (7–9 s in), WebKit held media
+    /// 70–125 ms just after it played again at the wake (both live kinds,
+    /// in the one run started there) and as the tab was shown again (both,
+    /// in 1 run of 5), measured 2026-11-27.
     private func around(_ kind: Kind, alone: Bool = false,
-                        _ action: (MediaTestBed, MediaPage) async throws -> Void) async throws -> (MediaClock, MediaPage.Picture) {
+                        _ action: (MediaTestBed, MediaPage, _ nudges: Int) async throws -> Void) async throws -> (MediaClock, MediaPage.Picture) {
         let bed = try await MediaTestBed(liveRate: kind.liveRate, alone: alone)
         defer { bed.close() }
         let page = try await bed.play(kind.media)
         try await page.played(beyond: 1, "before the check")
         if kind.isLive { try await page.nudged() }
-        var clock = try await page.clock(around: { try await action(bed, page) })
+        let nudges: Int = kind.isLive ? try await page.read("bed.live.nudges.length") : 0
+        var clock = try await page.clock(around: { try await action(bed, page, nudges) })
         // A nudge just before the clock starts can hold the media within it.
         if kind.isLive, let first = clock.samples.first?.wall {
             let nudges: [MediaClock.Mark] = try await page.read("bed.marks.filter(mark => mark.name.startsWith('nudge'))")
@@ -135,7 +144,7 @@ struct MediaActionsTests {
     @Test(arguments: Kind.allCases)
     func pausingASecondAndPlayingCarriesOnWhereItStopped(_ kind: Kind) async throws {
         var still: MediaPage.Still?
-        let (clock, picture) = try await around(kind) { _, page in still = try await page.pause(for: 1) }
+        let (clock, picture) = try await around(kind) { _, page, _ in still = try await page.pause(for: 1) }
         // Paused, the picture on show is the media time's.
         let ahead = try #require(still?.ahead, "The picture couldn't be read paused: \(String(describing: still))")
         // Behind it as WebKit's picture is, by #161's estimate run ahead (0.1 s),
@@ -161,7 +170,7 @@ struct MediaActionsTests {
         // Live seeks back, within what it has; the others on.
         let by = kind.isLive ? -1.0 : 3.0
         var target = 0.0
-        let (clock, picture) = try await around(kind) { _, page in
+        let (clock, picture) = try await around(kind) { _, page, _ in
             target = try await page.state().media + by
             try await page.seek(to: target)
         }
@@ -176,11 +185,13 @@ struct MediaActionsTests {
     }
 
     /// At 1.5 for half a second, then 1 again; live changes its own speed,
-    /// off 1 and back, as it catches up with its edge.
+    /// off 1 and back, as it catches up with its edge, both within the
+    /// clock: the clock starts as it comes back to 1, so it goes off 1
+    /// again at once, while the clock reads its first quarter second.
     @Test(arguments: Kind.allCases)
     func changingSpeedKeepsPlaying(_ kind: Kind) async throws {
-        let (clock, picture) = try await around(kind) { _, page in
-            if kind.isLive { try await page.nudged() } else { try await page.changeSpeed(to: 1.5) }
+        let (clock, picture) = try await around(kind) { _, page, nudges in
+            if kind.isLive { try await page.nudged(since: nudges) } else { try await page.changeSpeed(to: 1.5) }
         }
         expectSmooth(clock, picture, kind, speedEveryTime: true)
     }
@@ -188,7 +199,7 @@ struct MediaActionsTests {
     @Test(arguments: Kind.allCases)
     func fullScreenInAndOutKeepsPlaying(_ kind: Kind) async throws {
         var visible = "", element = "", asks = 0, windowFullScreen = true
-        let (clock, picture) = try await around(kind) { bed, page in
+        let (clock, picture) = try await around(kind) { bed, page, _ in
             try await bed.enterFullScreen(page)
             element = try await page.read("document.fullscreenElement?.tagName ?? ''")
             try await waitFor("Nerda never asked the window to go full screen with the page") {
@@ -212,7 +223,7 @@ struct MediaActionsTests {
     /// A second out of sight behind another tab, playing all the while.
     @Test(arguments: Kind.allCases)
     func leavingTheTabAndComingBackKeepsPlaying(_ kind: Kind) async throws {
-        let (clock, picture) = try await around(kind) { bed, page in try await bed.leaveAndReturn(page) }
+        let (clock, picture) = try await around(kind) { bed, page, _ in try await bed.leaveAndReturn(page) }
         expectSmooth(clock, picture, kind)
     }
 
@@ -220,7 +231,7 @@ struct MediaActionsTests {
     /// wakes. Alone: the notice reaches every page of the run.
     @Test(arguments: Kind.allCases)
     func sleepingAndWakingCarriesOnWhereItStopped(_ kind: Kind) async throws {
-        let (clock, picture) = try await around(kind, alone: true) { bed, page in try await bed.sleepAndWake(page) }
+        let (clock, picture) = try await around(kind, alone: true) { bed, page, _ in try await bed.sleepAndWake(page) }
         let sleep = try #require(clock.marks.first { $0.name == "sleep" }).wall
         let wake = try #require(clock.marks.first { $0.name == "wake" }).wall
         #expect(clock.samples.contains { $0.wall > sleep && $0.wall < wake && $0.paused })
