@@ -6,13 +6,20 @@ extension MediaClock {
     /// the media never played, from `wall` (the last sample before it stood
     /// still) at media time `media`; `after` is the last action marked by
     /// then.
-    struct Stall: Sendable, Equatable, CustomStringConvertible {
-        var wall: Double
-        var media: Double
-        var lost: Double
-        var after: String?
+    public struct Stall: Sendable, Equatable, CustomStringConvertible {
+        public var wall: Double
+        public var media: Double
+        public var lost: Double
+        public var after: String?
 
-        var description: String {
+        public init(wall: Double, media: Double, lost: Double, after: String?) {
+            self.wall = wall
+            self.media = media
+            self.lost = lost
+            self.after = after
+        }
+
+        public var description: String {
             String(format: "%.3f s lost at media %.3f s%@", lost, media, after.map { ", after \($0)" } ?? "")
         }
     }
@@ -27,7 +34,7 @@ extension MediaClock {
     /// a start is never instant, and WebKit reports media time late as it
     /// starts (`jumps(over:)`). The wall clock is taken at the slower speed
     /// of each two samples, so changing down is no stall either.
-    func stalls(over tolerance: Double) -> [Stall] {
+    public func stalls(over tolerance: Double) -> [Stall] {
         let look = 0.1
         var stalls: [Stall] = [], index = 1
         while index < samples.count {

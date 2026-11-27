@@ -1,17 +1,21 @@
 import Foundation
 import Network
 import Synchronization
-import Testing
 
 /// Media and its pages served on this Mac for the media test bed, as the
 /// agent tests' pages are (`AgentTestPages`), but with what a player asks
 /// of a server: any content type, parts of a file (`Range`), and answers on
 /// a queue of the server's own, so a test holding the main thread doesn't
 /// hold the media up. Every request is kept, its first line and its range.
-final class MediaServer: Sendable {
-    struct Body: Sendable {
-        var data: Data
-        var type: String
+public final class MediaServer: Sendable {
+    public struct Body: Sendable {
+        public var data: Data
+        public var type: String
+
+        public init(data: Data, type: String) {
+            self.data = data
+            self.type = type
+        }
     }
 
     private let listener: NWListener
@@ -19,7 +23,7 @@ final class MediaServer: Sendable {
     private let routes = Mutex<[String: Body]>([:])
     private let asked = Mutex<[String]>([])
 
-    init() throws {
+    public init() throws {
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -33,27 +37,33 @@ final class MediaServer: Sendable {
     /// Serves `data` as `type` at `path`, and answers its address.
     @discardableResult
     @MainActor
-    func serve(_ path: String, _ data: Data, type: String) async throws -> URL {
+    public func serve(_ path: String, _ data: Data, type: String) async throws -> URL {
         routes.withLock { $0[path] = Body(data: data, type: type) }
         return try await url(path)
     }
 
     @discardableResult
     @MainActor
-    func serve(_ path: String, html: String) async throws -> URL {
+    public func serve(_ path: String, html: String) async throws -> URL {
         try await serve(path, Data(html.utf8), type: "text/html; charset=utf-8")
     }
 
     @MainActor
-    func url(_ path: String = "/") async throws -> URL {
-        try await waitFor("The media server never listened") { listener.port != nil && listener.port != .any }
-        return URL(string: "http://127.0.0.1:\(try #require(listener.port).rawValue)\(path)")!
+    public func url(_ path: String = "/") async throws -> URL {
+        let deadline = ContinuousClock.now + .seconds(6)
+        while listener.port == nil || listener.port == .any {
+            guard ContinuousClock.now < deadline else {
+                throw CocoaError(.fileReadUnknown, userInfo: [NSLocalizedDescriptionKey: "The media server never listened"])
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        return URL(string: "http://127.0.0.1:\(listener.port!.rawValue)\(path)")!
     }
 
     /// The requests so far: `GET /media/movie.mp4 bytes=0-1`.
-    var requests: [String] { asked.withLock { $0 } }
+    public var requests: [String] { asked.withLock { $0 } }
 
-    func stop() { listener.cancel() }
+    public func stop() { listener.cancel() }
 
     /// Reads until the request's head is whole, then answers it.
     private func read(_ connection: NWConnection, _ head: Data) {
@@ -100,7 +110,7 @@ final class MediaServer: Sendable {
 
     /// The first and last byte `bytes=a-b`, `bytes=a-` or `bytes=-n` asks
     /// for, within `count`; nil when it asks for none of them.
-    static func bytes(_ range: String, of count: Int) -> (Int, Int)? {
+    public static func bytes(_ range: String, of count: Int) -> (Int, Int)? {
         guard range.hasPrefix("bytes="), !range.contains(",") else { return nil }
         let ends = range.dropFirst("bytes=".count).split(separator: "-", omittingEmptySubsequences: false).map { Int($0) }
         guard ends.count == 2 else { return nil }

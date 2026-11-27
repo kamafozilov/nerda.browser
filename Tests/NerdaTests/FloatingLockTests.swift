@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import MediaCheck
 
 /// The lock floating tests take (`FloatingLock`) keeps out every other
 /// holder, in this process as in another, until it is let go.

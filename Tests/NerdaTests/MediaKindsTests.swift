@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Nerda
+import MediaCheck
 
 /// The kinds of media the test bed gives out besides a file (`BedMedia`):
 /// a Media Source stream, an HLS stream and a live stream, each made as the

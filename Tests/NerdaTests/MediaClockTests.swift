@@ -1,5 +1,6 @@
 import Testing
 @testable import Nerda
+import MediaCheck
 
 /// The media clock read against the wall clock (`MediaClock`), over
 /// timelines made up here: what counts as media time jumping, which way,

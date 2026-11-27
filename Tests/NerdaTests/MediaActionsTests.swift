@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Nerda
+import MediaCheck
 
 /// Every kind of media the bed gives out, and every action the owner takes
 /// on a video: the page's media clock runs on without a jump or a stall,

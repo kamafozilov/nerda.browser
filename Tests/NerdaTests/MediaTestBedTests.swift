@@ -1,6 +1,7 @@
 import Testing
 import WebKit
 @testable import Nerda
+import MediaCheck
 
 /// The media test bed (`MediaTestBed`): media made as the test runs, served
 /// on this Mac and played in a hosted window, its clock read around an

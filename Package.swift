@@ -25,6 +25,11 @@ let package = Package(
         // system's screen capture and their comparison. Apart from the tests
         // so that a lab run outside `swift test` can record and compare too.
         .target(name: "SoundCheck", path: "Tests/SoundCheck", swiftSettings: approachable),
-        .testTarget(name: "NerdaTests", dependencies: ["Nerda", "TestRun", "SoundCheck"], swiftSettings: approachable),
+        // Media made on this Mac and served from it, a page's media clock
+        // read against its wall clock, and the lock for floating a video:
+        // the media test bed's parts that a lab run outside `swift test`
+        // uses as well.
+        .target(name: "MediaCheck", dependencies: ["SoundCheck"], path: "Tests/MediaCheck", swiftSettings: approachable),
+        .testTarget(name: "NerdaTests", dependencies: ["Nerda", "TestRun", "SoundCheck", "MediaCheck"], swiftSettings: approachable),
     ]
 )

@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Testing
 @testable import Nerda
+import MediaCheck
 
 /// Which window is in front decides where a video goes: the owner leaves a
 /// window's tab as another of Nerda's windows comes forward, or as it goes

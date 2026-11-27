@@ -3,6 +3,7 @@ import Foundation
 import Testing
 import WebKit
 @testable import Nerda
+import MediaCheck
 
 /// Only a video the owner chose floats as they leave its tab, in the media
 /// test bed's hosted window, on media generated as the test runs: what the

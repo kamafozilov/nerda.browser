@@ -4,7 +4,7 @@ import SoundCheck
 
 /// The sound generated media carries, quiet of itself (`level`): a second
 /// guard beside the volume a page plays it at (`MediaTestBed.inaudible`).
-enum GeneratedSound: Sendable, Hashable {
+public enum GeneratedSound: Sendable, Hashable {
     /// A sine at `hertz`.
     case tone(hertz: Double)
     /// Two tones whose pitches tell the media time (`Sweep`), so the sound
@@ -12,10 +12,10 @@ enum GeneratedSound: Sendable, Hashable {
     case sweep
 
     /// The loudest the sound goes, of full scale: −20 dB.
-    static let level = 0.1
+    public static let level = 0.1
 
     /// The sound at `seconds` into the media, from −`level` to `level`.
-    func sample(at seconds: Double) -> Double {
+    public func sample(at seconds: Double) -> Double {
         switch self {
         case .tone(let hertz): Self.level * sin(2 * .pi * hertz * seconds)
         case .sweep: Sweep.sample(at: seconds)
@@ -26,18 +26,18 @@ enum GeneratedSound: Sendable, Hashable {
 /// Media made as a test runs, never checked in and never fetched: a movie
 /// of `seconds` with a picture that tells its frame (`GeneratedMovie.frame`)
 /// and the sound asked for.
-enum GeneratedMovie {
-    static let width = 320, height = 180, framesPerSecond = 30, sampleRate = 48_000
+public enum GeneratedMovie {
+    public static let width = 320, height = 180, framesPerSecond = 30, sampleRate = 48_000
 
     /// The frame number in the picture: 16 squares across the top, 20
     /// points each, white for a 1, black for a 0, the lowest bit first, on
     /// grey. A page can read it back from a canvas to tell which frame shows.
-    static let frameBits = 16, frameSquare = 20
+    public static let frameBits = 16, frameSquare = 20
 
     /// An MP4 (H.264 and AAC) with its index at the front, as a page fetches
     /// one bit by bit. Made on a queue of its own, off the main thread and
     /// off Swift's shared threads, which the writer would otherwise hold.
-    static func mp4(seconds: Double, sound: GeneratedSound) async throws -> Data {
+    public static func mp4(seconds: Double, sound: GeneratedSound) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue(label: "GeneratedMovie").async {
                 continuation.resume(with: Result { try write(seconds: seconds, sound: sound) })
@@ -56,7 +56,7 @@ enum GeneratedMovie {
 
     /// Picture and sound for `seconds` through `writer`, finished, on the
     /// caller's thread; `compression` adds to the picture's settings.
-    static func write(seconds: Double, sound: GeneratedSound, with writer: AVAssetWriter,
+    public static func write(seconds: Double, sound: GeneratedSound, with writer: AVAssetWriter,
                       compression: [String: Any] = [:]) throws {
         var videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height,

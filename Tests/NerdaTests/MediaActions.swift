@@ -3,6 +3,7 @@ import Foundation
 import Testing
 import WebKit
 @testable import Nerda
+import MediaCheck
 
 // What the owner does to a playing video, done to a bed page (`MediaPage`)
 // as Nerda would have it done: pausing for a while, changing speed, full
