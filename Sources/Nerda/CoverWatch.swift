@@ -7,8 +7,9 @@ import AppKit
 /// The window server tells nothing as another app's window is moved over
 /// part of it, so besides the moments it does tell of (another app forward,
 /// an app hidden or shown, another Space, the screens changed, the window
-/// itself hidden or shown), it is read every `every` seconds; only while a
-/// video could float, as reading costs nothing until one can.
+/// itself hidden or shown), it is looked at every `every` seconds too. The
+/// window list is read only while a video could float; otherwise a look
+/// costs nothing.
 @MainActor
 final class CoverWatch {
     private weak var window: NSWindow?
