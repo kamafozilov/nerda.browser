@@ -847,6 +847,7 @@ final class Tab: Identifiable {
     /// until it has something to show, so the ground under it never shows through.
     func pageDidCommit() {
         committed = page?.url
+        Self.followProcess(page)
         // A new document in the page: its frames' videos went with the old one.
         forgetVideos()
         let owners = Self.sameDocument(navigatingForOwner, page?.url)
@@ -1363,24 +1364,66 @@ final class Tab: Identifiable {
     /// WebKit reads how a hidden page runs only as a page joins its process
     /// (macOS 27, and WebKit's source: `WebProcessProxy::addExistingWebPage`):
     /// changed later, a page already open kept what it began with. So each
-    /// process with pages gets one more, made in it and let go at once, and
-    /// reads it again from the pages it has; measured, a hidden page then
-    /// stops within seconds, or runs again.
+    /// process with pages gets one more (`ModePage`), made in it, and reads
+    /// it again from the pages it has; measured, a hidden page then stops
+    /// within seconds, or runs again. One made as the mode goes off is let
+    /// go at once; one made as it comes on is kept, as letting it go would
+    /// wake the process WebKit has just suspended.
     // WebKit SPI: should it go, a page open follows the mode once it is next
     // made (woken) or moves to another site's process.
     private static func reapplyHiddenPolicy(toPagesOf stores: [WKWebsiteDataStore]) {
         guard !stores.isEmpty else { return }
-        let related = NSSelectorFromString("_setRelatedWebView:")
-        var reached = Set<pid_t>()
-        for page in pages.allObjects where stores.contains(where: { $0 === page.configuration.websiteDataStore }) {
+        var processes: [pid_t: [SwipingWebView]] = [:]
+        for case let page as SwipingWebView in pages.allObjects
+        where stores.contains(where: { $0 === page.configuration.websiteDataStore }) {
             // No process (ended, or none started yet): one starts with the mode as it is.
-            guard let pid = Processes.pid(of: page), reached.insert(pid).inserted else { continue }
+            guard let pid = Processes.pid(of: page) else { continue }
+            processes[pid, default: []].append(page)
+        }
+        for (pid, inProcess) in processes {
+            // Any kept from the mode coming on go first, before the process is told.
+            for page in inProcess { page.modePage = nil }
+            guard let told = ModePage(in: inProcess[0], pid: pid) else { return }
+            // Going off, the process is woken anyway: let go at once.
+            if inProcess[0].configuration.preferences.inactiveSchedulingPolicy == .suspend {
+                for page in inProcess { page.modePage = told }
+            }
+        }
+    }
+
+    /// A page of no tab's, made in a page's process so the process reads
+    /// again how its hidden pages run (`reapplyHiddenPolicy`). Let go, it is
+    /// closed, and WebKit wakes a suspended process to close a page in it,
+    /// for up to seconds on a busy Mac: one made as Low Power Mode comes on
+    /// is held by the pages of its process, and goes with the last of them
+    /// to close, sleep or move to another process (`followProcess`), or as
+    /// the mode goes off. It never keeps a process of its own.
+    final class ModePage {
+        /// The process it is in.
+        let pid: pid_t
+        let page: WKWebView
+
+        init?(in page: WKWebView, pid: pid_t) {
             let configuration = page.configuration
-            guard configuration.responds(to: related) else { return }
+            let related = NSSelectorFromString("_setRelatedWebView:")
+            guard configuration.responds(to: related) else { return nil }
             configuration.perform(related, with: page)
             configuration.webExtensionController = nil
-            _ = WKWebView(frame: .zero, configuration: configuration)
+            self.page = WKWebView(frame: .zero, configuration: configuration)
+            self.pid = pid
         }
+    }
+
+    /// A page just committed may be in another process than before (another
+    /// site's, or a new one after its own ended): it lets go of the old
+    /// one's `ModePage`, and holds its new process's, should a page there
+    /// hold one.
+    private static func followProcess(_ page: WKWebView?) {
+        guard let page = page as? SwipingWebView else { return }
+        let pid = Processes.pid(of: page)
+        if page.modePage?.pid != pid { page.modePage = nil }
+        guard page.modePage == nil, let pid else { return }
+        page.modePage = pages.allObjects.lazy.compactMap { ($0 as? SwipingWebView)?.modePage }.first { $0.pid == pid }
     }
 
     /// WebKit's switch for it, one of the flags Safari lists under Develop ›

@@ -189,11 +189,14 @@ struct HiddenPagesTests {
         // A page just loaded runs a while longer whatever the mode.
         try await Task.sleep(for: .seconds(3))
 
+        // Each state WebKit gave the page's process, to tell a page never
+        // suspended from one woken again, should it not be suspended.
+        let states = ProcessStates(of: page)
         LowPowerMode.force(true, for: browser.dataStore)
         LowPowerMode.changed()
         let on = Date()
         try await waitFor("Paused", timeout: .seconds(10)) { server.longestQuiet(since: on) >= Self.paused }
-        #expect(try isSuspended(page))
+        #expect(try isSuspended(page), "\(states)")
 
         LowPowerMode.force(false, for: browser.dataStore)
         LowPowerMode.changed()
@@ -208,7 +211,79 @@ struct HiddenPagesTests {
         }
         #expect(!suspended, "WebKit suspended the page again")
         #expect(tab.webView === page)
-        withExtendedLifetime((browser, inSight)) {}
+        withExtendedLifetime((browser, inSight, states)) {}
+    }
+
+    /// Once WebKit has a hidden page suspended for Low Power Mode, nothing
+    /// of Nerda's wakes it: its process stays suspended, by WebKit's own
+    /// account of each change (`ProcessStates`), until the mode goes off.
+    /// Twice, as the second time comes long after the page's load, which
+    /// WebKit lets run a while: a wake in the first can hide in that. In
+    /// between, the page runs again for seconds, as it does between two
+    /// changes of the Mac's mode: its first answers come in a burst, all it
+    /// missed, and the mode turned on again within that moment would come
+    /// before WebKit has done with turning it off.
+    @Test func lowPowerModeLeavesASuspendedPageAlone() async throws {
+        let server = try StreamServer()
+        defer { server.stop() }
+        let (browser, tab, inSight) = try await listeningTab(server)
+        let states = ProcessStates(of: tab.webView)
+        for cycle in 1...2 {
+            states.clear()
+            LowPowerMode.force(true, for: browser.dataStore)
+            LowPowerMode.changed()
+            let on = Date()
+            try await waitFor("Paused, cycle \(cycle)", timeout: .seconds(10)) {
+                states.suspended && server.longestQuiet(since: on) >= Self.paused
+            }
+            #expect(states.sinceSuspended.allSatisfy { $0 == 3 }, "cycle \(cycle): \(states)")
+
+            LowPowerMode.force(false, for: browser.dataStore)
+            LowPowerMode.changed()
+            let off = Date()
+            try await waitFor("Answering again, cycle \(cycle)") { server.answered(after: off) > 0 }
+            let back = Date()
+            try await waitFor("Two seconds, and twenty events answered again, cycle \(cycle)") {
+                Date().timeIntervalSince(back) >= 2 && server.answered(after: back) >= 20
+            }
+        }
+        withExtendedLifetime((browser, inSight, states)) {}
+    }
+
+    /// How a tab's page leaves its process.
+    enum Leaving: CaseIterable, Sendable { case closing, sleeping, goingToAnotherSite }
+
+    /// What told a process Low Power Mode came on (`Tab.ModePage`), kept so
+    /// as not to wake it, goes once the process has no page of the
+    /// profile's left: its tab closed, asleep, or gone to another site,
+    /// which WebKit gives another process. Kept on, it would keep the
+    /// process for nothing.
+    @Test(arguments: Leaving.allCases)
+    func whatToldAProcessGoesWithItsPages(_ leaving: Leaving) async throws {
+        let pages = try AgentTestPages()
+        defer { pages.stop() }
+        let here = try await pages.serve("/here", "<p>Here</p>")
+        let elsewhere = try await pages.serve("/elsewhere", "<p>Elsewhere</p>", host: "localhost")
+        let browser = browserRunningOutOfSight()
+        let tab = browser.open(here)
+        try await waitFor { !tab.webView.isLoading && tab.pid != nil }
+        let pid = try #require(tab.pid)
+
+        LowPowerMode.force(true, for: browser.dataStore)
+        LowPowerMode.changed()
+        weak var told: WKWebView?
+        autoreleasepool { told = (tab.page as? SwipingWebView)?.modePage?.page }
+        try #require(told != nil, "Nothing kept in the page's process")
+
+        switch leaving {
+        case .closing: browser.close(tab.id)
+        case .sleeping: tab.sleep()
+        case .goingToAnotherSite:
+            tab.webView.load(URLRequest(url: elsewhere))
+            try await waitFor { !tab.webView.isLoading && tab.webView.url == elsewhere }
+            try #require(tab.pid != pid, "WebKit kept the other site in the same process: the test can't tell")
+        }
+        try await waitFor("Still kept after \(leaving)") { told == nil }
     }
 
     /// Low Power Mode reaches every page of a profile out of sight, not
@@ -301,4 +376,40 @@ struct HiddenPagesTests {
         browser.open(URL(string: "about:blank")!)
         #expect(try #require(browser.tabs.last).webView.configuration.preferences.inactiveSchedulingPolicy == .none)
     }
+}
+
+/// Each state WebKit gives a page's process (`_webProcessState`: 0 not
+/// running, 1 in the foreground, 2 in the background, 3 suspended), as
+/// WebKit tells of each change: a wake of a moment, which looking now and
+/// then would miss, is kept. Watching asks nothing of the page.
+@MainActor
+private final class ProcessStates: NSObject {
+    private let page: WKWebView
+    private(set) var states: [Int] = []
+
+    init(of page: WKWebView) {
+        self.page = page
+        super.init()
+        page.addObserver(self, forKeyPath: Self.key, options: [.new], context: nil)
+    }
+
+    isolated deinit { page.removeObserver(self, forKeyPath: Self.key) }
+
+    private static let key = "_webProcessState"
+
+    nonisolated override func observeValue(forKeyPath keyPath: String?, of object: Any?,
+                                           change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
+        let state = change?[.newKey] as? Int ?? -1
+        MainActor.assumeIsolated { states.append(state) }
+    }
+
+    func clear() { states = [] }
+
+    /// Whether WebKit has suspended the process since the last `clear`.
+    var suspended: Bool { states.contains(3) }
+
+    /// Each state from the first suspension on.
+    var sinceSuspended: ArraySlice<Int> { states.drop { $0 != 3 } }
+
+    override var description: String { "states \(states)" }
 }
