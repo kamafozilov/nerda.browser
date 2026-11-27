@@ -31,7 +31,9 @@ struct OtherAppTests {
             let browser = setup.bed.browser
             browser.pictureInPictureSettings.set(forApps, forKey: PictureInPicture.appsKey)
             delegate = AppDelegate(window: setup.bed.window, browser: browser)
-            delegate.frontWindow = { nil }
+            // The bed's window in front, as Nerda is left.
+            delegate.inFront = WindowInFront()
+            delegate.inFront.cameForward(browser)
             delegate.browsers = { [browser] }
             delegate.coverReadEvery = 0.05
             let screen = CGRect(x: 0, y: 0, width: 1000, height: 1000)

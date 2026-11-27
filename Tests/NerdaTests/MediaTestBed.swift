@@ -55,14 +55,16 @@ final class MediaTestBed {
     /// Held while the bed lives (`MediaGate`).
     private let gate: MediaGate.Hold
 
+    /// `browser`: the bed's window's, an incognito one's unless given.
     /// `liveRate`: whether Nerda's live-speed handling (`LiveRate`) is on
-    /// in the bed's pages. `alone`: no other page of the run plays media
-    /// while the bed lives, for what reaches every page of the run (the
-    /// system's sleep notice).
-    init(liveRate: Bool = true, alone: Bool = false) async throws {
+    /// in the bed's pages, set before the browser's store has its first
+    /// page. `alone`: no other page of the run plays media while the bed
+    /// lives, for what reaches every page of the run (the system's sleep
+    /// notice).
+    init(browser: Browser = browserRunningOutOfSight(), liveRate: Bool = true, alone: Bool = false) async throws {
         gate = alone ? await MediaGate.run.alone() : await MediaGate.run.shared()
         server = try MediaServer()
-        browser = browserRunningOutOfSight()
+        self.browser = browser
         LiveRate.force(liveRate, for: browser.dataStore)
         // Never into a space of its own when a page goes full screen (`BedWindow`).
         window = BedWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
