@@ -411,5 +411,5 @@ private final class ProcessStates: NSObject {
     /// Each state from the first suspension on.
     var sinceSuspended: ArraySlice<Int> { states.drop { $0 != 3 } }
 
-    override var description: String { "states \(states)" }
+    override var description: String { "states \(states) of process \(Processes.pid(of: page).map(String.init) ?? "none")" }
 }
