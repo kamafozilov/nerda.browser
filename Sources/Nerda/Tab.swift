@@ -136,12 +136,22 @@ final class Tab: Identifiable {
             if isAsleep != (page == nil) { isAsleep = page == nil }
             if page == nil, playsAudio { playsAudio = false }
             if page == nil, isFloating { isFloating = false }
+            if page == nil { floatingAsked = nil }
         }
     }
     /// Whether the page has a video floating (Picture in Picture), as WebKit
     /// last said (`Browser.webView(_:hasVideoInPictureInPictureDidChange:)`):
     /// never taken from Nerda having asked, which WebKit may ignore.
     var isFloating = false
+    /// Where the owner wants the page's video: floating, as they left the
+    /// tab or Nerda, or in its page, as they came back (`Browser.float`,
+    /// `Browser.land`). Kept beside `isFloating`, WebKit's word, the two
+    /// compared each time WebKit says a change is done.
+    @ObservationIgnored var wantsFloating = false
+    /// The change Nerda asked WebKit for that WebKit hasn't said is done:
+    /// while one is under way WebKit ignores another, so none is asked.
+    /// Goes with the page.
+    @ObservationIgnored var floatingAsked: FloatingAsk?
     /// Whether its page is let go (`sleep`), kept in step with `page` so a
     /// pinned site's icon can show it, where `page` itself isn't watched.
     private(set) var isAsleep = true
@@ -994,6 +1004,8 @@ final class Tab: Identifiable {
         recoloring?.cancel()
         recoloring = nil
         page.stopLoading()
+        // A floating video would float on, with no tab to go back to.
+        page.closeAllMediaPresentations()
         page.setAllMediaPlaybackSuspended(true)
         page.setCameraCaptureState(.none)
         page.setMicrophoneCaptureState(.none)

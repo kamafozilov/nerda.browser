@@ -42,8 +42,9 @@ final class MediaTestBed {
     init() async throws {
         server = try MediaServer()
         browser = browserRunningOutOfSight()
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
-                          styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        // Never into a space of its own when a page goes full screen (`BedWindow`).
+        window = BedWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
+                           styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: BrowserView(browser: browser, window: window))
         window.orderBack(nil)
@@ -106,6 +107,17 @@ final class MediaTestBed {
         server.stop()
         framing?.stop()
     }
+}
+
+/// The bed's window. With a page in full screen Nerda takes its window
+/// full screen too (`BrowserView.matchWindowToPage`), into a space of its
+/// own over the owner's screen: this one only counts the asks, so a test's
+/// full screen is the page's, inside the window, and the window stays put.
+// The same as #162's (`MediaActions.swift`): one of the two goes on merging.
+final class BedWindow: NSWindow {
+    private(set) var fullScreenAsks = 0
+
+    override func toggleFullScreen(_ sender: Any?) { fullScreenAsks += 1 }
 }
 
 /// A bed page in its tab: its one `<video>`, what can be done to it, and its
@@ -184,7 +196,7 @@ final class MediaPage {
     }
 
     /// The JSON `expression` comes to in the page, decoded.
-    private func read<Value: Decodable>(_ expression: String) async throws -> Value {
+    func read<Value: Decodable>(_ expression: String) async throws -> Value {
         let json = try await tab.webView.callAsyncJavaScript("return JSON.stringify(\(expression))", in: frame, contentWorld: .page)
         return try JSONDecoder().decode(Value.self, from: Data(try #require(json as? String).utf8))
     }
