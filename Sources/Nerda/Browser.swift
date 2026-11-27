@@ -1121,7 +1121,7 @@ extension Browser: WKNavigationDelegate {
         // mailto:, tel:, zoommtg: and the like belong to other apps, and only
         // with a yes: a page could otherwise start any app it names.
         if !Self.pageSchemes.contains(url.scheme?.lowercased() ?? "") {
-            guard action.targetFrame?.isMainFrame ?? true,
+            guard action.targetFrame?.isMainFrame ?? true, !Lab.isOn,
                   let app = NSWorkspace.shared.urlForApplication(toOpen: url) else { return .cancel }
             let name = FileManager.default.displayName(atPath: app.path).replacing(".app", with: "")
             let answer = await ask("Open “\(name)”?", "This page wants to open \(name).", over: webView,

@@ -47,10 +47,13 @@ public struct LabRun: Codable, Equatable, Sendable {
     public struct Safety: Codable, Equatable, Sendable {
         public var checks: Int
         public var broken: [String]
+        /// How the pages were found to play unheard, before any site.
+        public var quiet: String?
 
-        public init(checks: Int, broken: [String]) {
+        public init(checks: Int, broken: [String], quiet: String? = nil) {
             self.checks = checks
             self.broken = broken
+            self.quiet = quiet
         }
     }
 
@@ -166,6 +169,8 @@ public struct LabRun: Codable, Equatable, Sendable {
         public var skipped: String?
         /// Begun and not finished, and what went wrong.
         public var failed: String?
+        /// The sound recorded across it, a WAV file beside the result.
+        public var recording: String?
 
         public init(action: ActionName, media: Media, sound: Sound, droppedFrames: Int?, floating: Floating? = nil) {
             self.action = action
@@ -318,7 +323,10 @@ public struct LabRun: Codable, Equatable, Sendable {
             "",
             safety.broken.isEmpty
                 ? "Nothing came forward: \(safety.checks) checks of the app in front and Nerda Test's windows on screen."
-                : "**Stopped: something came forward.** " + safety.broken.joined(separator: "; "),
+                : "**Not as it should have been:** " + safety.broken.joined(separator: "; "),
+        ]
+        if let quiet = safety.quiet { lines += ["", quiet] }
+        lines += [
             "",
             "| Site | Action | Media time | Sound lost | Frames dropped | Floating |",
             "|---|---|---|---|---|---|",

@@ -693,6 +693,7 @@ final class Tab: Identifiable {
         if applyHiddenPolicy(configuration) { reapplyHiddenPolicy(toPagesOf: [configuration.websiteDataStore]) }
         _ = powerWatch
         let page = SwipingWebView(frame: .zero, configuration: configuration)
+        Lab.prepare(page)
         pages.add(page)
         return page
     }
@@ -1220,6 +1221,7 @@ final class Tab: Identifiable {
         controller.add(pageErrorCounts, contentWorld: .defaultClient, name: "pageError")
         controller.add(Translator.messages, contentWorld: .defaultClient, name: "translate")
         controller.addUserScript(JSONViewer.script)
+        if Lab.isOn { controller.addUserScript(Lab.webAudio) }
         contents.append(Contents(store: dataStore, controller: controller))
         return controller
     }
@@ -1247,6 +1249,9 @@ final class Tab: Identifiable {
         // WebKit's full screen, under our own (see Fullscreen). Pages a page
         // opens (popups) are given this configuration's, script and all.
         configuration.preferences.isElementFullscreenEnabled = true
+        // A lab run's pages (Lab) have Nerda's own page full screen only:
+        // WebKit's would put a window of its own over the owner's screen.
+        if Lab.isOn { configuration.preferences.isElementFullscreenEnabled = false }
         configuration.setURLSchemeHandler(ViewSource.handler, forURLScheme: ViewSource.scheme)
         configuration.setURLSchemeHandler(MediaCache.shared, forURLScheme: MediaCache.scheme)
         // WebKit samples the page's top edge only when asked, allowing this
