@@ -240,6 +240,9 @@ final class Browser: NSObject {
     private(set) var keptInSight: Tab?
     /// The longest a page left stays in sight waiting for its video to float.
     static let floatingWait: TimeInterval = 0.3
+    /// This window's: `floatingWait`, or a test's own that gives WebKit's
+    /// word itself, on a clock of its own, and wants no wait to end first.
+    @ObservationIgnored var floatingWaitHere = Browser.floatingWait
     /// Bumped on every keep: a wait's end that comes after is for a keep gone.
     @ObservationIgnored private var keeping = 0
     /// The record whose tab switch waits for the new page, while one does.
@@ -264,7 +267,7 @@ final class Browser: NSObject {
         if recorder.hold() { holding = recorder }
         keeping += 1
         let turn = keeping, holding = holding
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.floatingWait) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + floatingWaitHere) { [weak self] in
             // The window gone meanwhile: the record goes on all the same.
             guard let self else { holding?.release(); return }
             if self.keeping == turn { self.showSelected() }

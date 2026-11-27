@@ -151,6 +151,9 @@ struct KeptInSightTests {
         var setup: Setup!
         setup = try self.setup { $0 === setup.a }
         defer { setup.close() }
+        // Only WebKit's word ends the keep here: the main loop may be slow
+        // to sleep three times on a busy Mac.
+        setup.browser.floatingWaitHere = 3600
         // The opening and selecting of the setup settled first.
         try await waitFor("The setup never settled") { setup.recorder.timings().count >= 2 }
         let before = setup.timed(.tabSwitch).count

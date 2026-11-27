@@ -79,6 +79,9 @@ struct FloatingTests {
         settings.set(true, forKey: PictureInPicture.key)
         bed.browser.pictureInPictureSettings = settings
         let page = watched.tab.webView, next = other.tab.webView
+        // WebKit's word, not the wait, ends the keep here (the wait has a
+        // test of its own): a busy Mac can be slower to float than 300 ms.
+        bed.browser.floatingWaitHere = 3600
         // How the window stood the moment WebKit said the video floats.
         var atTheWord: (inSight: Bool, shown: Bool, nextShown: Bool, frameKept: Bool)?
         withObservationTracking { _ = watched.tab.isFloating } onChange: {
