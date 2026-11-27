@@ -33,7 +33,7 @@ let package = Package(
         // The lab run on the real sites (`./lab.sh`): its result file and
         // what judges it, apart so the tests can feed it made-up numbers,
         // and the command that drives Nerda Test to make them.
-        .target(name: "Lab", path: "Tests/Lab", swiftSettings: approachable),
+        .target(name: "Lab", dependencies: ["SoundCheck"], path: "Tests/Lab", swiftSettings: approachable),
         .executableTarget(name: "NerdaLab", dependencies: ["Lab", "MediaCheck", "SoundCheck"], path: "Tests/NerdaLab",
                           swiftSettings: approachable),
         .testTarget(name: "NerdaTests", dependencies: ["Nerda", "TestRun", "SoundCheck", "MediaCheck", "Lab"], swiftSettings: approachable),

@@ -143,7 +143,8 @@ enum Probe {
         await lab.until('paused', () => v.paused, 5);
         await lab.hold(1);
         lab.mark('play');
-        await v.play();
+        // A live player may load its stream anew on a play after a pause (Twitch's), aborting this one.
+        try { await v.play(); } catch (error) { if (error.name !== 'AbortError') throw error; lab.mark('play aborted by the site'); }
         return true;
         """#)
 

@@ -251,6 +251,8 @@ struct Visit {
             switch action {
             case .pauseAndPlay:
                 _ = try await run(Probe.pauseAndPlay, frame: frame)
+                // The site's player may have put a new stream in another element.
+                _ = try await run(Probe.watch, frame: frame)
             case .seek:
                 let said = try await run(Probe.seek, frame: frame) as? String ?? "{}"
                 let answer = try JSONSerialization.jsonObject(with: Data(said.utf8)) as? [String: Any] ?? [:]
@@ -351,26 +353,15 @@ struct Visit {
 
     private func sound(_ samples: [Float]?, _ recorder: SoundRecorder?, _ action: LabRun.ActionName) -> LabRun.Sound {
         guard spec.kind == .local else {
-            return .notMeasured("the site's own sound has no sweep to compare it with; sound is compared on the local file and stream")
+            return .notMeasured("a site's own sound has no sweep to compare with")
         }
         if let soundRefused { return .notMeasured(soundRefused) }
         guard let samples, let recorder else { return .notMeasured("nothing recorded") }
         if action == .seek { return .notMeasured("a seek leaves sound out on purpose") }
-        let comparison = SoundComparison(samples, rate: recorder.rate)
-        guard !comparison.runs.isEmpty else { return .notMeasured("the recording held no sweep (\(comparison))") }
-        var lost = 0.0
-        for fault in comparison.faults {
-            switch fault {
-            case .gap(_, _, _, let gone): lost += gone
-            // At 1.5× the sweep's media runs ahead of the recording: skips are its pace.
-            case .skip(_, _, let length) where action != .speed: lost += length
-            case .repeat(_, _, let length) where action != .speed: lost -= length
-            default: break
-            }
-        }
         let breaks = recorder.breaks.map { String(format: "screen capture's own delivery broke at %.3f s", $0) }
-        let level = "recorded at \(Quiet.decibels(samples.map(abs).max() ?? 0)) of full scale at its loudest"
-        let faults = action == .speed ? comparison.faults.filter { if case .gap = $0 { true } else { false } } : comparison.faults
-        return .measured(lostMs: (lost * 1000).rounded(), faults: [level] + faults.map(\.description) + breaks)
+        guard case .measured(let lost, let faults) = LabRun.Sound.compared(samples, rate: recorder.rate, action: action) else {
+            return LabRun.Sound.compared(samples, rate: recorder.rate, action: action)
+        }
+        return .measured(lostMs: lost, faults: faults + breaks)
     }
 }

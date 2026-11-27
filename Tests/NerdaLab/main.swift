@@ -127,7 +127,7 @@ enum LabCommand {
 
         let run = LabRun(started: started, ended: Date(), nerda: nerda.version, mac: mac,
                          safety: LabRun.Safety(checks: watch?.checks ?? 0, broken: broken,
-                                               quiet: [quiet, watch.map { "The system's floating window was on screen in \($0.floated) of the checks, as floating a video puts it there." }]
+                                               quiet: [quiet, watch.flatMap { $0.floated > 0 ? "The system's floating window, a window of Nerda Test's, was on screen in \($0.floated) of the checks, as floating a video puts it there." : nil }]
                                                    .compactMap(\.self).joined(separator: " ")),
                          sites: results, comparisons: comparisons() + [alone])
         let file = folder.appending(path: "lab-\(stamp).json"), summary = folder.appending(path: "lab-\(stamp).md")

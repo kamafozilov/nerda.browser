@@ -92,11 +92,9 @@ enum WebKitAlone {
         let samples = try await recorder.stop()
         try? FileManager.default.createDirectory(at: recordings, withIntermediateDirectories: true)
         try? Wave.write(samples, rate: 48_000, to: recordings.appending(path: "webkit-alone-pause-and-play.wav"))
-        let comparison = SoundComparison(samples, rate: recorder.rate)
-        guard !comparison.runs.isEmpty else { throw Failed(description: "the recording held no sweep (\(comparison))") }
-        var lost = 0.0
-        for case .gap(_, _, _, let gone) in comparison.faults { lost += gone }
-        let level = "recorded at \(Quiet.decibels(samples.map(abs).max() ?? 0)) of full scale at its loudest"
-        return ((lost * 1000).rounded(), [level] + comparison.faults.map(\.description))
+        guard case .measured(let lost, let faults) = LabRun.Sound.compared(samples, rate: recorder.rate, action: .pauseAndPlay) else {
+            throw Failed(description: "\(LabRun.Sound.compared(samples, rate: recorder.rate, action: .pauseAndPlay))")
+        }
+        return (lost, faults)
     }
 }
