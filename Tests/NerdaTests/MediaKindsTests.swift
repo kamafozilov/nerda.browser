@@ -99,4 +99,16 @@ struct MediaKindsTests {
         #expect(nudges >= 12)
         #expect(try await page.state().media - from > 55)
     }
+
+    /// A script that waits on an event that never comes fails its test,
+    /// rather than holding it, and the run, for good.
+    @Test func aPageThatNeverAnswersFailsTheTest() async throws {
+        let bed = try await MediaTestBed()
+        defer { bed.close() }
+        let page = try await bed.open(.file())
+        page.scriptTimeout = .milliseconds(500)
+        await #expect(throws: (any Error).self) { try await page.run("await new Promise(() => {})", mark: "never") }
+        let answer: Int = try await page.read("1")
+        #expect(answer == 1)
+    }
 }

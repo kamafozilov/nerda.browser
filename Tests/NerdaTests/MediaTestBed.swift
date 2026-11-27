@@ -239,13 +239,47 @@ final class MediaPage {
     }
 
     private func run(_ script: String) async throws {
-        _ = try await webView.callAsyncJavaScript(script, in: frame, contentWorld: .page)
+        try await bounded(script) { [self] in
+            _ = try await webView.callAsyncJavaScript(script, in: frame, contentWorld: .page)
+        }
     }
 
     /// The JSON `expression` comes to in the page, decoded.
     func read<Value: Decodable>(_ expression: String) async throws -> Value {
-        let json = try await webView.callAsyncJavaScript("return JSON.stringify(\(expression))", in: frame, contentWorld: .page)
-        return try JSONDecoder().decode(Value.self, from: Data(try #require(json as? String).utf8))
+        let json = try await bounded(expression) { [self] in
+            try await webView.callAsyncJavaScript("return JSON.stringify(\(expression))", in: frame, contentWorld: .page) as? String
+        }
+        return try JSONDecoder().decode(Value.self, from: Data(try #require(json).utf8))
+    }
+
+    /// How long a script may take in the page: each waits on one event of
+    /// the element's at most (a pause, a seek, a frame shown), and an event
+    /// that never comes would otherwise hold the test, and the run, for good.
+    var scriptTimeout: Duration = .seconds(20)
+
+    private struct ScriptTimedOut: Error, CustomStringConvertible {
+        var script: String
+        var description: String { "The page never finished \(script.prefix(200))" }
+    }
+
+    /// `work`'s result, or an error once `scriptTimeout` has passed without
+    /// one: WebKit's call can't be cancelled, so it is left behind.
+    private func bounded<Value: Sendable>(_ script: String, _ work: @escaping @MainActor () async throws -> Value) async throws -> Value {
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Value, any Error>) in
+            var finished = false
+            let finish = { @MainActor (result: Result<Value, any Error>) in
+                guard !finished else { return }
+                finished = true
+                done.resume(with: result)
+            }
+            Task { @MainActor in
+                do { finish(.success(try await work())) } catch { finish(.failure(error)) }
+            }
+            Task { @MainActor in
+                try? await Task.sleep(for: scriptTimeout)
+                finish(.failure(ScriptTimedOut(script: script)))
+            }
+        }
     }
 
     /// The first frame in `page`, through WebKit SPI (`_frames:`), which
