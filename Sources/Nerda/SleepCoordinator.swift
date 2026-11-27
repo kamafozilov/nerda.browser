@@ -113,10 +113,12 @@ final class SleepCoordinator {
     /// screen, the last five used in its window (what you go back and forth
     /// between), one seen in the last ten minutes, one heard in the last
     /// minute, one with changes not sent, an Agent tab its agent is at work
-    /// in, or a pinned tab: being always ready is what it is for.
+    /// in, one whose video floats, or a pinned tab: being always ready is
+    /// what it is for.
     private func mayRelieve(_ tab: Tab, in browser: Browser) -> Bool {
         let now = Date.now
         return tab.id != browser.selectedID && !tab.isPinned && !tab.isAsleep && !tab.hasUnsavedWork && !tab.playsAudio && !tab.isKeptAwake
+            && !tab.isFloating
             && now.timeIntervalSince(tab.lastSeen) >= Self.seenGrace
             && tab.lastHeard.map { now.timeIntervalSince($0) >= Self.heardGrace } ?? true
             && !browser.recent.lazy.filter { $0.id != browser.selectedID }.suffix(Self.keepRecent).contains { $0 === tab }

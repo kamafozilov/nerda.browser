@@ -7,6 +7,25 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- Help › Report a Problem… also carries how long a video took to float as you left its tab, and to go back into its page as you came back, with Auto Picture-in-Picture on, so a slow or missing float you report can be looked into.
+- A video in a player embedded on another site, such as a YouTube video in an article, floats when you leave its tab with Auto Picture-in-Picture on, and goes back into its page when you come back, as a video on the page itself does. Before, it stayed in the page.
+- With Auto Picture-in-Picture on, a playing video floats when you bring another Nerda window, an incognito one included, in front of its window, minimise its window, or hide Nerda (⌘H), and goes back into its page when its window is in front again, comes out of the Dock or Nerda is shown again. Coming back to Nerda through another window leaves it floating. Before, it stayed in its page, behind the other window, in the Dock or hidden with Nerda, unless "Also when switching to another app" was on.
+
+### Changed
+
+- With Auto Picture-in-Picture on, only a video you chose floats as you leave its tab or Nerda: one you started or turned the sound on for, or one that starts with sound as a page you went to opens, such as a YouTube video opened from a link, playing with sound for at least three seconds. Muted videos playing by themselves in a feed, hover previews, a video a page starts with sound long after it opened, a muted tab's video and pages with only sound stay where they are, and where a page has several videos the largest floats.
+
+### Fixed
+
+- With Auto Picture-in-Picture and "Also when switching to another app" on, leaving Nerda floats the video only once its window is hidden or at least half covered by other windows, and floats it then if the window becomes covered later while you work in the other app. Before, it floated even when its window was still in full view, on a second screen for instance.
+- With Auto Picture-in-Picture on, leaving a tab whose video is playing keeps that video in sight until it floats: the tab you went to is selected in the sidebar at once, and its page shows as soon as the video is floating, at most a third of a second later. Before, the video vanished with its page and came up late, as a black box over the new tab.
+- With Auto Picture-in-Picture on, a video ends up where you are however quickly you switch tabs: leaving its tab and coming straight back leaves it in its page, and coming back and leaving again straight away leaves it floating. Before, a quick change of mind could leave it floating over its own tab, or back in its page behind another one.
+- A floating video goes when you close its tab or its window, and a tab whose video floats is never put to sleep, so the video you are watching isn't taken away. Before, closing the tab could leave the video floating.
+- A live stream, on Twitch, X or any other site, no longer stops for good while its player catches up with the broadcast. Before, the picture and sound could stand still within a minute while the player still showed it playing, and only a reload brought it back.
+- Low Power Mode really quiets tabs out of sight as it comes on, saving battery. Before, Nerda woke them again straight after pausing them, and they ran on for up to several seconds each time the mode came on.
+
 ## [0.0.31] - 2026-11-27
 
 ### Fixed

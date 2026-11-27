@@ -16,9 +16,13 @@ final class Browser: NSObject {
         // the list took longer than the change itself.
         didSet {
             let open = Set(tabs.map(ObjectIdentifier.init))
-            for tab in oldValue where !open.contains(ObjectIdentifier(tab)) && tab !== handedOver { tab.silence() }
+            for tab in oldValue where !open.contains(ObjectIdentifier(tab)) && tab !== handedOver {
+                tab.silence()
+                recorder.letGo(tab)
+            }
             recent.removeAll { !open.contains(ObjectIdentifier($0)) }
             if selected.map({ !open.contains(ObjectIdentifier($0)) }) ?? (selectedID != nil) { findSelected() }
+            if let kept = keptInSight, !open.contains(ObjectIdentifier(kept)) { showSelected() }
             sessionChanged()
             // Only once they have started, after the window: made any sooner
             // for this, they would hold up the window.
@@ -30,6 +34,9 @@ final class Browser: NSObject {
     @ObservationIgnored private(set) var recent: [Tab] = []
     var selectedID: Tab.ID? {
         didSet {
+            // The page in sight as the owner left it: the one left, unless
+            // one left before is still kept in sight.
+            let shownBefore = keptInSight ?? tabs.first { $0.id == oldValue }
             if selected?.id != selectedID { findSelected() }
             if selectedID != oldValue, oldValue != nil { recorder.begin(.tabSwitch) }
             if let left = tabs.first(where: { $0.id == oldValue }) {
@@ -37,18 +44,26 @@ final class Browser: NSObject {
                 left.pageMoved()
             }
             if selectedID != oldValue { selected?.switchCount += 1 }
+            // Back on the tab kept in sight: it is the one shown.
+            if keptInSight?.id == selectedID { showSelected() }
             if let selected {
                 recent.removeAll { $0 === selected }
                 recent.append(selected)
+                // A page that came in out of sight is in sight from now.
+                if selected.document.inSightSince == nil { selected.document.inSightSince = videoClock() }
             }
             // As in Chrome, going to another tab takes the page out of full screen.
             if selectedID != oldValue { exitPageFullscreen() }
             // Accounts listed under a box of the tab left behind.
             if selectedID != oldValue { passwordChoices = nil }
-            if selectedID != oldValue, PictureInPicture.isOn {
-                // A muted tab's video has no sound to keep hearing.
-                tabs.first { $0.id == oldValue && !$0.isMuted }?.page?.evaluateJavaScript(PictureInPicture.enter)
-                selected?.page?.evaluateJavaScript(PictureInPicture.exit)
+            // The video the owner chose floats as they leave its tab, and lands as they come back.
+            if selectedID != oldValue, PictureInPicture.isOn(in: pictureInPictureSettings) {
+                if let left = tabs.first(where: { $0.id == oldValue }) {
+                    float(left)
+                    // Floating already, it gets no word from WebKit to wait for.
+                    if keptInSight == nil, left === shownBefore, !left.isFloating, floats(leaving: left) { keepInSight(left) }
+                }
+                if let selected { land(selected) }
             }
             if selectedID != oldValue, Extensions.started { Extensions.shared.activated(self, from: oldValue) }
             // Its page may be the one to translate now.
@@ -91,6 +106,23 @@ final class Browser: NSObject {
     /// Where this window's tab operations are timed: the app's one record,
     /// or a test's own.
     @ObservationIgnored var recorder = Recorder.shared
+    /// NERDA_LAST_FRAME for this window's pages alone, a test's; nil
+    /// follows the run's (LastFrame).
+    @ObservationIgnored var lastFramesOn: Bool?
+    /// Where Auto Picture-in-Picture is set: the app's settings, or a test's own.
+    @ObservationIgnored var pictureInPictureSettings = UserDefaults.standard
+    /// The clock a video's time heard is kept on (`PageVideos`): the Mac's
+    /// uptime, or a test's own.
+    @ObservationIgnored var videoClock: () -> TimeInterval = Recorder.uptime
+    /// How a tab's video is asked to float and land (`float`, `land`):
+    /// WebKit's toggle, or a test's own.
+    @ObservationIgnored var floatingToggle = FloatingToggle.webKit()
+    /// What tells how long ago Nerda asked a video to float or land
+    /// (`FloatingAsk`): the Mac's uptime, or a test's own.
+    @ObservationIgnored var floatingClock: () -> TimeInterval = Recorder.uptime
+    /// How many times this browser asked a video to float or land: each
+    /// ask's number (`FloatingAsk`).
+    @ObservationIgnored var floatingAsks = 0
     var recentlyClosed: [Session.ClosedTab] = []
     @ObservationIgnored private var closing: Set<Tab.ID> = []
     /// A tab put on screen from the keyboard in the sidebar's list (the
@@ -206,6 +238,59 @@ final class Browser: NSObject {
     /// each step of a drag in the sidebar is.
     private(set) var selected: Tab?
 
+    /// The tab whose page the page area shows: the one selected, or, for a
+    /// moment after the owner leaves a tab whose video is to float, the
+    /// tab left (`keptInSight`). The tab list shows the selection.
+    var inSight: Tab? { keptInSight ?? selected }
+
+    /// The tab just left whose page stays in sight until WebKit says its
+    /// video floats, or `floatingWait` has passed, so the video is always
+    /// either in its page or floating: hidden at once, it would vanish with
+    /// its page and come up late, over the next tab. Nil for a switch with
+    /// nothing to float, which shows the new page in the same pass as ever.
+    private(set) var keptInSight: Tab?
+    /// The longest a page left stays in sight waiting for its video to float.
+    static let floatingWait: TimeInterval = 0.3
+    /// This window's: `floatingWait`, or a test's own that gives WebKit's
+    /// word itself, on a clock of its own, and wants no wait to end first.
+    @ObservationIgnored var floatingWaitHere = Browser.floatingWait
+    /// Bumped on every keep: a wait's end that comes after is for a keep gone.
+    @ObservationIgnored private var keeping = 0
+    /// The record whose tab switch waits for the new page, while one does.
+    @ObservationIgnored private var holding: Recorder?
+    /// Whether leaving `tab` floats its video, the test's to say in the
+    /// rule's place (`videoToFloat`, `floats(leaving:)`).
+    @ObservationIgnored var floatsOnLeaving: ((Tab) -> Bool)?
+    /// The tab whose video floated as the owner left this window
+    /// (`windowLeft`), to land as they come back to it.
+    @ObservationIgnored weak var leftFloating: Tab?
+
+    /// Whether leaving `tab` floats its video: it has one the owner chose
+    /// (`videoToFloat`), with Auto Picture-in-Picture on.
+    func floats(leaving tab: Tab) -> Bool { videoToFloat(in: tab) != nil }
+
+    /// `tab`, just left, stays in sight; the tab switch is timed to the new
+    /// page shown (`showSelected`).
+    private func keepInSight(_ tab: Tab) {
+        keptInSight = tab
+        if recorder.hold() { holding = recorder }
+        keeping += 1
+        let turn = keeping, holding = holding
+        DispatchQueue.main.asyncAfter(deadline: .now() + floatingWaitHere) { [weak self] in
+            // The window gone meanwhile: the record goes on all the same.
+            guard let self else { holding?.release(); return }
+            if self.keeping == turn { self.showSelected() }
+        }
+    }
+
+    /// The page kept in sight goes, and the one selected shows.
+    private func showSelected() {
+        guard keptInSight != nil else { return }
+        keptInSight = nil
+        holding?.release()
+        holding = nil
+    }
+
     private func findSelected() {
         let found = selectedID.flatMap { id in tabs.first { $0.id == id } }
         if found !== selected { selected = found }
@@ -272,21 +357,22 @@ final class Browser: NSObject {
         sessionTimer?.invalidate()
     }
 
-    /// Tabs out of sight at least this long, and not busy (playing, on a call),
-    /// sleep; of those, only the ones taking more than `size`, if given.
+    /// Tabs out of sight at least this long, not busy (playing, on a call)
+    /// and not floating their video, paused there or not, sleep; of those,
+    /// only the ones taking more than `size`, if given.
     /// Pinned ones only with `pinsToo`: being always ready is what they are for.
     /// With `sparingRevisited`, not one gone to more than `revisited` times.
     func sleepIdleTabs(unseenFor age: TimeInterval, pinsToo: Bool = false, over size: UInt64 = 0,
                        picturing: Bool = true, sparingRevisited: Bool = false) {
         let cutoff = Date.now.addingTimeInterval(-age)
         for tab in tabs where tab.id != selectedID && (pinsToo || !tab.isPinned) && !tab.isAsleep && !tab.isKeptAwake
-            && tab.lastSeen <= cutoff && (size == 0 || (tab.memory ?? 0) > size)
+            && !tab.isFloating && tab.lastSeen <= cutoff && (size == 0 || (tab.memory ?? 0) > size)
             && !(sparingRevisited && tab.switchCount > Self.revisited) {
             Task {
                 // Asked of the page, so it may have come on screen in the meantime.
                 guard await !tab.isBusy(), tab.id != selectedID else { return }
                 let look = picturing ? await tab.snapshot() : nil
-                if tab.id != selectedID, !tab.hasUnsavedWork, !tab.isKeptAwake { tab.sleep(keeping: look) }
+                if tab.id != selectedID, !tab.hasUnsavedWork, !tab.isKeptAwake, !tab.isFloating { tab.sleep(keeping: look) }
             }
         }
     }
@@ -694,6 +780,30 @@ final class Browser: NSObject {
 /// open as tabs; one that closes itself closes its tab. A page's alerts, and
 /// its file pickers, come up as sheets over it.
 extension Browser: WKUIDelegate {
+    /// WebKit's word that a page's video floats (Picture in Picture), or is
+    /// back in its page: SPI (WKUIDelegatePrivate), told only to a delegate
+    /// that answers to it. Without it no tab is known to float, and nothing
+    /// is timed. An Agent tab's is known, never timed.
+    @objc(_webView:hasVideoInPictureInPictureDidChange:)
+    func webView(_ page: WKWebView, hasVideoInPictureInPictureDidChange floating: Bool) {
+        guard let tab = tab(for: page) else { return }
+        tab.isFloating = floating
+        if !isForAgents { recorder.floated(tab, floating) }
+        if floating, tab === keptInSight { showSelected() }
+        heard(tab, floating: floating)
+    }
+
+    /// Nerda asked `tab`'s video to float as the owner left it: timed in
+    /// the record until WebKit says it floats. Only the owner's tabs.
+    func askedToFloat(_ tab: Tab) {
+        if !isForAgents { recorder.leaving(tab) }
+    }
+
+    /// Nerda asked `tab`'s video to land as the owner came back to it.
+    func askedToLand(_ tab: Tab) {
+        if !isForAgents { recorder.returning(to: tab) }
+    }
+
     // WebKit's beforeunload delegate on the supported macOS versions is SPI.
     @objc(_webView:runBeforeUnloadConfirmPanelWithMessage:initiatedByFrame:completionHandler:)
     func beforeUnload(_ page: WKWebView, message: String, frame: WKFrameInfo,
@@ -910,6 +1020,16 @@ extension Browser: WKNavigationDelegate {
             recorder.stepped(tab)
         }
         if action.targetFrame?.isMainFrame ?? true {
+            // Whether the document this brings is one the owner went to: a
+            // redirect carries on where the navigation it follows went.
+            if let tab = tab(for: webView) {
+                if Self.isRedirect(action) {
+                    if tab.navigatingForOwner != nil { tab.navigatingForOwner = action.request.url }
+                } else {
+                    tab.navigatingForOwner = tab.ownerAsked || Self.clicked(action) ? action.request.url : nil
+                    tab.ownerAsked = false
+                }
+            }
             siteSettings.applyBlocking(to: preferences, for: action.request.url)
             if HTTPSUpgrade.isOn, let url = action.request.url, httpsUpgrade.applies(to: url) {
                 preferences.preferredHTTPSNavigationPolicy = .automaticFallbackToHTTP
@@ -1001,7 +1121,7 @@ extension Browser: WKNavigationDelegate {
         // mailto:, tel:, zoommtg: and the like belong to other apps, and only
         // with a yes: a page could otherwise start any app it names.
         if !Self.pageSchemes.contains(url.scheme?.lowercased() ?? "") {
-            guard action.targetFrame?.isMainFrame ?? true,
+            guard action.targetFrame?.isMainFrame ?? true, !Lab.isOn,
                   let app = NSWorkspace.shared.urlForApplication(toOpen: url) else { return .cancel }
             let name = FileManager.default.displayName(atPath: app.path).replacing(".app", with: "")
             let answer = await ask("Open “\(name)”?", "This page wants to open \(name).", over: webView,
@@ -1072,6 +1192,15 @@ extension Browser: WKNavigationDelegate {
     private static func clicked(_ action: WKNavigationAction) -> Bool {
         let key = "_isUserInitiated"
         guard action.responds(to: NSSelectorFromString(key)) else { return action.navigationType == .linkActivated }
+        return action.value(forKey: key) as? Bool ?? false
+    }
+
+    /// Whether it follows a redirect, by WebKit's own word (SPI). Should
+    /// that go, none does, and a redirect's page is the owner's only when
+    /// the owner's click itself went there.
+    private static func isRedirect(_ action: WKNavigationAction) -> Bool {
+        let key = "_isRedirect"
+        guard action.responds(to: NSSelectorFromString(key)) else { return false }
         return action.value(forKey: key) as? Bool ?? false
     }
 
@@ -1379,6 +1508,12 @@ extension Browser: WKNavigationDelegate {
     func pageEnded(_ webView: WKWebView, reason: PageEnd?) {
         guard let tab = tab(for: webView) else { return }
         if fullscreenTab == tab.id { fullscreenTab = nil }
+        // Its video went with its process, and WebKit may not say so.
+        tab.isFloating = false
+        tab.forgetVideos()
+        if tab === keptInSight { showSelected() }
+        tab.floatingAsked = nil
+        recorder.letGo(tab)
         tab.ended = reason
         Logger.pages.notice("A page's process ended: \(reason?.word ?? "no reason given", privacy: .public)")
         // Ended by Nerda itself, for not answering: loaded again, or asleep

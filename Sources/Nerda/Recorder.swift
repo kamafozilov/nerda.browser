@@ -4,9 +4,11 @@ import os
 
 /// What "it was slow" was, the last five minutes of it, for a feedback
 /// report (Feedback.diagnostics): how long each tab open, switch and close,
-/// Back or Forward and page's first paint took, and the main thread's
-/// hitches of 100 ms or more (Watchdog). Numbers and kinds only, in memory,
-/// never written down and never sent but in a report you choose to send.
+/// Back or Forward and page's first paint took, how long a video took to
+/// float as its tab was left and to land as it was come back to, and the
+/// main thread's hitches of 100 ms or more (Watchdog). Numbers and kinds
+/// only, in memory, never written down and never sent but in a report you
+/// choose to send.
 ///
 /// Each kind of entry is a fixed ring: adding one is a few stores, never an
 /// allocation, and however long Nerda runs the record holds at most the
@@ -31,6 +33,12 @@ final class Recorder {
         case backForward
         /// From a page starting to load to its first text or picture painted.
         case firstPaint
+        /// From the owner leaving a tab whose video Nerda asks to float to
+        /// WebKit saying it floats (Picture in Picture).
+        case floating
+        /// From the owner coming back to a tab whose video floats to WebKit
+        /// saying it is back in its page.
+        case landing
 
         var name: String {
             switch self {
@@ -39,6 +47,8 @@ final class Recorder {
             case .tabClose: "tab close"
             case .backForward: "back/forward"
             case .firstPaint: "first paint"
+            case .floating: "floating"
+            case .landing: "landing"
             }
         }
     }
@@ -88,22 +98,47 @@ final class Recorder {
 
     init(clock: @escaping () -> TimeInterval = Recorder.uptime) { self.clock = clock }
 
-    private static var isOn: Bool { Speedups.isOn(.recorder) }
+    /// NERDA_RECORDER for this record alone, set by a test in the run's
+    /// place: a switch for the whole process would reach other tests'
+    /// records running beside it. Nil follows the run's.
+    var switchedOn: Bool?
+    private var isOn: Bool { switchedOn ?? Speedups.isOn(.recorder) }
 
     private static let signposter = OSSignposter(subsystem: Logger.subsystem, category: "tabs")
 
     // MARK: - writing
 
     /// The operation waiting for the main loop to go to sleep.
-    private var pending: (kind: Kind, start: TimeInterval, interval: OSSignpostIntervalState)?
+    /// Held, it waits for `release` first.
+    private var pending: (kind: Kind, start: TimeInterval, interval: OSSignpostIntervalState, held: Bool)?
 
     /// `kind` began just now: it is timed until the main loop next goes to
     /// sleep, once what it changed is on screen. One begun while another
     /// waits leaves the first: a tab opened is selected too, and the pass
     /// that shows both is the open's.
     func begin(_ kind: Kind) {
-        guard pending == nil, Self.isOn else { return }
-        pending = (kind, clock(), Self.signposter.beginInterval(kind.signpost))
+        guard pending == nil, isOn else { return }
+        pending = (kind, clock(), Self.signposter.beginInterval(kind.signpost), false)
+        settleOnSleep()
+    }
+
+    /// What was just begun shows only later, once `release` is called: a
+    /// tab switch whose page left stays in sight while its video floats.
+    /// Whether there was one to hold, not held already.
+    func hold() -> Bool {
+        guard pending?.held == false else { return false }
+        pending?.held = true
+        return true
+    }
+
+    /// What `hold` held is on screen as the main loop next goes to sleep.
+    func release() {
+        guard pending?.held == true else { return }
+        pending?.held = false
+        settleOnSleep()
+    }
+
+    private func settleOnSleep() {
         // Once, after Core Animation's commit at the same moment (its order
         // is lower), and in every mode, a drag's or a menu's included.
         let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, Int.max) { [weak self] _, _ in
@@ -113,7 +148,7 @@ final class Recorder {
     }
 
     private func settle() {
-        guard let (kind, start, interval) = pending else { return }
+        guard let (kind, start, interval, held) = pending, !held else { return }
         pending = nil
         Self.signposter.endInterval(kind.signpost, interval)
         add(kind, seconds: clock() - start)
@@ -122,7 +157,7 @@ final class Recorder {
     /// `kind` took `seconds`, timed by whoever saw it end: a page's first
     /// paint, or the page Back went to on screen.
     func record(_ kind: Kind, seconds: TimeInterval) {
-        guard Self.isOn else { return }
+        guard isOn else { return }
         Self.signposter.emitEvent(kind.signpost, "\(Int(seconds * 1000)) ms")
         add(kind, seconds: seconds)
     }
@@ -200,6 +235,16 @@ extension Recorder {
         var loading: TimeInterval?
         /// Back or Forward was asked for.
         var stepping: TimeInterval?
+        /// Nerda asked its video to float, or to land, waiting for WebKit's
+        /// word (`floated`): one at a time, the newest ask's.
+        var presenting: Presenting?
+    }
+
+    /// Floating or landing under way: since when, and its signpost interval.
+    struct Presenting {
+        let kind: Kind
+        let start: TimeInterval
+        let interval: OSSignpostIntervalState
     }
 
     /// Longer than this, something else held it up: a page loaded out of
@@ -228,12 +273,60 @@ extension Recorder {
         time(.backForward, since: start)
     }
 
-    /// `tab`'s page failed to load: nothing to time.
-    func failed(_ tab: Tab) { tab.timing = PageTiming() }
+    /// `tab`'s page failed to load: nothing of the load to time.
+    func failed(_ tab: Tab) { tab.timing = PageTiming(presenting: tab.timing.presenting) }
 
     private func time(_ kind: Kind, since start: TimeInterval) {
         let seconds = clock() - start
         if seconds < Self.longest { record(kind, seconds: seconds) }
+    }
+}
+
+// MARK: - floating and landing
+
+/// A video floating (Picture in Picture) as the owner leaves its tab, and
+/// landing as they come back: timed from Nerda asking to WebKit's word
+/// that the video is, or is no longer, floating. A signpost interval each,
+/// begun on the ask and ended on the word. An ask WebKit never answers (a
+/// tab with no video to float) is let go on the tab's next ask, its close,
+/// or past `presentingLongest`, with nothing written.
+extension Recorder {
+    /// Longer than this from the ask, WebKit's word answers something else.
+    static let presentingLongest: TimeInterval = 5
+
+    /// Nerda asked `tab`'s video to float as the owner left it.
+    func leaving(_ tab: Tab) { present(.floating, tab) }
+
+    /// The owner came back to `tab`, and Nerda asked its video to land:
+    /// timed only when WebKit has said it floats.
+    func returning(to tab: Tab) {
+        if tab.isFloating { present(.landing, tab) } else { letGo(tab) }
+    }
+
+    /// WebKit says `tab`'s video floats, or has landed: the end of the ask
+    /// it answers. A word nobody asked for (the page's own button, the
+    /// floating window's) is not timed.
+    func floated(_ tab: Tab, _ floating: Bool) {
+        guard let presenting = tab.timing.presenting, presenting.kind == (floating ? .floating : .landing) else { return }
+        tab.timing.presenting = nil
+        Self.signposter.endInterval(presenting.kind.signpost, presenting.interval)
+        let seconds = clock() - presenting.start
+        if seconds <= Self.presentingLongest { add(presenting.kind, seconds: seconds) }
+    }
+
+    /// `tab`'s ask goes unanswered: its tab closed, or asked again.
+    func letGo(_ tab: Tab) {
+        guard let presenting = tab.timing.presenting else { return }
+        tab.timing.presenting = nil
+        Self.signposter.endInterval(presenting.kind.signpost, presenting.interval, "unanswered")
+    }
+
+    private func present(_ kind: Kind, _ tab: Tab) {
+        letGo(tab)
+        guard isOn else { return }
+        // An ID of its own: several tabs' asks can be open at once.
+        let interval = Self.signposter.beginInterval(kind.signpost, id: Self.signposter.makeSignpostID())
+        tab.timing.presenting = Presenting(kind: kind, start: clock(), interval: interval)
     }
 }
 
@@ -245,6 +338,8 @@ private extension Recorder.Kind {
         case .tabClose: "tab close"
         case .backForward: "back/forward"
         case .firstPaint: "first paint"
+        case .floating: "floating"
+        case .landing: "landing"
         }
     }
 }

@@ -412,14 +412,18 @@ private struct PageCard: View {
 
     var body: some View {
         let radius = rounded ? BrowserView.cornerRadius : 0
+        // The tab selected, or for a moment the one left while its video
+        // floats: everything here shows that tab, the page and what stands
+        // in for one (a new tab, the settings, a failure).
+        let shown = browser.inSight
         return ZStack {
             // A new tab, and round the settings' card, the window's glass tinted.
-            if browser.selected?.isBlank == true { browser.isPrivate ? Palette.ground : Palette.glass }
-            else if browser.selected?.settings != nil || browser.selected?.showsHistory == true { Palette.panel }
-            else if browser.selected?.responsive != nil { Palette.stage }
+            if shown?.isBlank == true { browser.isPrivate ? Palette.ground : Palette.glass }
+            else if shown?.settings != nil || shown?.showsHistory == true { Palette.panel }
+            else if shown?.responsive != nil { Palette.stage }
             else { Palette.ground }
             VStack(spacing: 0) {
-                if let tab = browser.selected, tab.hasPage, let responsive = tab.responsive, !browser.locked {
+                if let tab = shown, tab.hasPage, let responsive = tab.responsive, !browser.locked {
                     ResponsiveBar(tab: tab, responsive: responsive)
                 }
                 // Its own width, not the card's: see the top.
@@ -429,10 +433,10 @@ private struct PageCard: View {
                             tabs: browser.tabs,
                             // Locked, no page shows, nor can be read out from
                             // under the lock; nor under an Agent tab watched.
-                            selected: browser.locked || browser.watchedTab != nil ? nil : browser.selected,
+                            selected: browser.locked || browser.watchedTab != nil ? nil : shown,
                             takesFocus: !browser.commandBarOpen
                         )
-                        if let reader = browser.selected?.reader, !browser.locked {
+                        if let reader = shown?.reader, !browser.locked {
                             ReaderView(page: reader, takesFocus: !browser.commandBarOpen)
                                 .background(Palette.ground)
                                 .id(ObjectIdentifier(reader))
@@ -440,10 +444,10 @@ private struct PageCard: View {
                     }
                 }
             }
-            if let tab = browser.selected, tab.isBlank, browser.isPrivate {
+            if let tab = shown, tab.isBlank, browser.isPrivate {
                 IncognitoPage(browser: browser)
                     .id(tab.id)
-            } else if let tab = browser.selected, tab.isBlank {
+            } else if let tab = shown, tab.isBlank {
                 // A new tab: its picture across the page, where to go a third
                 // of the way down it, and under all, what picture to show.
                 // The field comes last, so its list of suggestions goes over the rest.
@@ -473,13 +477,13 @@ private struct PageCard: View {
                 .id(tab.id)
                 .onAppear { Backdrop.shared.load() }
             }
-            if let tab = browser.selected, tab.settings != nil {
+            if let tab = shown, tab.settings != nil {
                 SettingsView(browser: browser, tab: tab)
             }
-            if browser.selected?.showsHistory == true {
+            if shown?.showsHistory == true {
                 HistoryPage(browser: browser)
             }
-            if let failure = browser.selected?.failure {
+            if let failure = shown?.failure {
                 // Switched in with the tab, as the page is: faded, it would
                 // show the blank page under it, and linger over the next.
                 PageFailure(browser: browser, failure: failure)
@@ -492,7 +496,7 @@ private struct PageCard: View {
         }
         // Another tab comes as it is, at once: a new tab's field and picture,
         // opened with the sidebar's slide, would otherwise slide into place too.
-        .transaction(value: browser.selectedID) { $0.animation = nil }
+        .transaction(value: shown?.id) { $0.animation = nil }
         // The card's lower corners, and its right edge, past which the page
         // may reach while the sidebar slides.
         .mask {
@@ -672,7 +676,7 @@ final class BrowserWindow: NSWindow {
     /// the way in, the window already says it is), which would open the
     /// next time as a window over the whole display: the one before it stays.
     @objc private func remember() {
-        guard !styleMask.contains(.fullScreen), !isMiniaturized else { return }
+        guard !styleMask.contains(.fullScreen), !isMiniaturized, !Lab.isOn else { return }
         WindowFrame(frame: frame, fills: frame == filled || frame == screen?.visibleFrame).save(for: browser.profile.id)
     }
 
@@ -686,6 +690,37 @@ final class BrowserWindow: NSWindow {
     override func noResponder(for eventSelector: Selector) {
         if eventSelector == #selector(keyDown(with:)) { return }
         super.noResponder(for: eventSelector)
+    }
+
+    // A lab run's window (Lab): off every screen, behind, never key, never
+    // full screen; a page's full screen stays inside it.
+    override var canBecomeKey: Bool { Lab.isOn ? false : super.canBecomeKey }
+    override var canBecomeMain: Bool { Lab.isOn ? false : super.canBecomeMain }
+    override func makeKeyAndOrderFront(_ sender: Any?) { Lab.isOn ? keepAway() : super.makeKeyAndOrderFront(sender) }
+    override func orderFront(_ sender: Any?) { Lab.isOn ? keepAway() : super.orderFront(sender) }
+    override func orderFrontRegardless() { Lab.isOn ? keepAway() : super.orderFrontRegardless() }
+    override func toggleFullScreen(_ sender: Any?) { if !Lab.isOn { super.toggleFullScreen(sender) } }
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        Lab.isOn ? frameRect : super.constrainFrameRect(frameRect, to: screen)
+    }
+
+    private func keepAway() {
+        // No zoom of the window shown, which AppKit flies across the screen;
+        // and out of Mission Control, which would show it among the owner's,
+        // and of every Space switch, as Agent tabs' window is (AgentWindow).
+        animationBehavior = .none
+        collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
+        isExcludedFromWindowsMenu = true
+        Lab.park(self)
+        orderBack(nil)
+    }
+
+    override func order(_ place: NSWindow.OrderingMode, relativeTo otherWindow: Int) {
+        if Lab.isOn {
+            animationBehavior = .none
+            Lab.told("BrowserWindow ordered \(place.rawValue) at \(frame)")
+        }
+        super.order(place, relativeTo: otherWindow)
     }
 }
 
@@ -933,7 +968,8 @@ let launchSession = Launch.stage("session") { Session.reading(Session.file) }
 // owner opens Nerda (HiddenStart), its tabs and windows only then.
 let startsHidden = CommandLine.arguments.contains(AgentLauncher.hiddenArgument)
 let app = NSApplication.shared
-if !startsHidden { app.setActivationPolicy(.regular) }
+// A lab run's Nerda Test (Lab) has no Dock icon and is never in front.
+if Lab.isOn { app.setActivationPolicy(.accessory) } else if !startsHidden { app.setActivationPolicy(.regular) }
 // Tabs are ours; no system tab bar, and no Show Tab Bar items in the menus.
 NSWindow.allowsAutomaticWindowTabbing = false
 SpellCheck.registerDefault()
@@ -945,7 +981,8 @@ Launch.stage("history") { History.shared.load(from: History.file, waiting: false
 // Before the tabs: those of bookmarks are told by them.
 Launch.stage("bookmarks") { Bookmarks.shared.load(from: Bookmarks.file) }
 Favicons.shared.folder = Favicons.folder
-if !startsHidden {
+// A lab run starts with no tabs of a run before, and keeps none for the next.
+if !startsHidden, !Lab.isOn {
     Launch.stage("restore") {
         browser.restore(launchSession(), from: Session.file)
         // Read off the main thread, so the tabs' icons are there with the window.
@@ -980,6 +1017,7 @@ Windows.regular = window
 /// owner opens it.
 func showWindows() {
     window.makeKeyAndOrderFront(nil)
+    if Lab.isOn { return Lab.start(browser) }
     // A blank tab has no page to wait for: the window is the launch.
     Launch.watch(window, waitingForPage: browser.selected.map { !$0.isBlank } ?? false)
     Launch.stage("other windows") {
@@ -1023,6 +1061,9 @@ let delegate = AppDelegate(window: window, browser: browser)
 delegate.dockMenu = menu.dock
 app.delegate = delegate
 window.delegate = delegate
+// Shown before it had its delegate, it may have become the main window
+// unheard: in front to begin with, unless another window has said so since.
+if window.isVisible, WindowInFront.app.front == nil { WindowInFront.app.cameForward(browser) }
 // SIGTERM (`kill`, and watch.sh putting in a new build) would end the app on
 // the spot; the tabs and history are saved first.
 signal(SIGTERM, SIG_IGN)

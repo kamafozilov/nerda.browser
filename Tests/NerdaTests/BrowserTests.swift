@@ -410,6 +410,9 @@ private let somewhere = URL(string: "https://example.com")!
 /// A closed tab's page goes quiet at once, even while something still holds it.
 @MainActor
 @Test func closedTabsStopPlaying() async throws {
+    // Not while a test sends the Mac's sleep notice, which pauses it.
+    let gate = await MediaGate.run.shared()
+    defer { gate.release() }
     // A second of silence, looped: playing, as far as WebKit is concerned.
     let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -1663,30 +1666,38 @@ func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) async throws {
 // MARK: - Pinned tabs
 
 /// Pinned tabs sit above the rest in the order pinned, never sleep, outlast
-/// ⌘W, and come back pinned, and loaded, at the next launch.
+/// ⌘W, and come back pinned, and loaded, at the next launch. On pages of
+/// the test's own, each waited for until it has its title: a page from the
+/// network comes in as fast as the network answers, its title with it.
 @MainActor
 @Test func pinnedTabsStayOnTopAwakeAndOpenAgain() async throws {
     let folder = try temporaryFolder()
     defer { try? FileManager.default.removeItem(at: folder) }
+    let pages = try ["a", "b", "c", "d"].map { name in
+        let page = folder.appending(path: "\(name).html")
+        try "<title>Page \(name)</title><p>\(name)</p>".write(to: page, atomically: true, encoding: .utf8)
+        return page
+    }
     let file = folder.appending(path: "session.json")
     let browser = Browser()
     browser.sessionFile = file
-    for site in ["https://a.test", "https://b.test", "https://c.test"] { browser.open(URL(string: site)!) }
+    for page in pages.prefix(3) { browser.open(page) }
+    try await waitFor("The pages never had their titles") { browser.tabs.map(\.title) == ["Page c", "Page b", "Page a"] }
     let (c, b, a) = (browser.tabs[0].id, browser.tabs[1].id, browser.tabs[2].id)
 
     browser.setPinned(true, a)
     browser.setPinned(true, c)
     #expect(browser.tabs.map(\.id) == [a, c, b])
     // A new tab opens under the pins, and ⌘1 is still the first tile.
-    browser.open(somewhere)
-    #expect(browser.tabs[2].title == "example.com")
+    let added = browser.open(pages[3])
+    #expect(browser.tabs[2].id == added.id)
     browser.selectTab(number: 1)
     #expect(browser.selectedID == a)
+    try await waitFor("The new tab's page never had its title") { added.title == "Page d" }
 
-    browser.selectedID = browser.tabs[2].id
+    browser.selectedID = added.id
     browser.sleepIdleTabs(unseenFor: 0)
-    for _ in 0..<100 where !browser.tabs[3].isAsleep { try await Task.sleep(for: .milliseconds(20)) }
-    #expect(browser.tabs[3].isAsleep)
+    try await waitFor("The tab under the pins never slept") { browser.tabs[3].isAsleep }
     #expect(!browser.tabs[0].isAsleep && !browser.tabs[1].isAsleep)
 
     browser.selectedID = c
@@ -1698,24 +1709,25 @@ func aCrashedPageWithChangesWaitsToBeReloaded(onScreen: Bool) async throws {
     let restored = Browser()
     restored.restore(from: file)
     #expect(restored.tabs.map(\.isPinned) == [true, true, false, false])
-    #expect(restored.tabs.map(\.title) == ["a.test", "c.test", "example.com", "b.test"])
+    #expect(restored.tabs.map(\.title) == ["Page a", "Page c", "Page d", "Page b"])
     // Pinned tabs wake once the window is up, one after another.
-    for _ in 0..<100 where restored.tabs[1].isAsleep { try await Task.sleep(for: .milliseconds(20)) }
-    #expect(!restored.tabs[0].isAsleep && !restored.tabs[1].isAsleep)
+    try await waitFor("The pinned tabs never woke") { !restored.tabs[0].isAsleep && !restored.tabs[1].isAsleep }
     #expect(restored.tabs[3].isAsleep)
 
     // Unpinned, a tab goes to the top of the list.
     restored.setPinned(false, restored.tabs[0].id)
-    #expect(restored.tabs.map(\.title) == ["c.test", "a.test", "example.com", "b.test"])
+    #expect(restored.tabs.map(\.title) == ["Page c", "Page a", "Page d", "Page b"])
     #expect(restored.tabs.map(\.isPinned) == [true, false, false, false])
 
-    // Out of memory, or taking more than their share, they sleep too.
+    // Out of memory, or taking more than their share, they sleep too: none
+    // takes more than all there is, which is told once a tab that is put to
+    // sleep after it has slept.
     restored.sleepIdleTabs(unseenFor: 0, pinsToo: true, over: .max)
-    try await Task.sleep(for: .milliseconds(100))
+    restored.sleepIdleTabs(unseenFor: 0)
+    try await waitFor("The unpinned tab never slept") { restored.tabs[1].isAsleep }
     #expect(!restored.tabs[0].isAsleep)
     restored.sleepIdleTabs(unseenFor: 0, pinsToo: true)
-    for _ in 0..<100 where !restored.tabs[0].isAsleep { try await Task.sleep(for: .milliseconds(20)) }
-    #expect(restored.tabs[0].isAsleep)
+    try await waitFor("The pinned tab never slept") { restored.tabs[0].isAsleep }
 }
 
 /// A pinned tab goes back to where it was pinned (its tile double-clicked),
@@ -2668,6 +2680,10 @@ func errorsAreCountedOnThisMacOnly(address: String, counted: Int) async throws {
     #expect(run("v.playbackRate = 1.04; v.playbackRate = 1; v.real = 1.5") == [1.5, 1.5])
     #expect(run("v.playbackRate = 1.5; v.playbackRate = 1") == [1, 1])
     #expect(run("v.playbackRate = 2; try { v.playbackRate = NaN } catch {}") == [2, 2])
+    // A stream the page builds itself (Media Source) plays the speeds asked
+    // for: in WebKit a live one at 1.0001 stops for good (#162).
+    #expect(run("v.currentSrc = 'blob:https://live.example/1'; v.playbackRate = 1.04; v.playbackRate = 1") == [1, 1])
+    #expect(run("v.srcObject = {}; v.playbackRate = 1.04; v.playbackRate = 1") == [1, 1])
     #expect(context.exception == nil)
 }
 

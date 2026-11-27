@@ -56,6 +56,7 @@ final class Tab: Identifiable {
     private(set) var playsAudio = false {
         didSet {
             if oldValue, !playsAudio { lastHeard = .now }
+            if playsAudio, !oldValue { (delegate as? Browser)?.soundStarted(self) }
             if playsAudio != oldValue, Extensions.started { Extensions.shared.changed(self, .playingAudio) }
         }
     }
@@ -134,8 +135,41 @@ final class Tab: Identifiable {
             pageMoved()
             if isAsleep != (page == nil) { isAsleep = page == nil }
             if page == nil, playsAudio { playsAudio = false }
+            if page == nil, isFloating { isFloating = false }
+            if page == nil { forgetVideos() }
+            if page == nil { floatingAsked = nil }
         }
     }
+    /// Whether the page has a video floating (Picture in Picture), as WebKit
+    /// last said (`Browser.webView(_:hasVideoInPictureInPictureDidChange:)`):
+    /// never taken from Nerda having asked, which WebKit may ignore.
+    var isFloating = false
+    /// The videos its page's frames told of (`ChosenVideo`): which may float.
+    @ObservationIgnored private(set) var videos = PageVideos()
+    /// Each frame that told of videos, by its document's name, to float or
+    /// land them in; none known stands for the main frame.
+    @ObservationIgnored private(set) var videoFrames: [String: WKFrameInfo] = [:]
+    /// Where the owner wants the page's video: floating, as they left the
+    /// tab or Nerda, or in its page, as they came back (`Browser.float`,
+    /// `Browser.land`). Kept beside `isFloating`, WebKit's word, the two
+    /// compared each time WebKit says a change is done.
+    @ObservationIgnored var wantsFloating = false
+    /// How its main frame's document came, and since when it is in sight
+    /// (`FloatingRule`): set as each comes in.
+    @ObservationIgnored var document = PageDocument()
+    /// Nerda is loading the page for the owner (an address, back, reload):
+    /// taken by the page's next navigation (`Browser`'s policy).
+    @ObservationIgnored var ownerAsked = false
+    /// Where the owner's navigation under way goes, for the document it
+    /// brings there: a commit elsewhere (a blank page still coming in) isn't theirs.
+    @ObservationIgnored var navigatingForOwner: URL?
+    /// The video chosen to float as the owner left (`FloatingRule`), floated
+    /// again should WebKit's word call for it; nil for none chosen yet.
+    @ObservationIgnored var floatingVideo: PageVideo.ID?
+    /// The change Nerda asked WebKit for that WebKit hasn't said is done:
+    /// while one is under way WebKit ignores another, so none is asked.
+    /// Goes with the page.
+    @ObservationIgnored var floatingAsked: FloatingAsk?
     /// Whether its page is let go (`sleep`), kept in step with `page` so a
     /// pinned site's icon can show it, where `page` itself isn't watched.
     private(set) var isAsleep = true
@@ -386,6 +420,7 @@ final class Tab: Identifiable {
         // Woken first, while it has nowhere to go, or it would load `url` twice.
         let page = page ?? wake(for: url)
         self.url = url
+        ownerAsked = true
         page.load(.page(url))
     }
 
@@ -658,6 +693,7 @@ final class Tab: Identifiable {
         if applyHiddenPolicy(configuration) { reapplyHiddenPolicy(toPagesOf: [configuration.websiteDataStore]) }
         _ = powerWatch
         let page = SwipingWebView(frame: .zero, configuration: configuration)
+        Lab.prepare(page)
         pages.add(page)
         return page
     }
@@ -812,6 +848,16 @@ final class Tab: Identifiable {
     /// until it has something to show, so the ground under it never shows through.
     func pageDidCommit() {
         committed = page?.url
+        Self.followProcess(page)
+        // A new document in the page: its frames' videos went with the old one.
+        forgetVideos()
+        let owners = Self.sameDocument(navigatingForOwner, page?.url)
+        if owners { navigatingForOwner = nil }
+        if let browser = delegate as? Browser {
+            let inSight = browser.inSight === self
+            document = PageDocument(ownersNavigation: owners, startedOutOfSight: !inSight,
+                                    inSightSince: inSight ? browser.videoClock() : nil)
+        }
         hasUnsavedWork = false
         departureApproved = false
         // A new document, a reload's included: checked again once it has loaded.
@@ -869,11 +915,13 @@ final class Tab: Identifiable {
     /// Back and Forward, a page that stopped answering ended first.
     func goBack() {
         letGoHung()
+        ownerAsked = true
         webView.goBack()
     }
 
     func goForward() {
         letGoHung()
+        ownerAsked = true
         webView.goForward()
     }
 
@@ -897,6 +945,7 @@ final class Tab: Identifiable {
     func reload(fromOrigin: Bool = false) {
         if letGoHung() { _ = webView; return }
         stopReconnecting()
+        ownerAsked = true
         if let failure {
             webView.load(.page(failure.url, cachePolicy: fromOrigin ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy))
         } else if fromOrigin {
@@ -932,6 +981,7 @@ final class Tab: Identifiable {
     func goHome() {
         guard let home else { return }
         stopReconnecting()
+        ownerAsked = true
         webView.load(.page(home))
     }
 
@@ -988,6 +1038,8 @@ final class Tab: Identifiable {
         recoloring?.cancel()
         recoloring = nil
         page.stopLoading()
+        // A floating video would float on, with no tab to go back to.
+        page.closeAllMediaPresentations()
         page.setAllMediaPlaybackSuspended(true)
         page.setCameraCaptureState(.none)
         page.setMicrophoneCaptureState(.none)
@@ -1093,6 +1145,36 @@ final class Tab: Identifiable {
         return own
     }
 
+    /// Whether a navigation to `asked` brought the document at `committed`:
+    /// its scheme aside (WebKit's move to https) and any fragment.
+    nonisolated static func sameDocument(_ asked: URL?, _ committed: URL?) -> Bool {
+        guard let asked, let committed,
+              var a = URLComponents(url: asked, resolvingAgainstBaseURL: false),
+              var b = URLComponents(url: committed, resolvingAgainstBaseURL: false) else { return false }
+        a.scheme = nil; b.scheme = nil; a.fragment = nil; b.fragment = nil
+        return a == b
+    }
+
+    /// What `frame`'s document says of its videos at `now`.
+    /// `info` nil for the main frame.
+    func heardVideos(frame: String, in info: WKFrameInfo?, main: Bool, _ told: [PageVideos.Told], at now: TimeInterval) {
+        videos.heard(frame: frame, main: main, told, at: now)
+        videoFrames[frame] = info
+    }
+
+    /// `frame`'s document went: another came, or the frame was taken out.
+    func videosGone(frame: String) {
+        videos.gone(frame: frame)
+        videoFrames[frame] = nil
+    }
+
+    /// None of its page's videos are known: a new document, or no page.
+    func forgetVideos() {
+        videos = PageVideos()
+        videoFrames = [:]
+        floatingVideo = nil
+    }
+
     /// Weak: a store's preferences go with it.
     private static let preferences = NSMapTable<WKWebsiteDataStore, WKPreferences>.weakToStrongObjects()
 
@@ -1130,14 +1212,17 @@ final class Tab: Identifiable {
         controller.addUserScript(middleClick)
         controller.add(middleClicks, contentWorld: .defaultClient, name: "middleClick")
         controller.addUserScript(keepFocus)
+        // Before unseenMedia, which keeps its hook as the play() it gives back once shown.
+        ChosenVideo.install(in: controller)
         controller.addUserScript(unseenMedia)
-        controller.addUserScript(LiveRate.script)
+        if LiveRate.isOn(for: dataStore) { controller.addUserScript(LiveRate.script) }
         // Not for incognito: what it plays isn't kept on disk.
         if dataStore.isPersistent, mediaCacheOn { controller.addUserScript(MediaCache.script) }
         controller.addUserScript(pageErrors)
         controller.add(pageErrorCounts, contentWorld: .defaultClient, name: "pageError")
         controller.add(Translator.messages, contentWorld: .defaultClient, name: "translate")
         controller.addUserScript(JSONViewer.script)
+        if Lab.isOn { controller.addUserScript(Lab.webAudio) }
         contents.append(Contents(store: dataStore, controller: controller))
         return controller
     }
@@ -1165,6 +1250,9 @@ final class Tab: Identifiable {
         // WebKit's full screen, under our own (see Fullscreen). Pages a page
         // opens (popups) are given this configuration's, script and all.
         configuration.preferences.isElementFullscreenEnabled = true
+        // A lab run's pages (Lab) have Nerda's own page full screen only:
+        // WebKit's would put a window of its own over the owner's screen.
+        if Lab.isOn { configuration.preferences.isElementFullscreenEnabled = false }
         configuration.setURLSchemeHandler(ViewSource.handler, forURLScheme: ViewSource.scheme)
         configuration.setURLSchemeHandler(MediaCache.shared, forURLScheme: MediaCache.scheme)
         // WebKit samples the page's top edge only when asked, allowing this
@@ -1281,24 +1369,66 @@ final class Tab: Identifiable {
     /// WebKit reads how a hidden page runs only as a page joins its process
     /// (macOS 27, and WebKit's source: `WebProcessProxy::addExistingWebPage`):
     /// changed later, a page already open kept what it began with. So each
-    /// process with pages gets one more, made in it and let go at once, and
-    /// reads it again from the pages it has; measured, a hidden page then
-    /// stops within seconds, or runs again.
+    /// process with pages gets one more (`ModePage`), made in it, and reads
+    /// it again from the pages it has; measured, a hidden page then stops
+    /// within seconds, or runs again. One made as the mode goes off is let
+    /// go at once; one made as it comes on is kept, as letting it go would
+    /// wake the process WebKit has just suspended.
     // WebKit SPI: should it go, a page open follows the mode once it is next
     // made (woken) or moves to another site's process.
     private static func reapplyHiddenPolicy(toPagesOf stores: [WKWebsiteDataStore]) {
         guard !stores.isEmpty else { return }
-        let related = NSSelectorFromString("_setRelatedWebView:")
-        var reached = Set<pid_t>()
-        for page in pages.allObjects where stores.contains(where: { $0 === page.configuration.websiteDataStore }) {
+        var processes: [pid_t: [SwipingWebView]] = [:]
+        for case let page as SwipingWebView in pages.allObjects
+        where stores.contains(where: { $0 === page.configuration.websiteDataStore }) {
             // No process (ended, or none started yet): one starts with the mode as it is.
-            guard let pid = Processes.pid(of: page), reached.insert(pid).inserted else { continue }
+            guard let pid = Processes.pid(of: page) else { continue }
+            processes[pid, default: []].append(page)
+        }
+        for (pid, inProcess) in processes {
+            // Any kept from the mode coming on go first, before the process is told.
+            for page in inProcess { page.modePage = nil }
+            guard let told = ModePage(in: inProcess[0], pid: pid) else { return }
+            // Going off, the process is woken anyway: let go at once.
+            if inProcess[0].configuration.preferences.inactiveSchedulingPolicy == .suspend {
+                for page in inProcess { page.modePage = told }
+            }
+        }
+    }
+
+    /// A page of no tab's, made in a page's process so the process reads
+    /// again how its hidden pages run (`reapplyHiddenPolicy`). Let go, it is
+    /// closed, and WebKit wakes a suspended process to close a page in it,
+    /// for up to seconds on a busy Mac: one made as Low Power Mode comes on
+    /// is held by the pages of its process, and goes with the last of them
+    /// to close, sleep or move to another process (`followProcess`), or as
+    /// the mode goes off. It never keeps a process of its own.
+    final class ModePage {
+        /// The process it is in.
+        let pid: pid_t
+        let page: WKWebView
+
+        init?(in page: WKWebView, pid: pid_t) {
             let configuration = page.configuration
-            guard configuration.responds(to: related) else { return }
+            let related = NSSelectorFromString("_setRelatedWebView:")
+            guard configuration.responds(to: related) else { return nil }
             configuration.perform(related, with: page)
             configuration.webExtensionController = nil
-            _ = WKWebView(frame: .zero, configuration: configuration)
+            self.page = WKWebView(frame: .zero, configuration: configuration)
+            self.pid = pid
         }
+    }
+
+    /// A page just committed may be in another process than before (another
+    /// site's, or a new one after its own ended): it lets go of the old
+    /// one's `ModePage`, and holds its new process's, should a page there
+    /// hold one.
+    private static func followProcess(_ page: WKWebView?) {
+        guard let page = page as? SwipingWebView else { return }
+        let pid = Processes.pid(of: page)
+        if page.modePage?.pid != pid { page.modePage = nil }
+        guard page.modePage == nil, let pid else { return }
+        page.modePage = pages.allObjects.lazy.compactMap { ($0 as? SwipingWebView)?.modePage }.first { $0.pid == pid }
     }
 
     /// WebKit's switch for it, one of the flags Safari lists under Develop ›
@@ -1375,6 +1505,8 @@ nonisolated private final class KeyObserver: NSObject {
 /// down as out of sight, as it does a page out of the window.
 struct PageView: NSViewRepresentable {
     let tabs: [Tab]
+    /// The tab whose page shows: the one selected, or the one left kept in
+    /// sight while its video floats (`Browser.inSight`).
     let selected: Tab?
     /// Whether the page takes the keyboard when it comes on screen, so Space
     /// scrolls it. Not while the command bar has it.
@@ -1410,7 +1542,8 @@ struct PageView: NSViewRepresentable {
         // Put on screen from the sidebar's list by the keyboard: it stays there.
         let browser = selected?.delegate as? Browser
         let keepsKeyboard = browser?.keepsKeyboard != nil && browser?.keepsKeyboard == selected?.id
-        browser?.keepsKeyboard = nil
+        // Not while the page left is kept in sight: the ask is the next page's.
+        if browser?.keptInSight == nil { browser?.keepsKeyboard = nil }
         let focused = (window?.firstResponder as? NSView).flatMap { responder in
             pages.first { responder === $0 || responder.isDescendant(of: $0) }
         }

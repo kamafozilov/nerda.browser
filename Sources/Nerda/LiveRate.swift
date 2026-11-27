@@ -15,6 +15,17 @@ import WebKit
 // reads back the 1 it asked for. A speed picked from a menu (1.25, 1.5, 2)
 // never starts it, and a page that never nudges is never touched.
 //
+// Not for a stream the page builds itself (Media Source), which is how
+// nearly every live player plays: measured on macOS 27 (2026-11-27, #162),
+// a live Media Source stream nudged between 1.09 and 1.0001 stopped for
+// good within a minute in eight rounds of nine (seven of seven in Nerda,
+// one of two in a bare WKWebView given this script), after 0.9 to 49 s,
+// media time standing still while the page went on playing; between 1.09
+// and 1 it never did, nor with streams left out, in three more. There, too, a step to 1.0001 holds the picture
+// as long as a step to 1 does (0.4 s against 0.5 s). It stays for a file
+// or HLS played by WebKit itself, where stepping onto 1 sends media time
+// back a moment and 1.0001 doesn't.
+//
 // Taken from LiveRate.swift in Search (https://github.com/driceroland/Search):
 //
 //   Copyright (c) 2026 Office Commun
@@ -58,7 +69,8 @@ enum LiveRate {
                 },
                 set playbackRate(value) {
                     const rate = +value;
-                    const played = rate === 1 && nudged.has(this) ? beside : rate;
+                    const stream = this.srcObject != null || String(this.currentSrc ?? '').startsWith('blob:');
+                    const played = rate === 1 && nudged.has(this) && !stream ? beside : rate;
                     // Refused (not a number, out of range): thrown, and nothing kept.
                     plain.set.call(this, played);
                     if (rate !== 1 && Math.abs(rate - 1) <= nudge) nudged.add(this);
@@ -76,4 +88,19 @@ enum LiveRate {
         """
 
     static let script = WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
+
+    /// Whether `store`'s pages get it: a test's choice for the store, else
+    /// on unless NERDA_LIVE_RATE=0, to hear and time live video with and
+    /// without it on the same build. Read as a store's first page is made.
+    static func isOn(for store: WKWebsiteDataStore) -> Bool {
+        forced.object(forKey: store)?.boolValue ?? environment
+    }
+
+    /// On or off for `store`'s pages, for tests, before its first page.
+    static func force(_ on: Bool, for store: WKWebsiteDataStore) {
+        forced.setObject(NSNumber(value: on), forKey: store)
+    }
+
+    private static let forced = NSMapTable<WKWebsiteDataStore, NSNumber>.weakToStrongObjects()
+    private static let environment = ProcessInfo.processInfo.environment["NERDA_LIVE_RATE"] != "0"
 }

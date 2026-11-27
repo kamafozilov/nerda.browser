@@ -121,12 +121,9 @@ struct RecorderTests {
     /// NERDA_RECORDER=0 leaves the record empty for the run.
     @Test func theSwitchTurnsTheRecordOff() async throws {
         let (browser, recorder) = recordedBrowser()
-        do {
-            Speedups.overrides[.recorder] = false
-            defer { Speedups.overrides[.recorder] = nil }
-            browser.newTab()
-            recorder.record(.firstPaint, seconds: 0.1)
-        }
+        recorder.switchedOn = false
+        browser.newTab()
+        recorder.record(.firstPaint, seconds: 0.1)
         try await Task.sleep(for: .milliseconds(100))
         #expect(recorder.timings().isEmpty)
     }
