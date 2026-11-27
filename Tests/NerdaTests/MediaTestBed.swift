@@ -170,10 +170,13 @@ final class MediaPage {
     }
 
     /// Returns once no input of the owner's is in effect in the page: a new
-    /// document starts out with one for a moment, as if the owner had
-    /// clicked. After this, only what a test does next counts as theirs.
+    /// document's own timers read one in effect for about 5 s after it
+    /// loads (measured: 5.0 s each time), as if the owner had clicked.
+    /// After this, only what a test does next counts as theirs. Waited for
+    /// those 5 s and the usual 6 s besides: the state takes WebKit's own
+    /// time to come, not a moment.
     func waitForNoOwnersInput() async throws {
-        try await waitFor("The page never stopped reading an input of the owner's in effect") {
+        try await waitFor("The page never stopped reading an input of the owner's in effect", timeout: .seconds(11)) {
             try await read("bed.ownersInput") == false
         }
     }
