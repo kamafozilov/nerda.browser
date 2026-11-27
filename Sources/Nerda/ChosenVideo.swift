@@ -12,6 +12,10 @@ struct PageVideo: Equatable, Sendable {
 
     var id: ID
     var told: PageVideos.Told
+    /// It is in the page's main frame, not a frame in it.
+    var inMainFrame = true
+    /// When it was first heard, on Nerda's clock; nil until it is.
+    var firstHeard: TimeInterval?
     /// Seconds it played with sound before `heardSince`.
     var heard: TimeInterval = 0
     /// When it last began to be heard, while it is.
@@ -50,14 +54,16 @@ struct PageVideos: Equatable, Sendable {
 
     /// What `frame` says of its videos at `now`: all it has, those it
     /// doesn't name are gone.
-    mutating func heard(frame: String, _ videos: [Told], at now: TimeInterval) {
+    /// `main`: the frame is the page's main frame.
+    mutating func heard(frame: String, main: Bool, _ videos: [Told], at now: TimeInterval) {
         let before = all.filter { $0.id.frame == frame }
         gone(frame: frame)
         for told in videos {
             let id = PageVideo.ID(frame: frame, element: told.element)
-            var video = before.first { $0.id == id } ?? PageVideo(id: id, told: told)
+            var video = before.first { $0.id == id } ?? PageVideo(id: id, told: told, inMainFrame: main)
             if video.told.audible, !told.audible { video.heard = video.heard(at: now); video.heardSince = nil }
             if told.audible, video.heardSince == nil { video.heardSince = now }
+            if told.audible, video.firstHeard == nil { video.firstHeard = now }
             video.told = told
             all.append(video)
         }
@@ -69,21 +75,54 @@ struct PageVideos: Equatable, Sendable {
     }
 }
 
+/// What Nerda knows of the document in a tab's main frame, on its clock:
+/// how it came, and since when the owner could see it.
+struct PageDocument: Equatable, Sendable {
+    /// The owner went to it: a link they clicked, an address, a bookmark, a
+    /// link from another app, back, forward or reload. Not where the page
+    /// itself went (a script's redirect).
+    var ownersNavigation = false
+    /// It came in out of sight (a tab opened behind, a page loaded hidden).
+    var startedOutOfSight = false
+    /// Since when it has been in sight: as it came in, or since the owner
+    /// brought its tab into sight; nil while it never has been.
+    var inSightSince: TimeInterval?
+
+    /// Whether a video of its main frame first heard at `heard` started as
+    /// the owner went to the page or brought it into sight: within its
+    /// first moments in sight (`FloatingRule.firstMoments`).
+    func startedForTheOwner(heard: TimeInterval) -> Bool {
+        guard ownersNavigation || startedOutOfSight, let since = inSightSince else { return false }
+        return heard - since <= FloatingRule.firstMoments
+    }
+}
+
 /// Which video floats by itself as the owner leaves its tab (Auto
 /// Picture-in-Picture): only one they chose to watch. It plays with sound,
-/// they started it or turned its sound on, and it has been heard for three
-/// seconds; of several, the largest. Never a muted one, nor in a muted tab,
-/// nor in an Agent tab, nor sound with no picture.
+/// and has been heard for three seconds; they started it or turned its
+/// sound on, or it started with sound in the page's first moments in sight
+/// of a page they went to or brought into sight (`PageDocument`); of
+/// several, the largest. Never a muted one, nor in a muted tab, nor in an
+/// Agent tab, nor sound with no picture.
 enum FloatingRule {
     /// Seconds of play with sound before a video may float.
     static let heardAtLeast: TimeInterval = 3
+    /// Seconds from a page coming into sight within which a video that
+    /// starts with sound is taken as the owner's choice in going there.
+    static let firstMoments: TimeInterval = 10
 
-    static func video(among videos: [PageVideo], at now: TimeInterval, on: Bool, tabMuted: Bool,
-                      agentTab: Bool) -> PageVideo.ID? {
+    static func video(among videos: [PageVideo], in document: PageDocument = PageDocument(), at now: TimeInterval,
+                      on: Bool, tabMuted: Bool, agentTab: Bool) -> PageVideo.ID? {
         guard on, !tabMuted, !agentTab else { return nil }
         return videos
-            .filter { $0.told.audible && $0.told.hasPicture && $0.told.ownerStarted && $0.heard(at: now) >= heardAtLeast }
+            .filter { $0.told.audible && $0.told.hasPicture && chosen($0, in: document) && $0.heard(at: now) >= heardAtLeast }
             .max { $0.told.area < $1.told.area }?.id
+    }
+
+    private static func chosen(_ video: PageVideo, in document: PageDocument) -> Bool {
+        if video.told.ownerStarted { return true }
+        guard video.inMainFrame, let heard = video.firstHeard else { return false }
+        return document.startedForTheOwner(heard: heard)
     }
 }
 
@@ -101,7 +140,7 @@ enum ChosenVideo {
             // The frame's document: another name in its next one. Not
             // randomUUID, which an http page hasn't.
             const frame = [...crypto.getRandomValues(new Uint32Array(4))].map(n => n.toString(36)).join('');
-            const numbers = new WeakMap(), elements = new Map(), started = new WeakSet();
+            const numbers = new WeakMap(), elements = new Map(), started = new WeakSet(), calls = new WeakMap();
             let count = 0, queued = false;
             const owners = () => navigator.userActivation?.isActive === true;
             const audible = video => !video.muted && video.volume > 0;
@@ -143,10 +182,24 @@ enum ChosenVideo {
                     video.audioTracks?.addEventListener('addtrack', tell);
                     video.audioTracks?.addEventListener('removetrack', tell);
                 }
-                // Started, or its sound turned on as it plays, at the owner's word.
-                const sound = event.type === 'volumechange' || event.type === 'nerdasound';
-                const asked = event.type === 'play' || event.type === 'nerdaplay' || (sound && !video.paused && audible(video));
-                if (asked && owners()) started.add(video);
+                // Started, or its sound turned on as it plays, at the owner's
+                // word. A call through the page's play() or its setters is
+                // judged as it is made (`hook`), and the media event it
+                // brings is its own: later, Nerda's own scripts (an icon
+                // looked up) may read as an input in effect. The event alone
+                // judges what bypassed them, as WebKit's own controls do.
+                const now = performance.now();
+                const play = event.type === 'play' || event.type === 'nerdaplay';
+                const kind = play ? 'play' : 'sound';
+                const asked = play || ((event.type === 'volumechange' || event.type === 'nerdasound') && !video.paused && audible(video));
+                if (event.type === 'nerdaplay' || event.type === 'nerdasound') {
+                    calls.set(video, { ...calls.get(video), [kind]: now });
+                    if (asked && owners()) started.add(video);
+                } else if (asked || event.type === 'volumechange') {
+                    const call = calls.get(video)?.[kind];
+                    if (call !== undefined && now - call < 1000) calls.set(video, { ...calls.get(video), [kind]: undefined });
+                    else if (asked && owners()) started.add(video);
+                }
                 tell();
             };
             for (const type of ['play', 'playing', 'pause', 'ended', 'volumechange', 'loadedmetadata', 'resize', 'emptied', 'nerdaplay', 'nerdasound'])
@@ -183,15 +236,21 @@ enum ChosenVideo {
             const media = HTMLMediaElement.prototype;
             const mark = (element, type) => element.dispatchEvent(new Event(type));
             const { play } = media;
+            // Marked only where the call brings a media event of its own.
             media.play = function () {
-                const playing = play.apply(this, arguments);
-                mark(this, 'nerdaplay');
-                return playing;
+                if (this.paused) mark(this, 'nerdaplay');
+                return play.apply(this, arguments);
             };
             for (const name of ['muted', 'volume']) {
                 const { get, set } = Object.getOwnPropertyDescriptor(media, name);
                 Object.defineProperty(media, name, {
-                    get, set(value) { set.call(this, value); mark(this, 'nerdasound'); }, configurable: true, enumerable: true,
+                    get,
+                    set(value) {
+                        const was = get.call(this);
+                        set.call(this, value);
+                        if (get.call(this) !== was) mark(this, 'nerdasound');
+                    },
+                    configurable: true, enumerable: true,
                 });
             }
         })();
@@ -212,7 +271,7 @@ enum ChosenVideo {
                   let tab = browser.tab(for: page) else { return }
             if body["gone"] as? Bool == true { return tab.videosGone(frame: frame) }
             let videos = (body["videos"] as? [[String: Any]] ?? []).compactMap(PageVideos.Told.init)
-            tab.heardVideos(frame: frame, in: message.frameInfo, videos, at: browser.videoClock())
+            tab.heardVideos(frame: frame, in: message.frameInfo, main: message.frameInfo.isMainFrame, videos, at: browser.videoClock())
         }
     }
 }
@@ -236,7 +295,7 @@ extension Browser {
         if let floatsOnLeaving {
             return floatsOnLeaving(tab) ? tab.videos.all.first?.id ?? PageVideo.ID(frame: "", element: 0) : nil
         }
-        return FloatingRule.video(among: tab.videos.all, at: videoClock(), on: PictureInPicture.isOn(in: pictureInPictureSettings),
-                                  tabMuted: tab.isMuted, agentTab: isForAgents)
+        return FloatingRule.video(among: tab.videos.all, in: tab.document, at: videoClock(),
+                                  on: PictureInPicture.isOn(in: pictureInPictureSettings), tabMuted: tab.isMuted, agentTab: isForAgents)
     }
 }

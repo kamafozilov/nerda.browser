@@ -15,7 +15,7 @@ entry and how a release is made is in [docs/releasing.md](docs/releasing.md).
 
 ### Changed
 
-- With Auto Picture-in-Picture on, only a video you chose floats as you leave its tab or Nerda: one you started or turned the sound on for, playing with sound for at least three seconds. Muted videos playing by themselves in a feed, hover previews, a muted tab's video and pages with only sound stay where they are, and where a page has several videos the largest floats. A video a page started with its sound on by itself floats once you press play or turn its sound on.
+- With Auto Picture-in-Picture on, only a video you chose floats as you leave its tab or Nerda: one you started or turned the sound on for, or one that starts with sound as a page you went to opens, such as a YouTube video opened from a link, playing with sound for at least three seconds. Muted videos playing by themselves in a feed, hover previews, a video a page starts with sound long after it opened, a muted tab's video and pages with only sound stay where they are, and where a page has several videos the largest floats.
 
 ### Fixed
 

@@ -84,13 +84,15 @@ final class MediaTestBed {
     /// the bed page is in a frame of a page from another origin, with nothing
     /// else in it, and the bed's scripts run in that frame. With
     /// `startingByItself`, the page plays it of its own accord, with no click
-    /// or key of the owner's behind it (a feed, a hover preview); `muted`
-    /// has it muted from the start.
+    /// or key of the owner's behind it (a feed, a hover preview); with
+    /// `startingOnResize`, so too, but only once its window is resized
+    /// (`bed.window.setContentSize`) with no input in effect, when the test
+    /// says; `muted` has it muted from the start.
     func open(_ media: BedMedia, inFrame: Bool = false, startingByItself: Bool = false,
-              muted: Bool = false) async throws -> MediaPage {
+              startingOnResize: Bool = false, muted: Bool = false) async throws -> MediaPage {
         pages += 1
         let source = try await serve(media, as: "/media/\(pages)")
-        let html = MediaPage.html(source: source, startingByItself: startingByItself, muted: muted)
+        let html = MediaPage.html(source: source, startingByItself: startingByItself, startingOnResize: startingOnResize, muted: muted)
         var url = try await server.serve("/page/\(pages)", html: html)
         if inFrame {
             let framing = try self.framing ?? MediaServer()
@@ -265,7 +267,8 @@ final class MediaPage {
 
     /// The page: the element at the bed's volume before it has a source, its
     /// helper (`bed`) and the source attached.
-    static func html(source: Source, startingByItself: Bool = false, muted: Bool = false) -> String {
+    static func html(source: Source, startingByItself: Bool = false, startingOnResize: Bool = false,
+                     muted: Bool = false) -> String {
         let attach = switch source {
         case .src(let url): "media.src = \(String(reflecting: url.absoluteString));"
         }
@@ -274,6 +277,12 @@ final class MediaPage {
         let start = startingByItself ? """
             const byItself = () => navigator.userActivation.isActive ? setTimeout(byItself, 50) : media.play();
             byItself();
+            """ : startingOnResize ? """
+            addEventListener('resize', function start() {
+                if (navigator.userActivation.isActive) return;
+                removeEventListener('resize', start);
+                media.play();
+            });
             """ : ""
         return """
             <!doctype html>

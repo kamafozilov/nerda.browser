@@ -49,6 +49,8 @@ final class Browser: NSObject {
             if let selected {
                 recent.removeAll { $0 === selected }
                 recent.append(selected)
+                // A page that came in out of sight is in sight from now.
+                if selected.document.inSightSince == nil { selected.document.inSightSince = videoClock() }
             }
             // As in Chrome, going to another tab takes the page out of full screen.
             if selectedID != oldValue { exitPageFullscreen() }
@@ -1018,6 +1020,16 @@ extension Browser: WKNavigationDelegate {
             recorder.stepped(tab)
         }
         if action.targetFrame?.isMainFrame ?? true {
+            // Whether the document this brings is one the owner went to: a
+            // redirect carries on where the navigation it follows went.
+            if let tab = tab(for: webView) {
+                if Self.isRedirect(action) {
+                    if tab.navigatingForOwner != nil { tab.navigatingForOwner = action.request.url }
+                } else {
+                    tab.navigatingForOwner = tab.ownerAsked || Self.clicked(action) ? action.request.url : nil
+                    tab.ownerAsked = false
+                }
+            }
             siteSettings.applyBlocking(to: preferences, for: action.request.url)
             if HTTPSUpgrade.isOn, let url = action.request.url, httpsUpgrade.applies(to: url) {
                 preferences.preferredHTTPSNavigationPolicy = .automaticFallbackToHTTP
@@ -1180,6 +1192,15 @@ extension Browser: WKNavigationDelegate {
     private static func clicked(_ action: WKNavigationAction) -> Bool {
         let key = "_isUserInitiated"
         guard action.responds(to: NSSelectorFromString(key)) else { return action.navigationType == .linkActivated }
+        return action.value(forKey: key) as? Bool ?? false
+    }
+
+    /// Whether it follows a redirect, by WebKit's own word (SPI). Should
+    /// that go, none does, and a redirect's page is the owner's only when
+    /// the owner's click itself went there.
+    private static func isRedirect(_ action: WKNavigationAction) -> Bool {
+        let key = "_isRedirect"
+        guard action.responds(to: NSSelectorFromString(key)) else { return false }
         return action.value(forKey: key) as? Bool ?? false
     }
 

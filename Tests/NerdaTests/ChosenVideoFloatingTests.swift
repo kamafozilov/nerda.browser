@@ -136,13 +136,60 @@ struct ChosenVideoFloatingTests {
         try await setup.comeBack(to: page)
     }
 
-    /// A video the page started with its sound on, as a hover preview, stays.
-    @Test func aVideoThePageStartedWithSoundStaysInItsPage() async throws {
+    /// A page the owner went to by a link, starting its video with sound by
+    /// itself as it comes in, as a watch page opened from a link does: a
+    /// video they chose, though they pressed nothing in it.
+    @Test func aPageReachedByALinkStartingItsVideoWithSoundFloats() async throws {
         let setup = try await Setup()
         defer { setup.close() }
-        let page = try await setup.bed.open(.file(), startingByItself: true)
+        let first = try await setup.bed.open(.file())
+        let source: String = try await first.read("media.src")
+        let linked = try await setup.bed.server.serve(
+            "/linked", html: MediaPage.html(source: .src(try #require(URL(string: source))), startingByItself: true))
+        // The owner's click on a link: one of Nerda's scripts, which WebKit
+        // takes for a click of theirs.
+        try await first.run("""
+            const link = document.createElement('a');
+            link.href = \(String(reflecting: linked.absoluteString));
+            document.body.append(link);
+            link.click();
+            """, mark: "link")
+        try await waitFor("The link never led to its page") { first.tab.webView.url == linked && !first.tab.webView.isLoading }
+        let page = MediaPage(tab: first.tab)
         try await heard(page, "playing with sound by itself") { $0.playing && !$0.muted && !$0.ownerStarted }
-        setup.bed.clock.now += 60
+        setup.bed.clock.now += FloatingRule.heardAtLeast
+        setup.turnOn()
+        try await setup.leaveAndFloat(page)
+        try await setup.comeBack(to: page)
+    }
+
+    /// The same page starting its video with sound long after it came in,
+    /// with nothing of the owner's behind it, as an ad does: it stays. No
+    /// script of Nerda's runs in the page, which would read as the owner's
+    /// input in effect: it loads, Nerda hears of its video, and it starts
+    /// as its window is resized.
+    @Test func aVideoStartingWithSoundLongAfterThePageCameInStays() async throws {
+        let setup = try await Setup()
+        defer { setup.close() }
+        let bed = setup.bed
+        let movie = try await GeneratedMovie.mp4(seconds: 30, sound: .tone(hertz: 440))
+        let source = try await bed.server.serve("/later.mp4", movie, type: "video/mp4")
+        let url = try await bed.server.serve("/later", html: MediaPage.html(source: .src(source), startingOnResize: true))
+        let tab = bed.browser.open(URL(string: "about:blank")!)
+        tab.webView.hearsWindowCovered(false)
+        try await waitFor("The tab never joined the bed's window") { tab.webView.window === bed.window }
+        tab.go(to: url)
+        let page = MediaPage(tab: tab)
+        try await heard(page, "loaded") { $0.hasPicture && !$0.playing }
+        bed.clock.now += FloatingRule.firstMoments + 1
+        var wide = false
+        try await waitFor("The page never started its video: \(tab.videos.all)") {
+            wide.toggle()
+            bed.window.setContentSize(NSSize(width: wide ? 600 : 640, height: wide ? 380 : 400))
+            return tab.videos.all.contains { $0.told.playing }
+        }
+        try await heard(page, "playing with sound by itself") { $0.playing && !$0.muted && !$0.ownerStarted }
+        bed.clock.now += 60
         setup.turnOn()
         setup.leaveAndStay(page)
     }

@@ -154,6 +154,15 @@ final class Tab: Identifiable {
     /// `Browser.land`). Kept beside `isFloating`, WebKit's word, the two
     /// compared each time WebKit says a change is done.
     @ObservationIgnored var wantsFloating = false
+    /// How its main frame's document came, and since when it is in sight
+    /// (`FloatingRule`): set as each comes in.
+    @ObservationIgnored var document = PageDocument()
+    /// Nerda is loading the page for the owner (an address, back, reload):
+    /// taken by the page's next navigation (`Browser`'s policy).
+    @ObservationIgnored var ownerAsked = false
+    /// Where the owner's navigation under way goes, for the document it
+    /// brings there: a commit elsewhere (a blank page still coming in) isn't theirs.
+    @ObservationIgnored var navigatingForOwner: URL?
     /// The video chosen to float as the owner left (`FloatingRule`), floated
     /// again should WebKit's word call for it; nil for none chosen yet.
     @ObservationIgnored var floatingVideo: PageVideo.ID?
@@ -411,6 +420,7 @@ final class Tab: Identifiable {
         // Woken first, while it has nowhere to go, or it would load `url` twice.
         let page = page ?? wake(for: url)
         self.url = url
+        ownerAsked = true
         page.load(.page(url))
     }
 
@@ -839,6 +849,13 @@ final class Tab: Identifiable {
         committed = page?.url
         // A new document in the page: its frames' videos went with the old one.
         forgetVideos()
+        let owners = Self.sameDocument(navigatingForOwner, page?.url)
+        if owners { navigatingForOwner = nil }
+        if let browser = delegate as? Browser {
+            let inSight = browser.inSight === self
+            document = PageDocument(ownersNavigation: owners, startedOutOfSight: !inSight,
+                                    inSightSince: inSight ? browser.videoClock() : nil)
+        }
         hasUnsavedWork = false
         departureApproved = false
         // A new document, a reload's included: checked again once it has loaded.
@@ -896,11 +913,13 @@ final class Tab: Identifiable {
     /// Back and Forward, a page that stopped answering ended first.
     func goBack() {
         letGoHung()
+        ownerAsked = true
         webView.goBack()
     }
 
     func goForward() {
         letGoHung()
+        ownerAsked = true
         webView.goForward()
     }
 
@@ -924,6 +943,7 @@ final class Tab: Identifiable {
     func reload(fromOrigin: Bool = false) {
         if letGoHung() { _ = webView; return }
         stopReconnecting()
+        ownerAsked = true
         if let failure {
             webView.load(.page(failure.url, cachePolicy: fromOrigin ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy))
         } else if fromOrigin {
@@ -959,6 +979,7 @@ final class Tab: Identifiable {
     func goHome() {
         guard let home else { return }
         stopReconnecting()
+        ownerAsked = true
         webView.load(.page(home))
     }
 
@@ -1122,10 +1143,20 @@ final class Tab: Identifiable {
         return own
     }
 
+    /// Whether a navigation to `asked` brought the document at `committed`:
+    /// its scheme aside (WebKit's move to https) and any fragment.
+    nonisolated static func sameDocument(_ asked: URL?, _ committed: URL?) -> Bool {
+        guard let asked, let committed,
+              var a = URLComponents(url: asked, resolvingAgainstBaseURL: false),
+              var b = URLComponents(url: committed, resolvingAgainstBaseURL: false) else { return false }
+        a.scheme = nil; b.scheme = nil; a.fragment = nil; b.fragment = nil
+        return a == b
+    }
+
     /// What `frame`'s document says of its videos at `now`.
     /// `info` nil for the main frame.
-    func heardVideos(frame: String, in info: WKFrameInfo?, _ told: [PageVideos.Told], at now: TimeInterval) {
-        videos.heard(frame: frame, told, at: now)
+    func heardVideos(frame: String, in info: WKFrameInfo?, main: Bool, _ told: [PageVideos.Told], at now: TimeInterval) {
+        videos.heard(frame: frame, main: main, told, at: now)
         videoFrames[frame] = info
     }
 
