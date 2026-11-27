@@ -30,6 +30,12 @@ let package = Package(
         // the media test bed's parts that a lab run outside `swift test`
         // uses as well.
         .target(name: "MediaCheck", dependencies: ["SoundCheck"], path: "Tests/MediaCheck", swiftSettings: approachable),
-        .testTarget(name: "NerdaTests", dependencies: ["Nerda", "TestRun", "SoundCheck", "MediaCheck"], swiftSettings: approachable),
+        // The lab run on the real sites (`./lab.sh`): its result file and
+        // what judges it, apart so the tests can feed it made-up numbers,
+        // and the command that drives Nerda Test to make them.
+        .target(name: "Lab", path: "Tests/Lab", swiftSettings: approachable),
+        .executableTarget(name: "NerdaLab", dependencies: ["Lab", "MediaCheck", "SoundCheck"], path: "Tests/NerdaLab",
+                          swiftSettings: approachable),
+        .testTarget(name: "NerdaTests", dependencies: ["Nerda", "TestRun", "SoundCheck", "MediaCheck", "Lab"], swiftSettings: approachable),
     ]
 )
