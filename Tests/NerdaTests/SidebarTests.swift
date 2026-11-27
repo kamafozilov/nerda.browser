@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Testing
+import WebKit
 @testable import Nerda
 
 /// A window of the browser's, behind the one in use.
@@ -14,10 +15,12 @@ private func window(of browser: Browser) -> NSWindow {
     return window
 }
 
-/// Every accessibility element under `element`, as VoiceOver walks them.
+/// Every accessibility element of Nerda's own under `element`, as VoiceOver
+/// walks them, but a page's: a page asked anything by accessibility turns
+/// WebKit's own on for the rest of the run (`WebKitAccessibility.webKitsIsOn`).
 @MainActor
 private func elements(under element: AnyObject) -> [AnyObject] {
-    let children = (element.accessibilityChildren?() ?? []).map { $0 as AnyObject }
+    let children = (element.accessibilityChildren?() ?? []).map { $0 as AnyObject }.filter { !($0 is WKWebView) }
     return children.flatMap { [$0] + elements(under: $0) }
 }
 
@@ -27,13 +30,12 @@ private func saved(_ title: String, pinned: Bool = false) -> Session.Tab {
 }
 
 /// SwiftUI makes its accessibility elements only once something asks for
-/// them, as VoiceOver does by setting this on the app.
+/// them, as VoiceOver does by setting this on the app; kept from WebKit's
+/// pages, which the tests beside would otherwise hear it in for the rest of
+/// the run (`WebKitAccessibility`).
 @MainActor
 private func withAccessibility(_ body: () async throws -> Void) async rethrows {
-    let attribute = NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface")
-    NSApp.accessibilitySetValue(true, forAttribute: attribute)
-    defer { NSApp.accessibilitySetValue(false, forAttribute: attribute) }
-    try await body()
+    try await WebKitAccessibility.turnedOn(body)
 }
 
 /// VoiceOver hears each tab by its title, which one is on screen, and can
@@ -74,6 +76,8 @@ private func withAccessibility(_ body: () async throws -> Void) async rethrows {
         _ = close?.handler?()
         #expect(!browser.tabs.contains { $0.title == "One" })
     }
+    // Nothing of this reached the tests beside it.
+    #expect(try !WebKitAccessibility.webKitsIsOn())
 }
 
 /// ↑ and ↓ in the tab list go one tab up or down, and stop at either end.
