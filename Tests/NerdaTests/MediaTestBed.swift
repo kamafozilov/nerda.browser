@@ -46,9 +46,10 @@ final class MediaTestBed {
         var now: TimeInterval = 1000
     }
 
-    init() async throws {
+    /// `browser`: the bed's window's, an incognito one's unless given.
+    init(browser: Browser = browserRunningOutOfSight()) async throws {
         server = try MediaServer()
-        browser = browserRunningOutOfSight()
+        self.browser = browser
         browser.videoClock = { [clock] in clock.now }
         // Never into a space of its own when a page goes full screen (`BedWindow`).
         window = BedWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),

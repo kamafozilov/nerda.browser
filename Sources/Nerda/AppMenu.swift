@@ -754,9 +754,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let browser: Browser
     /// The Dock icon's menu (`AppMenu.dock`), for the app's own delegate.
     var dockMenu: (() -> NSMenu)?
-    /// The window in front as Nerda is left, its video's to float: the main
-    /// one, an incognito one's included, or a test's own.
-    var frontWindow: () -> NSWindow? = { NSApp.mainWindow }
+    /// Which window is in front, for floating: the app's, or a test's own.
+    var inFront = WindowInFront.app
     /// How much of a window other windows cover: as on screen, or a test's own.
     var cover: @MainActor (NSWindow) -> WindowCover = WindowCover.read
     /// How often the cover is read while nothing tells it changed.
@@ -765,8 +764,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var browsers: () -> [Browser] = { Windows.browsers }
     /// The window left in front for another app, while it is watched.
     private(set) var away: CoverWatch?
-    /// The browser whose window's video floated as Nerda was left.
-    private weak var leftFloating: Browser?
 
     init(window: NSWindow, browser: Browser) {
         self.window = window
@@ -780,6 +777,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// of all it held (see `Windows`), as a secondary one's does. A profile's
     /// stays closed at the next launch.
     func windowWillClose(_ notification: Notification) {
+        inFront.closed(browser)
         if browser.isSecondary { return Windows.closedSecondary(self) }
         browser.closeAll()
         if browser.isPrivate { Windows.closed(self) } else {
@@ -787,6 +785,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             Windows.letSpareGo(of: browser.profile, closing: window)
         }
     }
+
+    /// In front of Nerda's other windows: the owner left the one in front
+    /// before, and came back to this one (`WindowInFront`).
+    func windowDidBecomeMain(_ notification: Notification) { inFront.cameForward(browser) }
+    /// Into the Dock: the owner left it. Out of it: back in front.
+    func windowWillMiniaturize(_ notification: Notification) { inFront.putAway(browser) }
+    func windowDidDeminiaturize(_ notification: Notification) { inFront.cameForward(browser) }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard browser.tabs.contains(where: \.hasUnsavedWork) || browser.downloads.contains(where: \.needsSession) else { return true }
@@ -887,16 +892,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func leftForAnotherApp() -> Bool {
         away?.stop()
         away = nil
-        let front = frontWindow() as? BrowserWindow
-        let window = front ?? self.window, browser = front?.browser ?? self.browser
-        guard PictureInPicture.isOnForApps(in: browser.pictureInPictureSettings) else { return false }
+        // The window in front, an incognito one's included (`WindowInFront`).
+        let browser = inFront.front ?? self.browser
+        guard let window = browser === self.browser ? self.window : browser.window,
+              PictureInPicture.isOnForApps(in: browser.pictureInPictureSettings) else { return false }
         let watch = CoverWatch(window: window, browser: browser, cover: cover)
-        leftFloating = browser
         if watch.check() { return true }
         watch.start(every: coverReadEvery)
         away = watch
         return false
     }
+
+    /// Hide Nerda (⌘H): its windows are put away, as one is into the Dock,
+    /// and the front window's video floats with Auto Picture-in-Picture on,
+    /// "Also when switching to another app" or not. Asked before the windows
+    /// go; leaving for another app with it asks nothing more (`windowLeft`).
+    func applicationWillHide(_ notification: Notification) { inFront.hiding() }
 
     /// Made active after a hidden start (opened by hand, its Dock tile
     /// absent): Nerda opens as any launch does.
@@ -904,12 +915,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         HiddenStart.shared?.showWindow()
     }
 
-    /// Back in Nerda, the video goes back into its page.
+    /// Back in Nerda, the video of the window in front goes back into its
+    /// page: only that one, come back to through another window.
     func applicationDidBecomeActive(_ notification: Notification) {
         away?.stop()
         away = nil
-        leftFloating?.windowCameBack()
-        leftFloating = nil
+        inFront.appCameBack()
     }
 
     /// Every profile's window: their tabs and history.

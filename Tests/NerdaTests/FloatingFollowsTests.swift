@@ -45,8 +45,9 @@ struct FloatingFollowsTests {
         private let suite = "dev.nerda.tests.floating.\(UUID().uuidString)"
         private let settings: UserDefaults
 
-        init() async throws {
-            let bed = try await MediaTestBed()
+        /// `browser`: the bed's, an incognito window's unless given.
+        init(browser: Browser = browserRunningOutOfSight()) async throws {
+            let bed = try await MediaTestBed(browser: browser)
             self.bed = bed
             other = try await bed.open(.file())
             let watched = try await bed.play(.file())
