@@ -23,11 +23,13 @@ extension Browser {
     }
 
     /// The owner is back at this window, in front: the video floated by
-    /// leaving it lands, once. Nothing for a video floated otherwise (its
-    /// page's own button), as with Auto Picture-in-Picture off.
+    /// leaving it lands, once, if its tab is still the one on screen.
+    /// Another tab shown meanwhile (a link opened from another app), the
+    /// video floats on, as for a tab left. Nothing for a video floated
+    /// otherwise (its page's own button), as with Auto Picture-in-Picture off.
     func windowCameBack() {
         guard let tab = leftFloating else { return }
         leftFloating = nil
-        land(tab)
+        if tab === selected { land(tab) }
     }
 }
