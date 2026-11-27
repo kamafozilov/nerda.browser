@@ -155,9 +155,10 @@ enum PictureInPicture {
     static let appsKey = "autoPictureInPictureForApps"
 
     static var isOn: Bool { isOn(in: .standard) }
-    static var isOnForApps: Bool { isOn && UserDefaults.standard.bool(forKey: appsKey) }
     /// On in `settings`: the app's, or a test's own.
     static func isOn(in settings: UserDefaults) -> Bool { settings.bool(forKey: key) }
+    /// "Also when switching to another app", on with Auto Picture-in-Picture in `settings`.
+    static func isOnForApps(in settings: UserDefaults) -> Bool { isOn(in: settings) && settings.bool(forKey: appsKey) }
 
     /// Lands a video floating from the page's own frame, however it floated
     /// (`ChosenVideo` floats and lands in every frame).

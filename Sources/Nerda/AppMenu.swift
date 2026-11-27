@@ -754,8 +754,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let browser: Browser
     /// The Dock icon's menu (`AppMenu.dock`), for the app's own delegate.
     var dockMenu: (() -> NSMenu)?
-    /// The page whose video went into picture in picture as Nerda was left.
-    private weak var floating: WKWebView?
+    /// The window in front as Nerda is left, its video's to float: the main
+    /// one, an incognito one's included, or a test's own.
+    var frontWindow: () -> NSWindow? = { NSApp.mainWindow }
+    /// How much of a window other windows cover: as on screen, or a test's own.
+    var cover: @MainActor (NSWindow) -> WindowCover = WindowCover.read
+    /// How often the cover is read while nothing tells it changed.
+    var coverReadEvery: TimeInterval = 1
+    /// The browsers whose sessions are saved: every profile's window, or a test's own.
+    var browsers: () -> [Browser] = { Windows.browsers }
+    /// The window left in front for another app, while it is watched.
+    private(set) var away: CoverWatch?
+    /// The browser whose window's video floated as Nerda was left.
+    private weak var leftFloating: Browser?
 
     init(window: NSWindow, browser: Browser) {
         self.window = window
@@ -856,16 +867,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? { dockMenu?() }
 
     /// Going to another app is a good moment: nothing is happening here. Not
-    /// waited for, as quitting does: the switch isn't held up by it.
-    func applicationDidResignActive(_ notification: Notification) { save(waiting: false) }
+    /// waited for, as quitting does: the switch isn't held up by it. With a
+    /// video about to float, written on a later turn of the main loop, as
+    /// reading the page on screen would hold floating up; quitting before
+    /// then writes it all the same.
+    func applicationDidResignActive(_ notification: Notification) {
+        if leftForAnotherApp() {
+            DispatchQueue.main.async { MainActor.assumeIsolated { self.save(waiting: false) } }
+        } else {
+            save(waiting: false)
+        }
+    }
 
     /// The video on screen floats while another app is in front (Settings ›
-    /// General). Asked before Nerda's window stops being the main one.
-    func applicationWillResignActive(_ notification: Notification) {
-        guard PictureInPicture.isOnForApps else { return }
-        // The window in front, an incognito one's included.
-        let front = (NSApp.mainWindow as? BrowserWindow)?.browser ?? browser
-        floating = front.selected.flatMap { front.float($0) ? $0.page : nil }
+    /// General), once the window in front is hidden or at least half
+    /// covered: one still in full view, on another screen say, stays in its
+    /// page. Read now, as the other app comes forward, and then whenever
+    /// what covers the window may change (`CoverWatch`). Whether it floats now.
+    private func leftForAnotherApp() -> Bool {
+        away?.stop()
+        away = nil
+        let front = frontWindow() as? BrowserWindow
+        let window = front ?? self.window, browser = front?.browser ?? self.browser
+        guard PictureInPicture.isOnForApps(in: browser.pictureInPictureSettings) else { return false }
+        let watch = CoverWatch(window: window, browser: browser, cover: cover)
+        leftFloating = browser
+        if watch.check() { return true }
+        watch.start(every: coverReadEvery)
+        away = watch
+        return false
     }
 
     /// Made active after a hidden start (opened by hand, its Dock tile
@@ -876,13 +906,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Back in Nerda, the video goes back into its page.
     func applicationDidBecomeActive(_ notification: Notification) {
-        if let floating, let browser = floating.uiDelegate as? Browser, let tab = browser.tab(for: floating) { browser.land(tab) }
-        floating = nil
+        away?.stop()
+        away = nil
+        leftFloating?.windowCameBack()
+        leftFloating = nil
     }
 
     /// Every profile's window: their tabs and history.
     func save(waiting: Bool = true) {
-        for browser in Windows.browsers {
+        for browser in browsers() {
             browser.saveSession(waiting: waiting)
             browser.profile.history.save(waiting: waiting)
         }
