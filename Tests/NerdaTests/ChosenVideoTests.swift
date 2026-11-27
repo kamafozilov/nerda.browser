@@ -117,3 +117,13 @@ struct ChosenVideoTests {
         #expect(chosen(videos, at: 10) == nil)
     }
 }
+
+extension Nerda.Tab {
+    /// As if its page had told Nerda of a video the owner started, playing
+    /// with sound and heard long enough to float, on `browser`'s clock.
+    @MainActor func playsAVideoTheOwnerChose(in browser: Browser) {
+        let video = PageVideos.Told(element: 1, playing: true, muted: false, hasSound: true, hasPicture: true,
+                                    ownerStarted: true, area: 640 * 360)
+        heardVideos(frame: "main", in: nil, [video], at: browser.videoClock() - FloatingRule.heardAtLeast)
+    }
+}

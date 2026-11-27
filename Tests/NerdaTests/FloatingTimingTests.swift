@@ -52,9 +52,7 @@ struct FloatingTimingTests {
         let a = browser.open(URL(string: "about:blank")!)
         let b = browser.open(URL(string: "about:blank")!)
         browser.select(b.id)
-        let video = PageVideos.Told(element: 1, playing: true, muted: false, hasSound: true, hasPicture: true,
-                                    ownerStarted: true, area: 640 * 360)
-        for tab in [a, b] { tab.heardVideos(frame: "main", in: nil, [video], at: clock.now - FloatingRule.heardAtLeast) }
+        for tab in [a, b] { tab.playsAVideoTheOwnerChose(in: browser) }
         return Setup(browser: browser, recorder: recorder, clock: clock, a: a, b: b, settings: settings, suite: suite)
     }
 
@@ -149,7 +147,7 @@ struct FloatingTimingTests {
         defer { agents.close() }
         #expect(owners.browser.videoToFloat(in: owners.a) != nil)
         #expect(agents.browser.videoToFloat(in: agents.a) == nil)
-        #expect(!agents.browser.ownerLeft(agents.a))
+        #expect(!agents.browser.float(agents.a))
     }
 
     /// An Agent tab's video is known to float, and never timed.
@@ -172,8 +170,7 @@ struct FloatingTimingTests {
     @Test func theRecordsSwitchLeavesFloatingKnown() throws {
         let setup = try setup()
         defer { setup.close() }
-        Speedups.overrides[.recorder] = false
-        defer { Speedups.overrides[.recorder] = nil }
+        setup.recorder.switchedOn = false
         setup.browser.select(setup.a.id)
         setup.browser.select(setup.b.id)
         setup.webKitSays(setup.a, floating: true)

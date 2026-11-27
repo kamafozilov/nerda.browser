@@ -152,13 +152,17 @@ enum ChosenVideo {
             addEventListener('pageshow', event => { if (event.persisted) tell(); });
             const number = element => elements.get(element)?.deref();
             globalThis.nerdaVideos = {
+                // Each answers whether it found a video to ask.
                 float(element) {
                     const video = number(element);
-                    if (video?.webkitSupportsPresentationMode?.('picture-in-picture')) video.webkitSetPresentationMode('picture-in-picture');
+                    if (!video?.webkitSupportsPresentationMode?.('picture-in-picture')) return false;
+                    video.webkitSetPresentationMode('picture-in-picture');
+                    return true;
                 },
                 land() {
-                    for (const video of document.querySelectorAll('video'))
-                        if (video.webkitPresentationMode === 'picture-in-picture') video.webkitSetPresentationMode('inline');
+                    const floating = [...document.querySelectorAll('video')].filter(video => video.webkitPresentationMode === 'picture-in-picture');
+                    for (const video of floating) video.webkitSetPresentationMode('inline');
+                    return floating.length > 0;
                 },
             };
         })();
@@ -219,30 +223,12 @@ extension PageVideos.Told {
     }
 }
 
-/// Floating by itself, as the owner leaves a tab or Nerda, and landing as
-/// they come back: the one place both ask, so the rule holds for each.
 extension Browser {
-    /// The video that would float were `tab` left now (`FloatingRule`).
+    /// The video that would float were `tab` left now (`FloatingRule`): what
+    /// `float` floats, and `floats(leaving:)` keeps in sight for.
     func videoToFloat(in tab: Tab) -> PageVideo.ID? {
         guard tab.page != nil else { return nil }
         return FloatingRule.video(among: tab.videos.all, at: videoClock(), on: PictureInPicture.isOn(in: pictureInPictureSettings),
                                   tabMuted: tab.isMuted, agentTab: isForAgents)
-    }
-
-    /// The owner left `tab`: its video floats if it is one they chose
-    /// (`float`). Whether it asked. One floats at a time without more: the
-    /// system's floating window is one for the app, so another floating
-    /// lands the first, in whichever window or profile (`oneVideoFloatsAtATime`).
-    @discardableResult
-    func ownerLeft(_ tab: Tab) -> Bool {
-        guard let video = videoToFloat(in: tab) else { return false }
-        float(tab, video)
-        return true
-    }
-
-    /// The owner came back to `tab`: its video lands in its page (`land`).
-    func ownerCameBack(to tab: Tab) {
-        guard PictureInPicture.isOn(in: pictureInPictureSettings), tab.page != nil else { return }
-        land(tab)
     }
 }

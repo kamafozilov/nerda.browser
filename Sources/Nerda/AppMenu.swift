@@ -865,7 +865,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard PictureInPicture.isOnForApps else { return }
         // The window in front, an incognito one's included.
         let front = (NSApp.mainWindow as? BrowserWindow)?.browser ?? browser
-        floating = front.selected.flatMap { front.ownerLeft($0) ? $0.page : nil }
+        floating = front.selected.flatMap { front.float($0) ? $0.page : nil }
     }
 
     /// Made active after a hidden start (opened by hand, its Dock tile
@@ -876,9 +876,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Back in Nerda, the video goes back into its page.
     func applicationDidBecomeActive(_ notification: Notification) {
-        if let floating, let browser = floating.uiDelegate as? Browser, let tab = browser.tab(for: floating) {
-            browser.ownerCameBack(to: tab)
-        }
+        if let floating, let browser = floating.uiDelegate as? Browser, let tab = browser.tab(for: floating) { browser.land(tab) }
         floating = nil
     }
 

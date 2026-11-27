@@ -32,6 +32,11 @@ struct FloatingTests {
         let landing = recorder.timings().filter { $0.kind == .landing }.map(\.seconds)
         print("Floating, \(floating.count) times: \(Self.summary(floating))")
         print("Landing, \(landing.count) times: \(Self.summary(landing))")
+        // A leave's switch is timed to the new page shown, after WebKit's
+        // word: the one recorded straight after each floating.
+        let timings = recorder.timings()
+        let leaves = zip(timings, timings.dropFirst()).filter { $0.kind == .floating && $1.kind == .tabSwitch }.map(\.1.seconds)
+        print("Tab switch leaving the video, \(leaves.count) times: \(Self.summary(leaves))")
         #expect(floating.count == Self.rounds)
         #expect(landing.count == Self.rounds)
     }
@@ -95,6 +100,51 @@ struct FloatingTests {
         #expect(!silent.tab.playsAudio)
         #expect(!readied.contains(ObjectIdentifier(silent.tab.webView)))
         #expect(!silent.tab.isFloating)
+    }
+
+    /// Leaving the tab, the tab list shows the new tab at once, while the
+    /// page left stays in sight until WebKit says its video floats; only
+    /// then is the new page shown, and the page left's last frame taken,
+    /// which is what comes back with the tab.
+    @Test func thePageLeftStaysInSightUntilItsVideoFloats() async throws {
+        let lock = try await FloatingLock.take()
+        defer { lock.release() }
+        let bed = try await MediaTestBed()
+        defer { bed.close() }
+        bed.browser.recorder = Recorder()
+        let other = try await bed.open(.file())
+        let watched = try await bed.play(.file())
+        try await waitFor("The video never played with sound") { watched.tab.playsAudio }
+        let suite = "dev.nerda.tests.floating.\(UUID().uuidString)"
+        let settings = try #require(UserDefaults(suiteName: suite))
+        defer { settings.removePersistentDomain(forName: suite) }
+        settings.set(true, forKey: PictureInPicture.key)
+        bed.browser.pictureInPictureSettings = settings
+        let page = watched.tab.webView, next = other.tab.webView
+        // WebKit's word, not the wait, ends the keep here (the wait has a
+        // test of its own): a busy Mac can be slower to float than 300 ms.
+        bed.browser.floatingWaitHere = 3600
+        // How the window stood the moment WebKit said the video floats.
+        var atTheWord: (inSight: Bool, shown: Bool, nextShown: Bool, frameKept: Bool)?
+        withObservationTracking { _ = watched.tab.isFloating } onChange: {
+            MainActor.assumeIsolated {
+                atTheWord = (bed.browser.inSight === watched.tab, !page.isHidden, !next.isHidden, page.keepsLastFrame)
+            }
+        }
+        bed.browser.select(other.tab.id)
+        #expect(bed.browser.selected === other.tab)
+        #expect(bed.browser.inSight === watched.tab)
+        try await waitFor("Never floated") { watched.tab.isFloating }
+        let word = try #require(atTheWord)
+        #expect(word.inSight, "The page left was no longer kept in sight when its video floated")
+        #expect(word.shown && !word.nextShown, "The page left was hidden before its video floated")
+        #expect(!word.frameKept, "The page left's last frame was taken before its video floated")
+        try await waitFor("The new page never showed") { !next.isHidden && page.isHidden }
+        try await waitFor("The page left's last frame was never taken") { page.keepsLastFrame }
+        bed.browser.select(watched.tab.id)
+        try await waitFor("The tab never came back") { page.lastArrival != nil }
+        #expect(page.lastArrival == .lastFrame, "Came back as \(String(describing: page.lastArrival))")
+        try await waitFor("Never landed") { !watched.tab.isFloating }
     }
 
     /// Turns Auto Picture-in-Picture on for `bed`'s browser alone, then

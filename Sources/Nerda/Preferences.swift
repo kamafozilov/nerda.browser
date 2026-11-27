@@ -162,9 +162,11 @@ enum PictureInPicture {
     /// Lands a video floating from the page's own frame, however it floated
     /// (`ChosenVideo` floats and lands in every frame).
     static let exit = """
-        document.querySelectorAll('video').forEach(v => {
-            if (v.webkitPresentationMode === 'picture-in-picture') v.webkitSetPresentationMode('inline');
-        });
+        (() => {
+            const floating = [...document.querySelectorAll('video')].filter(v => v.webkitPresentationMode === 'picture-in-picture');
+            floating.forEach(v => v.webkitSetPresentationMode('inline'));
+            return floating.length > 0;
+        })();
         """
 }
 

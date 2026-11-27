@@ -98,22 +98,47 @@ final class Recorder {
 
     init(clock: @escaping () -> TimeInterval = Recorder.uptime) { self.clock = clock }
 
-    private static var isOn: Bool { Speedups.isOn(.recorder) }
+    /// NERDA_RECORDER for this record alone, set by a test in the run's
+    /// place: a switch for the whole process would reach other tests'
+    /// records running beside it. Nil follows the run's.
+    var switchedOn: Bool?
+    private var isOn: Bool { switchedOn ?? Speedups.isOn(.recorder) }
 
     private static let signposter = OSSignposter(subsystem: Logger.subsystem, category: "tabs")
 
     // MARK: - writing
 
     /// The operation waiting for the main loop to go to sleep.
-    private var pending: (kind: Kind, start: TimeInterval, interval: OSSignpostIntervalState)?
+    /// Held, it waits for `release` first.
+    private var pending: (kind: Kind, start: TimeInterval, interval: OSSignpostIntervalState, held: Bool)?
 
     /// `kind` began just now: it is timed until the main loop next goes to
     /// sleep, once what it changed is on screen. One begun while another
     /// waits leaves the first: a tab opened is selected too, and the pass
     /// that shows both is the open's.
     func begin(_ kind: Kind) {
-        guard pending == nil, Self.isOn else { return }
-        pending = (kind, clock(), Self.signposter.beginInterval(kind.signpost))
+        guard pending == nil, isOn else { return }
+        pending = (kind, clock(), Self.signposter.beginInterval(kind.signpost), false)
+        settleOnSleep()
+    }
+
+    /// What was just begun shows only later, once `release` is called: a
+    /// tab switch whose page left stays in sight while its video floats.
+    /// Whether there was one to hold, not held already.
+    func hold() -> Bool {
+        guard pending?.held == false else { return false }
+        pending?.held = true
+        return true
+    }
+
+    /// What `hold` held is on screen as the main loop next goes to sleep.
+    func release() {
+        guard pending?.held == true else { return }
+        pending?.held = false
+        settleOnSleep()
+    }
+
+    private func settleOnSleep() {
         // Once, after Core Animation's commit at the same moment (its order
         // is lower), and in every mode, a drag's or a menu's included.
         let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, Int.max) { [weak self] _, _ in
@@ -123,7 +148,7 @@ final class Recorder {
     }
 
     private func settle() {
-        guard let (kind, start, interval) = pending else { return }
+        guard let (kind, start, interval, held) = pending, !held else { return }
         pending = nil
         Self.signposter.endInterval(kind.signpost, interval)
         add(kind, seconds: clock() - start)
@@ -132,7 +157,7 @@ final class Recorder {
     /// `kind` took `seconds`, timed by whoever saw it end: a page's first
     /// paint, or the page Back went to on screen.
     func record(_ kind: Kind, seconds: TimeInterval) {
-        guard Self.isOn else { return }
+        guard isOn else { return }
         Self.signposter.emitEvent(kind.signpost, "\(Int(seconds * 1000)) ms")
         add(kind, seconds: seconds)
     }
@@ -298,7 +323,7 @@ extension Recorder {
 
     private func present(_ kind: Kind, _ tab: Tab) {
         letGo(tab)
-        guard Self.isOn else { return }
+        guard isOn else { return }
         // An ID of its own: several tabs' asks can be open at once.
         let interval = Self.signposter.beginInterval(kind.signpost, id: Self.signposter.makeSignpostID())
         tab.timing.presenting = Presenting(kind: kind, start: clock(), interval: interval)
